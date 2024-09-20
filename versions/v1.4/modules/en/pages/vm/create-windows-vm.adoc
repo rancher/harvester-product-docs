@@ -1,0 +1,232 @@
+= Create a Windows Virtual Machine
+
+Create one or more virtual machines from the *Virtual Machines* page.
+
+[NOTE]
+====
+For creating Linux virtual machines, please refer to xref:./create-vm.adoc[this page].
+====
+
+== How to Create a Windows VM
+
+=== Header Section
+
+. Create a single VM instance or multiple VM instances.
+. Set the VM name.
+. (Optional) Provide a description for the VM.
+. (Optional) Select the VM template `windows-iso-image-base-template`. This template will add a volume with the `virtio` drivers for Windows.
+
+=== Basics Tab
+
+. Configure the number of `CPU` cores assigned to the VM.
+. Configure the amount of `Memory` assigned to the VM.
+
+image::vm/create-windows-vm.png[create-windows-vm]
+
+[NOTE]
+====
+As mentioned above, it is recommended that you use the Windows VM template. The `Volumes` section will describe the options which the Windows VM template created automatically.
+====
+
+[CAUTION]
+====
+The `bootOrder` values need to be set with the installation image first. If you change it, your VM might not boot into the installation disk.
+====
+
+=== Volumes Tab
+
+. The *first volume* is an `Image Volume` with the following values:
+ .. `Name`: The value `cdrom-disk` is set by default. You can keep it or change it.
+ .. `Type`: Select `cd-rom`.
+ .. `Image`: Select the Windows image to be installed. See xref:../upload-image.adoc[Upload Images] for the full description on how to create new images.
+ .. `Size`: The value `20` is set by default. You can change it if your image has a bigger size.
+ .. `Bus`: The value `SATA` is set by default. It's recommended you don't change it.
+. The *second volume* is a `Volume` with the following values:
+ .. `Name`: The value `rootdisk` is set by default. You can keep it or change it.
+ .. `Type`: Select `disk`.
+ .. `StorageClass`: You can use the default StorageClass `harvester-longhorn` or specify a custom one.
+ .. `Size`: The value `32` is set by default. See the disk space requirements for https://docs.microsoft.com/en-us/windows-server/get-started/hardware-requirements#storage-controller-and-disk-space-requirements[Windows Server] and https://docs.microsoft.com/en-us/windows/whats-new/windows-11-requirements#hardware-requirements[Windows 11] before changing this value.
+ .. `Bus`: The value `VirtIO` is set by default. You can keep it or change it to the other available options, `SATA` or `SCSI`.
+. The *third volume* is a `Container` with the following values:
+ .. `Name`: The value `virtio-container-disk` is set by default. You can keep it or change it.
+ .. `Type`: Select `cd-rom`.
+ .. `Docker Image`: The value `registry.suse.com/suse/vmdp/vmdp:2.5.4.2` is set by default. We recommend not changing this value.
+ .. `Bus`: The value `SATA` is set by default. We recommend not changing this value.
+. You can add additional disks using the buttons `Add Volume`, `Add Existing Volume`, `Add VM Image`, or `Add Container`.
+
+image::vm/create-windows-vm-volumes.png[create-windows-vm-volumes]
+
+=== Networks Tab
+
+. The *Management Network* is added by default with the following values:
+ .. `Name`:  The value `default` is set by default. You can keep it or change it.
+ .. `Model`: The value `e1000` is set by default. You can keep it or change it to the other available options from the dropdown.
+ .. `Network`: The value `management Network` is set by default. You can't change this option if no other network has been created. See xref:../networking/harvester-network.adoc[Harvester Network] for the full description on how to create new networks.
+ .. `Type`: The value `masquerade` is set by default. You can keep it or change it to the other available option, `bridge`.
+. You can add additional networks by clicking  `Add Network`.
+
+image::vm/create-windows-vm-networks.png[create-windows-vm-networks]
+
+[CAUTION]
+====
+Changing the `Node Scheduling` settings can impact Harvester features, such as disabling `Live migration`.
+====
+
+=== Node Scheduling Tab
+
+. `Node Scheduling` is set to `Run VM on any available node` by default. You can keep it or change it to the other available options from the dropdown.
+
+image::vm/create-windows-vm-scheduling.png[create-windows-vm-scheduling]
+
+=== Advanced Options Tab
+
+. `OS Type`: The value `Windows` is set by default. It's recommended you don't change it.
+. `Machine Type`: The value `None` is set by default. It's recommended you don't change it. See the https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#machine-type[KubeVirt Machine Type] documentation before you change this value.
+. (Optional) `Hostname`: Set the VM hostname.
+. (Optional) `Cloud Config`: Both `User Data` and `Network Data` values are set with default values. Currently, these configurations are not applied to Windows-based VMs.
+. (Optional) `Enable TPM`, `Booting in EFI mode`, `Secure Boot`: Both the TPM 2.0 device and UEFI firmware with Secure Boot are hard requirements for Windows 11.
+
+[NOTE]
+====
+Currently, only non-persistent vTPMs are supported, and their state is erased after each VM shutdown. Therefore, https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker] should not be enabled.
+====
+
+image::vm/create-windows-vm-advanced.png[create-windows-vm-advanced]
+
+=== Footer Section
+
+Once all the settings are in place, click on `Create` to create the VM.
+
+[NOTE]
+====
+If you need to add advanced settings, you can edit the VM configuration directly by clicking on `Edit as YAML`.
+And if you want to cancel all changes made, click `Cancel`.
+====
+
+== Installation of Windows
+
+. Select the VM you just created, and click `Start` to boot up the VM.
+. Boot into the installer, and follow the instructions given by the installer.
+. (Optional) If you are using `virtio` based volumes, you will need to load the specific driver to allow the installer to detect them. If you're using VM template `windows-iso-image-base-template`, the instruction is as follows:
+ .. Click on `Load driver`, and then click `Browse` on the dialog box, and find a CD-ROM drive with a `VMDP-WIN` prefix. Next, find the driver directory according to the Windows version you're installing; for example, Windows Server 2012r2 should expand `win8.1-2012r2` and choose the `pvvx` directory inside.
+ image:vm/find-virtio-driver-directory.png[find-virtio-driver-directory]
+ .. Click `OK` to allow the installer to scan this directory for drivers, choose `SUSE Block Driver for Windows`, and click `Next` to load the driver.
+ image:vm/select-virtio-block-driver.png[select-virtio-block-driver]
+ .. Wait for the installer to load up the driver. If you choose the correct driver version the `virtio` volumes will be detected once the driver is loaded.
+ image:vm/installer-found-virtio-drive.png[installer-found-virtio-drive]
+. (Optional) If you are using other `virtio` based hardware like network adapter, you will need to install those drivers manually after completing the installation. To install drivers, open the VMDP driver disk, and use the installer based on your platform.
+
+The support matrix of VMDP driver pack for Windows are as follows (assume the VMDP CD-ROM drive path is E):
+
+|===
+| Version | Supported | Driver path
+
+| Windows 7
+| No
+| `N/A`
+
+| Windows Server 2008
+| No
+| `N/A`
+
+| Windows Server 2008r2
+| No
+| `N/A`
+
+| Windows 8 x86(x64)
+| Yes
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows Server 2012 x86(x64)
+| Yes
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows 8.1 x86(x64)
+| Yes
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows Server 2012r2 x86(x64)
+| Yes
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows 10 x86(x64)
+| Yes
+| `E:\win10-server\x86(x64)\pvvx`
+
+| Windows Server 2016 x86(x64)
+| Yes
+| `E:\win10-server\x86(x64)\pvvx`
+
+| Windows Server 2019 x86(x64)
+| Yes
+| `E:\win10-server\x86(x64)\pvvx`
+
+| Windows 11 x86(x64)
+| Yes
+| `E:\win10-2004\x86(x64)\pvvx`
+
+| Windows Server 2022 x86(x64)
+| Yes
+| `E:\win10-2004\x86(x64)\pvvx`
+|===
+
+[NOTE]
+====
+If you didn't use the `windows-iso-image-base-template` template, and you still need `virtio` devices, please make sure to add your custom Windows virtio driver to allow it to detect the hardware correctly.
+====
+
+[NOTE]
+====
+For full instructions on how to install the VMDP guest driver and tools see the documentation at https://documentation.suse.com/sle-vmdp/2.5/html/vmdp/index.html
+====
+
+== Known Issues
+
+=== Windows ISO unable to boot when using EFI mode
+
+When using EFI mode with Windows, you may find the system booted with other devices like HDD or UEFI shell like the one below:
+
+image::vm/efi-shell.png[efi-shell]
+
+That's because Windows will prompt a `+Press any key to boot from CD or DVD...+` to let the user decide whether to boot from the installer ISO or not, and it needs human intervention to allow the system to boot from CD or DVD.
+
+image::vm/boot-from-cd.png[boot-from-cd]
+
+Alternately if the system has already booted into the UEFI shell, you can type in `reset` to force the system to reboot again. Once the prompt appears you can press any key to let system boot from Windows ISO.
+
+=== VM crashes when reserved memory not enough
+
+There is a known issue with Windows VM when it is allocated more than 8GiB without enough reserve memory configured. The VM crashes without warning.
+
+This can be fixed by allocating at least 256MiB of reserved memory to the template on the Advanced Options tab. If `256MiB` doesn't work, try `512MiB`.
+
+image::vm/reserved-memory-config.png[reserved-memory-config]
+
+=== BSoD (Blue Screen of Death) at first boot time of Windows
+
+There is a known issue with Windows VM using Windows Server 2016 and above, a BSoD with error code `KMODE_EXCEPTION_NOT_HANDLED` may appears at the first boot time of Windows. We are still looking into it and will fix this issue in the future release.
+
+As a workaround, you can create or modify the file `/etc/modprobe.d/kvm.conf` within the installation of Harvester by updating `/oem/99_custom.yaml` like below:
+
+[,YAML]
+----
+name: Harvester Configuration
+stages:
+  initramfs:
+  - commands: # ...
+    files:
+    - path: /etc/modprobe.d/kvm.conf
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+          options kvm ignore_msrs=1
+      encoding: ""
+      ownerstring: ""
+      # ...
+----
+
+[NOTE]
+====
+This is still an experimental solution. For more information, please refer to https://github.com/harvester/harvester/issues/276[this issue] and please let us know if you have encountered any issues after applying this workaround.
+====

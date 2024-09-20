@@ -1,0 +1,91 @@
+= Creating an K3s Kubernetes Cluster
+
+You can now provision K3s Kubernetes clusters on top of the Harvester cluster in Rancher using the built-in Harvester node driver.
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* Harvester K3s node driver is in *Tech Preview*.
+* xref:../../networking/harvester-network.adoc#_vlan_network[VLAN network] is required for Harvester node driver.
+* Harvester node driver only supports cloud images.
+* For the port requirements of the guest clusters deployed within Harvester, please refer to the xref:../../install/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[port requirements for guest clusters].
+====
+
+== Create your cloud credentials
+
+. Click *☰ > Cluster Management*.
+. Click *Cloud Credentials*.
+. Click *Create*.
+. Click *Harvester*.
+. Enter your cloud credential name
+. Select "Imported Harvester Cluster".
+. Click *Create*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Create K3s Kubernetes cluster
+
+You can create a K3s Kubernetes cluster from the *Cluster Management* page via the K3s node driver.
+
+. Select *Clusters* menu.
+. Click *Create* button.
+. Toggle Switch to *RKE2/K3s*.
+. Select Harvester node driver.
+. Select a *Cloud Credential*.
+. Enter *Cluster Name* (required).
+. Enter *Namespace* (required).
+. Enter *Image* (required).
+. Enter *Network Name* (required).
+. Enter *SSH User* (required).
+. Click *Create*.
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== Add node affinity
+
+_Available as of v1.0.3 + Rancher v2.6.7_
+
+The Harvester node driver now supports scheduling a group of machines to particular nodes through the node affinity rules. This provides high availability and better resource utilization.
+
+Node affinity can be added to the machine pools during the cluster creation:
+
+. Click the `Show Advanced` button and click the `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Set priority to `Required` if you wish the scheduler to schedule the machines only when the rules are met.
+. Click `Add Rule` to specify the node affinity rules, e.g., for the xref:./node-driver.adoc#_topology_spread_constraints[topology spread constraints] use case, you can add the `region` and `zone` labels as follows:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+. Click `Create` to save the node template. After the cluster is installed, you can check whether its machine nodes are scheduled according to the affinity rules.
+
+== Using Harvester K3s node driver in air gapped environment
+
+K3s provisioning relies on the `qemu-guest-agent` package to get the IP of the virtual machine.
+
+However, it may not be feasible to install packages in an air gapped environment.
+
+You can address the installation constraints with the following options:
+
+* Option 1. Use a VM image preconfigured with the required packages (e.g., `iptables`, `qemu-guest-agent`).
+* Option 2. Go to *Show Advanced* > *User Data* to allow VMs to install the required packages via an HTTP(S) proxy.
+
+Example of `user data` in Harvester node template:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----
