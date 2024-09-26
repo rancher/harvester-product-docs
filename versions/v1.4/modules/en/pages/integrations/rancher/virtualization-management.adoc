@@ -21,13 +21,94 @@ Please refer to the https://www.suse.com/suse-harvester/support-matrix/all-suppo
 
 [tabs]
 ======
-Tab UI::
+UI::
 +
-1. Check and prepare the container image. To facilitate the importing task, a new pod named `cattle-cluster-agent-***` will be created on the Harvester cluster. The container image used for this pod depends on the version of your Rancher server (for example, the image `rancher/rancher-agent:v2.7.9` is used if you are running Rancher v2.7.9). Moreover, this dynamic image is not packed into the Harvester ISO and is instead pulled from the repository during importing. If your Harvester cluster is not directly accessible from the internet, perform one of the following actions: - Configure a [private registry](../advanced/settings.md#containerd-registry) for the cluster and add the image. Harvester will automatically pull the image from this registry. - If you configured an [HTTP proxy](../airgap.md/#configure-an-http-proxy-in-harvester-settings) for accessing external services, verify that it is working as expected. The [DNS servers](../install/update-harvester-configuration.md#dns-servers) that you specified in the Harvester configuration should be able to resolve the domain name `docker.io`. - Download the image using the command `docker pull rancher/rancher-agent:v2.7.9 && docker save -o rancher-agent.tar rancher/rancher-agent:v2.7.9`. Next, create a copy of the downloaded image in each cluster node, and then import the image to containerd using the command `sudo -i ctr --namespace k8s.io image import rancher-agent.tar`. Finally, run `sudo -i crictl image ls | grep "rancher-agent"` on each node to ensure that the image is ready. 1. Once the Rancher server is up and running, log in and click the hamburger menu and choose the **Virtualization Management** tab. Select **Import Existing** to import the downstream Harvester cluster into the Rancher server. ![](/img/v1.2/rancher/vm-menu.png) 1. Specify the `Cluster Name` and click **Create**. You will then see the registration guide; please open the dashboard of the target Harvester cluster and follow the guide accordingly. ![](/img/v1.2/rancher/harv-importing.png) 1. Once the agent node is ready, you should be able to view and access the imported Harvester cluster from the Rancher server and manage your VMs accordingly. ![](/img/v1.2/rancher/harv-cluster-view.png) Whenever the agent node becomes stuck, run the command `kubectl get pod cattle-cluster-agent-*** -n cattle-system -oyaml` on the Harvester cluster. If the following message is displayed, check the information in step 1, kill this pod and then a new pod will be created automatically to restart the importing process. ```yaml \... state: waiting: message: Back-off pulling image "rancher/rancher-agent:v2.7.9" reason: ImagePullBackOff \... ``` 1. From the Harvester UI, you can click the hamburger menu to navigate back to the Rancher multi-cluster management page. ![](/img/v1.2/rancher/harv-go-back.png) 
+--
+. Check and prepare the container image.
++
+To facilitate the importing task, a new pod named `+cattle-cluster-agent-***+` will be created on the Harvester cluster. The container image used for this pod depends on the version of your Rancher server (for example, the image `rancher/rancher-agent:v2.7.9` is used if you are running Rancher v2.7.9). Moreover, this dynamic image is not packed into the Harvester ISO and is instead pulled from the repository during importing.
++
+If your Harvester cluster is not directly accessible from the internet, perform one of the following actions:
 
-Tab API::
+ ** Configure a xref:../installation-setup/config/settings.adoc#_containerd_registry[private registry] for the cluster and add the image. Harvester will automatically pull the image from this registry.
+ ** If you configured an xref:../installation-setup/airgap.adoc#_configure_an_http_proxy_in_harvester_settings[HTTP proxy] for accessing external services, verify that it is working as expected. The xref:../installation-setup/config/update-configuration.adoc#_dns_servers[DNS servers] that you specified in the Harvester configuration should be able to resolve the domain name `docker.io`.
+ ** Download the image using the command `docker pull rancher/rancher-agent:v2.7.9 && docker save -o rancher-agent.tar rancher/rancher-agent:v2.7.9`. Next, create a copy of the downloaded image in each cluster node, and then import the image to containerd using the command `sudo -i ctr --namespace k8s.io image import rancher-agent.tar`. Finally, run `sudo -i crictl image ls | grep "rancher-agent"` on each node to ensure that the image is ready.
+
+. Once the Rancher server is up and running, log in and click the hamburger menu and choose the *Virtualization Management* tab. Select *Import Existing* to import the downstream Harvester cluster into the Rancher server.
+image:rancher/vm-menu.png[]
+. Specify the `Cluster Name` and click *Create*. You will then see the registration guide; please open the dashboard of the target Harvester cluster and follow the guide accordingly.
+image:rancher/harv-importing.png[]
+. Once the agent node is ready, you should be able to view and access the imported Harvester cluster from the Rancher server and manage your VMs accordingly.
+image:rancher/harv-cluster-view.png[]
+
+Whenever the agent node becomes stuck, run the command `+kubectl get pod cattle-cluster-agent-*** -n cattle-system -oyaml+` on the Harvester cluster. If the following message is displayed, check the information in step 1, kill this pod and then a new pod will be created automatically to restart the importing process.
+
+[,yaml]
+----
+  ...
+  state:
+    waiting:
+      message: Back-off pulling image "rancher/rancher-agent:v2.7.9"
+      reason: ImagePullBackOff
+  ...
+----
+
+. From the Harvester UI, you can click the hamburger menu to navigate back to the Rancher multi-cluster management page.
+image:rancher/harv-go-back.png[]
+--
+
+API::
 +
-1. In the Rancher Kubernetes cluster, create a new `Cluster` resource. Example: ```yaml apiVersion: provisioning.cattle.io/v1 kind: Cluster metadata: name: harvester-cluster-name namespace: fleet-default labels: provider.cattle.io: harvester annotations: field.cattle.io/description: Human readable cluster description spec: agentEnvVars: [] ``` 1. Once the status of the `Cluster` resource is updated, obtain the cluster ID (format: `c-m-foobar`) from the `.status.clusterName` property. 1. Create a `ClusterRegistrationToken` using the cluster ID in the namespace with the same name as the cluster ID. You must specify the cluster ID in the token's `.spec.clusterName` field. Example: ```yaml apiVersion: management.cattle.io/v3 kind: ClusterRegistrationToken metadata: name: default-token namespace: c-m-foobar spec: clusterName: c-m-foobar ``` 1. Once the status of the `ClusterRegistrationToken` is updated, obtain the value of the token's `.status.manifestUrl` property. 1. In the Harvester cluster, patch the setting `cluster-registration-url` and specify the URL obtained from the cluster registration token's `.status.manifestUrl` property in the `value` field. Example: ```yaml apiVersion: harvesterhci.io/v1beta1 kind: Setting metadata: name: cluster-registration-url value: https://rancher.example.com/v3/import/abcdefghijkl1234567890-c-m-foobar.yaml ```
+--
+. In the Rancher Kubernetes cluster, create a new `Cluster` resource.
+
+Example:
+
+[,yaml]
+----
+  apiVersion: provisioning.cattle.io/v1
+  kind: Cluster
+  metadata:
+    name: harvester-cluster-name
+    namespace: fleet-default
+    labels:
+      provider.cattle.io: harvester
+    annotations:
+      field.cattle.io/description: Human readable cluster description
+  spec:
+    agentEnvVars: []
+----
+
+. Once the status of the `Cluster` resource is updated, obtain the cluster ID (format: `c-m-foobar`) from the `.status.clusterName` property.
+. Create a `ClusterRegistrationToken` using the cluster ID in the namespace with the same name as the cluster ID. You must specify the cluster ID in the token's `.spec.clusterName` field.
+
+Example:
+
+[,yaml]
+----
+  apiVersion: management.cattle.io/v3
+  kind: ClusterRegistrationToken
+  metadata:
+    name: default-token
+    namespace: c-m-foobar
+  spec:
+    clusterName: c-m-foobar
+----
+
+. Once the status of the `ClusterRegistrationToken` is updated, obtain the value of the token's `.status.manifestUrl` property.
+. In the Harvester cluster, patch the setting `cluster-registration-url` and specify the URL obtained from the cluster registration token's `.status.manifestUrl` property in the `value` field.
+
+Example:
+
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: cluster-registration-url
+  value: https://rancher.example.com/v3/import/abcdefghijkl1234567890-c-m-foobar.yaml
+----
+--
 ======
 
 == Multi-Tenancy
@@ -55,13 +136,13 @@ The following example provides a good explanation of how the multi-tenant featur
 . First, add new users via the Rancher `Users & Authentication` page. Then click `Create` to add two new separated users, such as `project-owner` and `project-readonly` respectively.
  ** A `project-owner` is a user with permission to manage a list of resources of a particular project, e.g., the default project.
  ** A `project-readonly` is a user with read-only permission of a particular project, e.g., the default project.
- image:/img/v1.2/rancher/create-user.png[]
+ image:rancher/create-user.png[]
 . Click one of the imported Harvester clusters after navigating to the Harvester UI.
  ** Click the `Projects/Namespaces` tab.
  ** Select a project such as `default` and click the `Edit Config` menu to assign the users to this project with appropriate permissions. For example, the `project-owner` user will be assigned the project owner role.
-image:/img/v1.2/rancher/add-member.png[]
+image:rancher/add-member.png[]
 . Continue to add the `project-readonly` user to the same project with read-only permissions and click *Save*.
-image:/img/v1.2/rancher/added-user.png[]
+image:rancher/added-user.png[]
 . Open an incognito browser and log in as `project-owner`.
 . After logging in as the `project-owner` user, click the *Virtualization Management* tab. There you should be able to view the cluster and project to which you have been assigned.
 . Click the *Images* tab to view a list of images previously uploaded to the `harvester-public` namespace. You can also upload your own image if needed.
@@ -81,7 +162,7 @@ Users can delete the imported Harvester cluster from the Rancher UI via menu:Vir
 
 You will also need to reset the `cluster-registration-url` setting on the associated Harvester cluster to clean up the Rancher cluster agent.
 
-image::/img/v1.2/rancher/delete-harvester-cluster.png[delete-cluster]
+image::rancher/delete-harvester-cluster.png[delete-cluster]
 
 [CAUTION]
 ====
