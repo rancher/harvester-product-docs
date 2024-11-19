@@ -1,10 +1,7 @@
 = PCI Devices Controller
 
 A `PCIDevice` in SUSE® Virtualization represents a host device with a PCI address.
-The devices can be passed through the hypervisor to a VM by creating a `PCIDeviceClaim` resource,
-or by using the UI to enable passthrough. Passing a device through the hypervisor means that
-the VM can directly access the device, and effectively owns the device. A VM can even install
-its own drivers for that device.
+The devices can be passed through the hypervisor to a VM by creating a `PCIDeviceClaim` resource, or by using the UI to enable passthrough. Passing a device through the hypervisor means that the VM can directly access the device, and effectively owns the device. A VM can even install its own drivers for that device.
 
 This is accomplished by using the `pcidevices-controller` add-on.
 
@@ -14,7 +11,7 @@ image::vm-import-controller/EnableAddon.png[]
 
 Once the `pcidevices-controller` add-on is deployed successfully, it can take a few minutes for it to scan and the PCIDevice CRDs to become available.
 
-image:pcidevices/PcideviceEnabled.png[]
+image::pcidevices/PcideviceEnabled.png[]
 
 == Enabling Passthrough on a PCI Device
 
@@ -61,17 +58,15 @@ This is just like installing drivers in the host. The PCI passthrough feature wi
 
 == SRIOV Network Devices
 
-_Available as of v1.2.0_
-
 image::pcidevices/SriovNetworkDevicesLink.png[]
 
 The `pcidevices-controller` add-on can now scan network interfaces on the underlying hosts and check if they support SRIOV Virtual Functions (VFs). If a valid device is found, `pcidevices-controller` will generate a new `SRIOVNetworkDevice` object.
 
 image::pcidevices/SriovNetworkDevicesList.png[]
 
-To create VFs on a SriovNetworkDevice, you can click *⋮ > Enable* and then define the *Number of Virtual Functions*.
+To create VFs on a SriovNetworkDevice, you can click *⋮ -> Enable* and then define the *Number of Virtual Functions*.
 
-image:pcidevices/SriovNetworkDeviceEnable.png[]
+image::pcidevices/SriovNetworkDeviceEnable.png[]
 
 image::pcidevices/SriovNetworkVFDefinition.png[]
 
@@ -89,4 +84,65 @@ image::pcidevices/SriovNetworkDevicesFilter.png[]
 
 The newly created PCI device can be passed through to virtual machines like any other PCI device.
 
-image:pcidevices/SriovNetworkDevicesFilterResult.png[]
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== USB Devices
+
+A `USBDevice` resource in Harvester represents a USB device on the node. USB devices can be "passed through" by the hypervisor to allow direct access from VMs. This is accomplished through the `pcidevices-controller` add-on. To use USB passthrough, you can either create a `USBDeviceClaim` resource or enable the feature on the Harvester UI. 
+
+USB passthrough is slightly different from PCI passthrough. For example, you can fully control a USB controller with four USB ports by creating a `PCIDeviceClaim`. However, you can also create a `USBDeviceClaim` to control only one USB port. The other three USB ports remain available to the node.
+
+[CAUTION]
+====
+Before you remove the USB device, detach it from the virtual machine and then disable passthrough on the *USB Devices* screen.
+====
+
+=== Enable Passthrough on a USB Device
+
+. On the Harvester UI, go to *Advanced -> USB Devices*.
++
+image::pcidevices/index.png[]
++
+. Locate the device in the list.
++
+image::pcidevices/search.png[]
++
+. Select the target device, and then select *⋮ -> Enable Passthrough*.
++
+image::pcidevices/select.png[]
++
+. Read the confirmation message, and then click *Enable*.
++
+Allow some time for the device state to change to *Enabled*.
++
+image::pcidevices/enable-done.png[]
+
+=== Attach a USB Device to a Virtual Machine
+
+. Verify that passthrough is enabled on the target device.
++
+. Go to *Virtual Machines*, and then create a virtual machine or edit the configuration of an existing virtual machine.
++
+. On the virtual machine configuration screen, go to the *USB Devices* tab and then select a device from the *Available USB Devices* list.
++
+image::pcidevices/attach-vm.png[]
++
+. Click *Create* or *Save*.
+
+=== View USB Devices Attached to a Virtual Machine
+
+. Start and then access the virtual machine.
++
+. Run `lsusb`.
++
+This utility displays information about USB buses and attached devices.
++
+image::pcidevices/usb-in-vm.png[]
+
+=== Limitations
+
+* Virtual machines with attached USB devices cannot be live-migrated because the devices are bound to a specific node.
++
+* Hot-plugging and replugging of USB devices is not supported. For more information, see https://github.com/kubevirt/kubevirt/issues/11979[KubeVirt Issue #11979].
++
+* If the device path changes when you reattach the device or reboot the node, you must detach the device from the virtual machine and then enable passthrough again.
