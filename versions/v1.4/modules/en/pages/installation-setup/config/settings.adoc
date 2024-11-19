@@ -425,7 +425,7 @@ Specify an IP range in the IPv4 CIDR format. The number of IPs must be four time
 
 === `support-bundle-image`
 
-*Definition*: Support bundle image, with various versions available in https://hub.docker.com/r/rancher/support-bundle-kit/tags[rancher/support-bundle-kit].
+*Definition*: Support bundle image, with various versions available in https://hub.docker.com/r/rancher/support-bundle-kit/tags[`rancher/support-bundle-kit`].
 
 *Default value*:
 
@@ -436,6 +436,14 @@ Specify an IP range in the IPv4 CIDR format. The number of IPs must be four time
   "imagePullPolicy": "IfNotPresent"
 }
 ----
+
+*Supported options and values*:
+
+The value is a JSON object literal that contains the following key-value pairs:
+
+* `repository`: Name of the repository that stores the support bundle image.
+* `tag`:  Tag assigned to the support bundle image.
+* `imagePullPolicy`: Pull policy of the support bundle image. The supported values are `IfNotPresent`, `Always`, and `Never`. For more information, see https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy[Image pull policy] in the Kubernetes documentation.
 
 === `support-bundle-namespaces`
 
@@ -472,7 +480,7 @@ The process is considered to have failed when the data collection and file packi
 
 *Definition*: Number of minutes SUSE® Virtualization waits before deleting a support bundle that has been packaged but not downloaded (either deliberately or unsuccessfully) or retained.
 
-The minimum value is `30`.
+You can specify a value greater than or equal to 0. When the value is 0, Harvester uses the default value.
 
 *Default value*: `30`
 
@@ -482,7 +490,7 @@ The minimum value is `30`.
 
 *Definition*: Number of minutes SUSE® Virtualization allows for collection of logs and configurations on the nodes for the support bundle.
 
-If the collection process is not completed within the allotted time, SUSE® Virtualization still allows you to download the support bundle (without the uncollected data). The minimum value is `30`.
+If the collection process is not completed within the allotted time, SUSE® Virtualization still allows you to download the support bundle (without the uncollected data). You can specify a value greater than or equal to 0. When the value is 0, Harvester uses the default value.
 
 *Default value*: `30`
 
@@ -516,45 +524,44 @@ https://your.upgrade.checker-url/v99/checkupgrade
 
 *Definition*: Upgrade-related configuration.
 
-*Default value*: `{"imagePreloadOption":{"strategy":{"type":"sequential"}}}`
+*Default value*: `{"imagePreloadOption":{"strategy":{"type":"sequential"}}, "restoreVM": false}`
 
 *Supported options and fields*:
 
 * `imagePreloadOption`: Options for the image preloading phase.
 +
 The full ISO contains the core operating system components and all required container images. SUSE® Virtualization can preload these container images to each node during installation and upgrades. When workloads are scheduled to management and worker nodes, the container images are ready to use.
-
++
 * `strategy`: Image preload strategy.
++
 * `type`: Type of image preload strategy.
- ** `sequential`: The container images from the target ISO are preloaded to each node. This is the default option.
- ** `skip`: The container images are not preloaded to each node. *Do not use this option in production environments.*
 +
-
+** `sequential`: The container images from the target ISO are preloaded to each node. This is the default option.
++
+** `skip`: The container images are not preloaded to each node. *Do not use this option in production environments.*
++
 [IMPORTANT]
-.important
 ====
-+
 If you decide to use `skip`, ensure that the following requirements are met:
 
-  *** You have a private container registry that contains all required images.
-  *** Your cluster has high-speed internet access and is able to pull all images from Docker Hub when necessary.
+* You have a private container registry that contains all required images.
+* Your cluster has high-speed internet access and is able to pull all images from Docker Hub when necessary.
 
-+
 Note any potential internet service interruptions and how close you are to reaching your https://www.docker.com/increase-rate-limits/[Docker Hub rate limit]. Failure to download any of the required images may cause the upgrade to fail and may leave the cluster in a middle state.
-+
 ====
-
-
- ** `parallel` (*experimental*): Nodes preload images in batches. You can adjust this using the `concurrency` option.
++
+** `parallel` (*experimental*): Nodes preload images in batches. You can adjust this using the `concurrency` option.
++
 * `concurrency`: Number of nodes that can simultaneously preload images. This option takes effect only when `type` is set to `parallel`.
 +
 The default value is `0`, which is equivalent to following the cluster's node counts. Using `0` allows the system to dynamically follow the scale of the cluster. Values higher than the cluster's node counts are treated as `0`, while lower values are considered invalid and are rejected.
 +
-
 [NOTE]
 ====
 SUSE® Virtualization deploys an upgrade-repo service on the cluster that serves as an HTTP server for nodes that need to preload the container images. When a `concurrency` value is set, each batch of nodes downloads the container images from this upgrade-repo in parallel. Because of this, you must consider the speed of the SUSE® Virtualization management network and the read speed of the default disk for Longhorn.
 ====
++
+* `restoreVM`: Option that enables SUSE® Virtualization to automatically restore running virtual machines after a single-node cluster is upgraded. The default value is `false`, which causes all virtual machines to be stopped after the upgrade is completed. When set to `true`, SUSE® Virtualization restarts virtual machines that were running before the upgrade was started. Virtual machines that were paused before the upgrade are not restarted.
 
 *Example*:
 
@@ -566,7 +573,8 @@ SUSE® Virtualization deploys an upgrade-repo service on the cluster that serves
       "type": "parallel",
       "concurrency": 2
     }
-  }
+  },
+  "restoreVM": true
 }
 ----
 
@@ -628,7 +636,7 @@ When the node becomes unavailable or is powered off, the VM only restarts and do
 
 [CAUTION]
 ====
-Because this setting is part of the `settings.management.cattle.io` custom resource, you cannot configure any of the supported options (for example, `Logo` and `Primary Color` using a xref:./configuration-file.adoc#_system_settings[configuration file].
+Because this setting is part of the `settings.management.cattle.io` custom resource, you cannot configure any of the supported options (for example, `Logo` and `Primary Color`) using a xref:./configuration-file.adoc#_system_settings[configuration file].
 ====
 
 image::advanced/branding.png[containerd-registry]
