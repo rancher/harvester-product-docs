@@ -1,0 +1,147 @@
+= Upload Images
+
+Currently, there are three ways that are supported to create an image: uploading images via URL, uploading images via local files, and creating images via volumes.
+
+== Upload Images via URL
+
+[tabs]
+======
+UI::
++
+To import virtual machine images in the **Images** page, enter a URL that can be accessed from the cluster. Description and labels are optional. :::note The image name will be auto-filled using the URL address's filename. You can customize the image name at any time.
++
+image::upload-image.png[]
+
+API::
++
+To import a virtual machine image from a repository using the API, create a `VirtualMachineImage` object. You must specify a URL that can be accessed from the cluster. 
++
+Example:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap
+  namespace: default
+spec:
+  description: A human-readable description for the VM image
+  displayName: openSUSE-Leap
+  sourceType: download
+  url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+  checksum: 80c27afb7cd791ac86ee1b0b0c572a242f6142579db5beac841e71151d370cd6
+----
++
+For more information, see the xref:api.adoc#tag/Images/operation/createNamespacedVirtualMachineImage[API reference]. 
+
+Terraform::
++
+[,json]
+----
+resource "harvester_image" "opensuse154" {
+  name      = "opensuse154"
+  namespace = "harvester-public"
+
+  display_name = "openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+  source_type  = "download"
+  url          = "https://downloadcontent-us1.opensuse.org/repositories/Cloud:/Images:/Leap_15.4/images/openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+}
+----
+======
+
+== Upload Images via Local File
+
+Currently, qcow2, raw, and ISO images are supported.
+
+[NOTE]
+====
+* Please do not refresh the page until the file upload is finished.
+====
+
+image::upload-image-local.png[]
+
+=== HTTP 413 Error in {rancher-product-name} Multi-Cluster Management
+
+You can upload images from the xref:../../integrations/rancher/virtualization-management.adoc#_importing_harvester_cluster[*Multi-Cluster Management*] screen on the *{rancher-product-name} UI*. When the status of an image is _Uploading_ but the progress indicator displays _0%_ for an extended period, check the HTTP response status code. _413_ indicates that the size of the request body exceeds the limit.
+
+image::img-413-code.png[]
+
+The maximum request body size should be specific to the cluster that is hosting {rancher-product-name} (for example, RKE2 clusters have a default limit of 1 MB but no such limit exists in K3s clusters).
+
+The current workaround is to upload images from the *{harvester-product-name} UI*. If you choose to upload images from the {rancher-product-name} UI, you may need to configure related settings on the ingress server (for example, https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size[`proxy-body-size`] in NGINX).
+
+If {rancher-product-name} is deployed on an RKE2 cluster, perform the following steps:
+
+. Edit the {rancher-product-name} ingress.
++
+[,sh]
+----
+ $ kubectl -n cattle-system edit ingress rancher
+----
+
+. Specify a value for `nginx.ingress.kubernetes.io/proxy-body-size`.
++
+Example:
++
+image:img-ingress-client-body.png[]
+
+. Delete the stuck image, and then restart the upload process.
+
+=== Prolonged Uploading of Large Images in {rancher-product-name} Multi-Cluster Management
+
+If you upload a very large image (over 10 GB) from the *Multi-Cluster Management* screen on the {rancher-product-name} UI, the operation may take longer than usual and the image status (Uploading) may not change.
+
+This behavior is related to _proxy-request-buffering_ in the ingress configuration, which is also specific to the cluster that is hosting {rancher-product-name}.
+
+The current workaround is to upload images from the *{harvester-product-name} UI*. If you choose to upload images from the {rancher-product-name} UI, you may need to configure related settings on the ingress server (for example, https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering[`proxy-request-buffering`] in NGINX).
+
+If {rancher-product-name} is deployed on an RKE2 cluster, perform the following steps:
+
+. Edit the {rancher-product-name} ingress.
++
+[,sh]
+----
+ $ kubectl -n cattle-system edit ingress rancher
+----
+
+. Turn off `nginx.ingress.kubernetes.io/proxy-request-buffering`.
++
+Example:
++
+image:img-ingress-request-proxy-buffering.png[]
+
+. Delete the stuck image, and then restart the upload process.
+
+=== Uploading Images Previously Downloaded from {harvester-product-name}
+
+Starting with *v1.5.5*, Longhorn https://github.com/longhorn/backing-image-manager/pull/153[compresses backing images for downloading]. If you attempt to upload a compressed backing image, {harvester-product-name} rejects the attempt and displays the message *Upload failed: the uploaded file size xxxx should be a multiple of 512 bytes since Longhorn uses directIO by default* because the compressed data violates Longhorn's data alignment.
+
+Before uploading, decompress backing images using the command `$ gzip -d <file name>`.
+
+== Create Images via Volumes
+
+On the *Volumes* page, click *Export Image*. Enter the image name and select a StorageClass to create an image.
+
+image::volume/export-volume-to-image-1.png[]
+
+== Image StorageClass
+
+When creating an image, you can select a xref:../../storage/storageclass.adoc[StorageClass] and use its pre-defined parameters like replicas, node selectors and disk selectors .
+
+[NOTE]
+====
+The image will not use the `StorageClass` selected here directly. It's just a `StorageClass` template.
+
+Instead, it will create a special StorageClass under the hood with a prefix name of `longhorn-`. This is automatically done by the {harvester-product-name} backend, but it will inherit the parameters from the StorageClass you have selected.
+====
+
+image::image-storageclass.png[]
+
+== Image Labels
+
+You can add labels to the image, which will help identify the OS type more accurately. Also, you can add any custom labels for filtering if needed.
+
+If your image name or URL contains any valid information, the UI will automatically recognize the OS type and image category for you. If not, you can also manually specify those corresponding labels on the UI.
+
+image::image-labels.png[]

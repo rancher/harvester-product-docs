@@ -1,0 +1,85 @@
+= CPU Pinning
+
+{harvester-product-name} supports virtual machine CPU pinning. To use this feature, you must first enable the CPU Manager on the nodes, and then enable CPU pinning when you create the virtual machine.
+
+== Kubernetes CPU Manager
+
+The https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[CPU Manager] feature improves CPU resource allocation in Kubernetes clusters, ensuring that workloads with strict performance needs receive stable and predictable CPU resources. This is especially important for high-performance and latency-sensitive applications.
+
+{harvester-product-name} uses the `static` CPU Manager policy when the CPU Manager is enabled. This policy manages a shared pool of CPUs that initially includes all CPUs on nodes with the following configuration:
+
+* Pods in the https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`] quality of service (QoS) class that request whole CPU cores (for example, CPU: "2") are assigned dedicated CPUs. These CPUs are "pinned" to the pod and are removed from the shared CPU pool.
++
+* Pods in the https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`] and https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] QoS classes share the remaining CPUs in the shared pool.
+
+=== Calculation of Shared CPU Pool
+
+{harvester-product-name} reserves CPU resources for system-level operations based on the https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[GKE formula], with the https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`] and https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`] values allocated in a 2:3 ratio.
+
+Example (node with 16 CPU cores):
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+In this example, approximately 15 cores (14980 millicores) are available for workloads.
+
+When a virtual machine (pod) in the Guaranteed QoS class requests 4 CPUs, 4 cores are dedicated to that virtual machine. Pods in the other QoS classes share the remaining 11 cores in the shared pool.
+
+== Enable and Disable CPU Manager
+
+When you enable the CPU Manager, {harvester-product-name} sets the CPU Manager policy to `static`. When you disable the feature, {harvester-product-name} switches the CPU Manager policy back to `none`. 
+
+You must enable or disable the CPU Manager on each node separately.
+
+. On the {harvester-product-name} UI, go to *Hosts*.
++
+. Locate the node in the list, and then select *⋮ -> Enable CPU Manager* or *Disable CPU Manager*.
++
+Allow some time for {harvester-product-name} to apply the corresponding CPU Manager policy.
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== Limitations
+
+* The CPU Manager cannot be enabled on the witness node.
++
+* The CPU Manager must be enabled or disabled on each management node separately. You must wait for the operation to be completed before starting another.
++
+* Virtual machines with CPU pinning enabled must be stopped before CPU Manager is disabled on the corresponding node.
+
+== Enable CPU Pinning on a New Virtual Machine
+
+. Verify that CPU Manager is enabled on one or more nodes.
++
+. Go to *Virtual Machines*.
++
+. Click *Create*.
++
+image::vm/cpu-pinning-create-vm.png[create-vm]
++
+. On the *Advanced Options* tab, select *Enable CPU Pinning*.
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-advanced-options]
++
+. Click *Save*.
+
+Enabling CPU pinning adds `dedicatedCpuPlacement: true` to `.spec.template.spec.domain.cpu` in the virtual machine configuration (YAML). When `dedicatedCpuPlacement` is set to `true`, the CPU and memory resource requests are automatically set to match the limits to ensure that the criteria for Guaranteed QoS are met.
+
+Because the requests and limits are identical, CPU and memory xref:./resource-overcommit.adoc[Resource Overcommit] settings do not apply to virtual machines with CPU pinning enabled.
+
+[NOTE]
+====
+To use CPU pinning on an existing virtual machine, you must restart the virtual machine after enabling the feature and saving the change.
+====
+
+== Virtual Machine Live Migration
+
+Virtual machines with CPU pinning enabled can be migrated only if the CPU Manager is enabled on the target node.
+
+== Upgrades
+
+When upgrading a node, {harvester-product-name} drains all pods and live migrates virtual machines to another node. To avoid interruptions to the upgrade process, ensure that the CPU Manager is enabled on other nodes and sufficient resources are available whenever you use virtual machines with CPU pinning enabled.
