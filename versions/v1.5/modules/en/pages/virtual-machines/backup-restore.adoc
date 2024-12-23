@@ -1,0 +1,321 @@
+= Virtual Machine Backup, Snapshot & Restore
+
+== Virtual Machine Backup & Restore
+
+Virtual machine backups are created from the *Virtual Machines* page. The virtual machine backup volumes will be stored in the *Backup Target* (an NFS or S3 server), and they can be used to either restore a new virtual machine or replace an existing virtual machine.
+
+image::vm/vm-backup.png[]
+
+[NOTE]
+====
+A backup target must be set up. For more information, see <<Configure Backup Target>>. If the backup target has not been set, you'll be prompted with a message to do so.
+====
+
+=== Configure Backup Target
+
+A backup target is an endpoint used to access a backup store in {harvester-product-name}. A backup store is an NFS server or S3 compatible server that stores the backups of virtual machine volumes. The backup target can be set at `Settings > backup-target`.
+
+|===
+| Parameter | Type | Description
+
+| Type
+| string
+| Choose S3 or NFS
+
+| Endpoint
+| string
+| A hostname or an IP address. It can be left empty for AWS S3.
+
+| BucketName
+| string
+| Name of the bucket
+
+| BucketRegion
+| string
+| Region of the bucket
+
+| AccessKeyID
+| string
+| A user-id that uniquely identifies your account
+
+| SecretAccessKey
+| string
+| The password to your account
+
+| Certificate
+| string
+| Paste to use a self-signed SSL certificate of your S3 server
+
+| VirtualHostedStyle
+| bool
+| Use `VirtualHostedStyle` access only; e.g., Alibaba Cloud (Aliyun) OSS
+|===
+
+=== Create a Virtual Machine Backup
+
+. Once the backup target is set, go to the `Virtual Machines` page.
+. Click `Take Backup` of the virtual machine actions to create a new virtual machine backup.
+. Set a custom backup name and click `Create` to create a new virtual machine backup.
++
+image::vm/create-backup.png[]
+
+*Result:* The backup is created. You will receive a notification message, and you can also go to the `Backup & Snapshot > VM Backups` page to view all virtual machine backups.
+
+The `State` will be set to `Ready` once the backup is complete.
+
+image::vm/vm-backup-results.png[]
+
+Users can either restore a new virtual machine or replace an existing virtual machine using this backup.
+
+=== Restore a new virtual machine using a backup
+
+. Go to the `VM Backups` page.
+. Click the `Restore Backup` button at the top right.
+. Specify the new virtual machine name and click `Create`.
+. A new virtual machine will be restored using the backup volumes and metadata, and you can access it from the `Virtual Machines` page.
++
+image::vm/restore-vm.png[]
+
+=== Replace an existing virtual machine using a backup
+
+You can replace an existing virtual machine using the backup with the same virtual machine backup target.
+
+You can choose to either delete or retain the previous volumes. By default, all previous volumes are deleted.
+
+*Requirements:* The virtual machine must exist and is required to be in the powered-off status.
+
+. Go to the `VM Backups` page.
+. Click the `Restore Backup` button at the top right.
+. Click `Replace Existing`.
+. You can view the restore process from the `Virtual Machines` page.
++
+image::vm/vm-restore-existing.png[]
+
+=== Restore a new virtual machine on another {harvester-product-name} cluster
+
+Users can now restore a new virtual machine on another cluster by leveraging the virtual machine metadata & content backup feature.
+
+==== Prerequisites
+
+* v1.4.0 and later: The controller automatically syncs the virtual machine images with the new cluster, except when a virtual machine image with the same name or display name already exists on the new cluster.
++
+* Earlier than v1.4.0: You must upload and configure the virtual machine images on the <<Upload the same virtual machine images to a new cluster,new cluster>>. Ensure that the image names and configuration are identical so that the virtual machines can be restored.
+
+==== Upload the same virtual machine images to a new cluster
+
+. Check the existing image name (normally starts with `image-`) and create the same one on the new cluster.
++
+[,console]
+----
+$ kubectl get vmimages -A
+NAMESPACE   NAME                               DISPLAY-NAME                              SIZE         AGE
+default     image-79hdq                        focal-server-cloudimg-amd64.img           566886400    5h36m
+default     image-l7924                        harvester-v1.0.0-rc2-amd64.iso            3964551168   137m
+default     image-lvqxn                        opensuse-leap-15.3.x86_64-nocloud.qcow2   568524800    5h35m
+----
+
+. Apply a virtual machine image YAML with the same name and content in the new cluster.
++
+[,console]
+----
+$ cat <<EOF | kubectl apply -f -
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: image-lvqxn
+  namespace: default
+spec:
+  displayName: opensuse-leap-15.3.x86_64-nocloud.qcow2
+  pvcName: ""
+  pvcNamespace: ""
+  sourceType: download
+  url: http://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.3/images/openSUSE-Leap-15.3.x86_64-NoCloud.qcow2
+ EOF
+----
+
+==== Restore a new virtual machine in a new cluster
+
+. Setup the same backup target in a new cluster. And the backup controller will automatically sync the backup metadata to the new cluster.
+. Go to the `VM Backups` page.
+. Select the synced virtual machine backup metadata and choose to restore a new virtual machine with a specified virtual machine name.
+. A new virtual machine will be restored using the backup volumes and metadata. You can access it from the `Virtual Machines` page.
+
+== Virtual Machine Snapshot & Restore
+
+Virtual machine snapshots are created from the *Virtual Machines* page. The virtual machine snapshot volumes will be stored in the cluster, and they can be used to either restore a new virtual machine or replace an existing virtual machine.
+
+image::vm/vm-snapshot.png[]
+
+=== Create a Virtual Machine Snapshot
+
+. Go to the `Virtual Machines` page.
+. Click `Take VM Snapshot` of the VM actions to create a new virtual machine snapshot.
+. Set a custom snapshot name and click `Create` to create a new virtual machine snapshot.
++
+image::vm/create-snapshot.png[]
+
+*Result:* The snapshot is created. You can also go to the `Backup & Snapshot > virtual machine Snapshots` page to view all VM snapshots.
+
+The `State` will be set to `Ready` once the snapshot is complete.
+
+image::vm/vm-snapshot-results.png[]
+
+Users can either restore a new virtual machine or replace an existing virtual machine using this snapshot.
+
+=== Restore a new virtual machine using a snapshot
+
+. Go to the `VM Snapshots` page.
+. Click the `Restore Snapshot` button at the top right.
+. Specify the new virtual machine name and click `Create`.
+. A new virtual machine will be restored using the snapshot volumes and metadata, and you can access it from the `Virtual Machines` page.
++
+image::vm/restore-vm-snapshot.png[]
+
+=== Replace an existing virtual machine using a snapshot
+
+You can replace an existing virtual machine using the snapshot.
+
+[NOTE]
+====
+You can only choose to retain the previous volumes.
+====
+
+. Go to the `VM Snapshots` page.
+. Click the `Restore Snapshot` button at the top right.
+. Click `Replace Existing`.
+. You can view the restore process from the `Virtual Machines` page.
++
+image::vm/restore-vm-snapshot-existing.png[]
+
+== Virtual Machine Snapshot Space Management
+
+Volumes consume extra disk space in the cluster whenever you create a new virtual machine backup or snapshot. To manage this, you can configure space usage limits at the namespace and virtual machine levels. The configured values represent the maximum amount of disk space that can be used by all backups and snapshots. No limits are set by default.
+
+=== Configure the Snapshot Space Usage Limit at the Namespace Level
+
+. Go to the *Namespaces* screen.
++
+. Locate the target namespace, and then select *⋮ -> Edit Quota*.
++
+image::vm/edit-quota-namespace.png[]
++
+. Specify the maximum amount of disk space that can be consumed by all snapshots in the namespace, and then and click *Save*.
++
+image::vm/edit-quota-namespace-save.png[]
++
+. Verify that the configured value is displayed on the *Namespaces* screen.
++
+image::vm/edit-quota-namespace-read.png[]
+
+=== Configure the Snapshot Space Usage Limit at the Virtual Machine Level
+
+. Go to the *Virtual Machines* screen.
++
+. Locate the target virtual machine, and then select *⋮ -> Edit VM Quota*.
++
+image::vm/edit-quota-vm.png[]
++
+. Specify the maximum total amount of disk space that can be consumed by all snapshots for the virtual machine, and then and click *Save*.
++
+image::vm/edit-quota-vm-save.png[]
++
+. Verify that the configured value is displayed on the *Quotas* tab of the virtual machine details screen.
++
+image::vm/edit-quota-vm-read.png[]
+
+== Scheduled Virtual Machine Backups and Snapshots
+
+{harvester-product-name} supports the creation of virtual machine backups and snapshots on a scheduled basis, with the option to retain a specific number of backups and snapshots. You can suspend, resume, and update the schedule at runtime.
+
+=== Create the Virtual Machine Schedule
+
+. Go to the *Virtual Machine Schedules* screen, and then click *Create Schedule*.
++
+image::vm/create-schedule.png[]
++
+. Configure the following settings:
++
+image::vm/configure-schedule.png[]
++
+** *Type*: Select either *Backup* or *Snapshot*.
++
+** *Namespace* and *Virtual Machine Name*: Specify the namespace and name of the source virtual machine.
++
+** *Cron Schedule*: Specify the cron expression (a string consisting of fields separated by whitespace characters) that defines the schedule properties.
++
+[IMPORTANT]
+====
+The backup or snapshot creation interval must be **at least one hour**. Frequent backup or snapshot deletion results in heavy I/O load.
+
+If two schedules have the same granularity level, each iteration's timing offset must be **at least 10 minutes**.
+====
++
+** *Retain*: Specify the number of up-to-date backups or snapshots to be retained.
++
+When this value is exceeded, the {harvester-product-name} controller deletes the oldest backups or snapshots, and Longhorn starts the snapshot purge.
++
+** *Max Failure*: Specify the maximum number of consecutive failed backup or snapshot creation attempts to be allowed.
++
+When this value is exceeded, the {harvester-product-name} controller suspends the schedule.
++
+. Click *Create*.
+
+=== Check the Status of a Virtual Machine Schedule
+
+. Go to the *Virtual Machine Schedules* screen.
++
+. Locate the target schedule, and then click the name to open the details screen.
++
+. On the *Basics* tab, verify that the settings are correct.
++
+image::vm/check-schedule-basic.png[]
++
+. On the *Backups* tab, check the status of the backups or snapshots that were created according to the schedule.
++
+image::vm/check-schedule-backups.png[]
++
+Backups and snapshots that are marked *Ready* can be used to restore the source virtual machine. For more information, see <<Virtual Machine Backup & Restore>> and <<Virtual Machine Snapshot & Restore>>.
++
+image::vm/check-schedule-restore.png[]
+
+=== Edit a Virtual Machine Schedule
+
+. Go to the *Virtual Machine Schedules* screen.
++
+. Locate the target schedule, and then select *⋮ -> Edit Config*.
++
+image::vm/edit-schedule-config.png[]
++
+. Edit the *Cron Schedule*, *Retain*, or *Max Failure* values.
++
+image::vm/edit-schedule-parameters.png[]
++
+. Click *Save* to apply the changes.
+
+=== Suspend or Resume a Virtual Machine Schedule
+
+You can suspend active schedules and resume suspended schedules.
+
+. Go to the *Virtual Machine Schedules* screen.
++
+. Locate the target schedule, and then select *⋮ -> Suspend* or *Resume*.
++
+image::vm/suspend-resume-schedule.png[]
++
+The schedule is automatically suspended when the number of consecutive failed backup or snapshot creation attempts exceeds the *Max Failure* value.
++
+{harvester-product-name} does not allow you to resume a suspended schedule for backup creation if the backup target is not reachable.
+
+=== Virtual Machine Operations and {harvester-product-name} Upgrades
+
+Before you upgrade {harvester-product-name}, ensure that no virtual machine backups or snapshots are in use, and that all virtual machine schedules are suspended. The {harvester-product-name} UI displays the following error messages when upgrade attempts are rejected:
+
+* Virtual machine backups or snapshots are being created, deleted, or used during the upgrade attempt
++
+image::vm/upgrade-vmbackup.png[]
++
+* Virtual machine schedules are active during the upgrade attempt
++
+image::vm/upgrade-svmbackup.png[]
+
+To avoid such issues, SUSE plans to implement automatic suspension of all virtual machine schedules before the upgrade process is started. The suspended schedules will also be automatically resumed after the upgrade is completed. For more information, see https://github.com/harvester/harvester/issues/6759[Issue #6759].

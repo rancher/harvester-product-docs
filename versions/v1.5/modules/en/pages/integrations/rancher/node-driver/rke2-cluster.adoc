@@ -1,0 +1,143 @@
+= Creating an RKE2 Kubernetes Cluster
+
+You can now provision RKE2 Kubernetes clusters on top of the Harvester cluster in Rancher using the built-in Harvester node driver.
+
+image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+
+[NOTE]
+====
+
+* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN network] is required for Harvester node driver.
+* Harvester node driver only supports cloud images.
+* For the port requirements of the guest clusters deployed within Harvester, please refer to the doc xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[here].
+* For RKE2 with Harvester cloud provider support matrix, please refer to the website https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[here].
+====
+
+== Backward Compatibility Notice
+
+[NOTE]
+====
+Please note a known backward compatibility issue if you're using the Harvester cloud provider version *v0.2.2* or higher.  If your Harvester version is below *v1.2.0* and you intend to use newer RKE2 versions (i.e., >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`), it is essential to upgrade your Harvester cluster to v1.2.0 or a higher version before proceeding with the upgrade of the guest Kubernetes cluster or Harvester cloud provider.
+
+For a detailed support matrix, please refer to the *Harvester CCM & CSI Driver with RKE2 Releases* section of the official https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[website].
+====
+
+== Create your cloud credentials
+
+. Click *☰ > Cluster Management*.
+. Click *Cloud Credentials*.
+. Click *Create*.
+. Click *Harvester*.
+. Enter your cloud credential name
+. Select "Imported Harvester Cluster".
+. Click *Create*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Create RKE2 kubernetes cluster
+
+Users can create a RKE2 Kubernetes cluster from the *Cluster Management* page via the RKE2 node driver.
+
+. Select *Clusters* menu.
+. Click *Create* button.
+. Toggle Switch to *RKE2/K3s*.
+. Select Harvester node driver.
+. Select a *Cloud Credential*.
+. Enter *Cluster Name* (required).
+. Enter *Namespace* (required).
+. Enter *Image* (required).
+. Enter *Network Name* (required).
+. Enter *SSH User* (required).
+. (optional) Configure the menu:Show Advanced[User Data] to install the required packages of VM.
++
+[,yaml]
+----
+#cloud-config
+packages:
+  - iptables
+----
++
+[NOTE]
+====
+Calico and Canal networks require the `iptables` or `xtables-nft` package to be installed on the node, for more details, please refer to the https://docs.rke2.io/known_issues#canal-and-ip-exhaustion[RKE2 known issues].
+====
+
+. Click *Create*.
++
+image:rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+image:rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+image:rancher/create-rke2-harvester-cluster-3.png[create-rke2-harvester-cluster-3]
++
+[NOTE]
+====
+* RKE2 v1.21.5+rke2r2 or above provides a built-in Harvester Cloud Provider and Guest CSI driver integration.
+* Only imported Harvester clusters are supported by the Harvester node driver.
+====
+
+=== Add node affinity
+
+The Harvester node driver now supports scheduling a group of machines to particular nodes through the node affinity rules, which can provide high availability and better resource utilization.
+
+Node affinity can be added to the machine pools during the cluster creation:
+
+. Click the `Show Advanced` button and click the `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Set priority to `Required` if you wish the scheduler to schedule the machines only when the rules are met.
+. Click `Add Rule` to specify the node affinity rules, e.g., for the xref:./node-driver.adoc#_topology_spread_constraints[topology spread constraints] use case, you can add the `region` and `zone` labels as follows:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+=== Add workload affinity
+
+The workload affinity rules allow you to constrain which nodes your machines can be scheduled on based on the labels of workloads (VMs and Pods) already running on these nodes, instead of the node labels.
+
+Workload affinity rules can be added to the machine pools during the cluster creation:
+
+. Select *Show Advanced* and choose *Add Workload Selector*.
+image:rancher/affinity-rke2-add-workload-selector.png[affinity-add-workload-selector]
+. Select *Type*, *Affinity* or *Anti-Affinity*.
+. Select *Priority*. *Prefered* means it's an optional rule, and *Required* means a mandatory rule.
+. Select the namespaces for the target workloads.
+. Select *Add Rule* to specify the workload affinity rules.
+. Set *Topology Key* to specify the label key that divides Harvester hosts into different topologies.
+
+See the https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod Affinity and Anti-Affinity Documentation] for more details.
+
+== Update RKE2 Kubernetes cluster
+
+The fields highlighted below of the RKE2 machine pool represent the Harvester VM configurations. Any modifications to these fields will trigger node reprovisioning.
+
+image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+== Using Harvester RKE2 node driver in air gapped environment
+
+RKE2 provisioning relies on the `qemu-guest-agent` package to get the IP of the virtual machine.
+
+Calico and Canal require the `iptables` or `xtables-nft` package to be installed on the node.
+
+However, it may not be feasible to install packages in an air gapped environment.
+
+You can address the installation constraints with the following options:
+
+* Option 1. Use a VM image preconfigured with required packages (e.g., `iptables`, `qemu-guest-agent`).
+* Option 2. Go to *Show Advanced* > *User Data* to allow VMs to install the required packages via an HTTP(S) proxy.
+
+Example user data in Harvester node template:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----
