@@ -11,7 +11,36 @@ image::host/host.png[host.png]
 
 == Node Maintenance
 
-For admin users, you can click *Enable Maintenance Mode* to evict all VMs from a node automatically. It will leverage the `VM live migration` feature to migrate all VMs to other nodes automatically. Note that at least two active nodes are required to use this feature.
+Admin users can enable Maintenance Mode (select *⋮ -> Enable Maintenance Mode*) to automatically evict all virtual machines from a node. This mode leverages the *live migration* feature to migrate the virtual machines to other nodes, which is useful when you need to reboot, upgrade firmware, or replace hardware components. At least two active nodes are required to use this feature.
+
+[WARNING]
+====
+A https://github.com/harvester/harvester/issues/7128[bug] may cause an I/O error to occur in virtual machines while Maintenance Mode is enabled on the underlying node. To mitigate the issue, you can set a taint on the node before enabling Maintenance Mode.
+
+. Set the taint on the target node.
++
+[,sh]
+----
+kubectl taint node <NODE> --overwrite kubevirt.io/drain=draining:NoSchedule
+----
++
+. Wait for all virtual machines to be live-migrated out of the node.
++
+. On the Harvester UI *Hosts* screen, select the target node, and then select *⋮ -> Enable Maintenance Mode*.
+
+Once the maintenance tasks are completed, perform the following steps to allow scheduling of workloads on the node.
+
+. Remove the taint on the node.
++
+[,sh]
+----
+kubectl taint node <NODE> kubevirt.io/drain-
+----
++
+. On the Harvester UI *Hosts* screen, select the node, and then select *⋮ -> Disable Maintenance Mode*.
+
+For more information, see [Issue #7128](https://github.com/harvester/harvester/issues/7128).
+====
 
 If you want to force individual VMs to shut down instead of migrating to other nodes, add the label `harvesterhci.io/maintain-mode-strategy` and one of the following values to those VMs:
 
@@ -28,7 +57,7 @@ image::host/node-maintenance.png[node-maintenance.png]
 
 == Cordoning a Node
 
-Cordoning a node marks it as unschedulable. This feature is useful for performing short tasks on the node during small maintenance windows, like reboots, upgrades, or decommissions. When you're done, power back on and make the node schedulable again by uncordoning it.
+Cordoned nodes are marked as unschedulable. Cordoning is useful when you want to prevent new workloads from being scheduled on a node. You can uncordon a node to make it schedulable again.
 
 image::host/cordon-nodes.png[cordon-node.png]
 
@@ -82,7 +111,6 @@ Removing a control plane node in this situation is not recommended because etcd 
 Eviction cannot be completed if the remaining nodes cannot accept replicas from the node to be removed. In this case, some volumes will remain in the *Degraded* state until you add more nodes to the cluster.
 ====
 
-
 === 4. Manage non-migratable VMs.
 
 xref:../virtual-machines/live-migration.adoc[Live migration] cannot be performed for VMs with certain properties.
@@ -123,17 +151,21 @@ kubectl drain <node_name> --force --ignore-daemonsets --delete-local-data --pod-
 Again, removing a control plane node in this situation is *not recommended* because etcd data is not replicated. Failure of a single node can cause etcd to lose its quorum and shut the cluster down.
 ====
 
-=== 6. Remove the node.
-
-. On the {harvester-product-name} UI, go to the *Hosts* screen.
-. Locate the node that you want to remove, and then click *⋮ -> Delete*.
-
-image::host/delete-node.png[delete.png]
-
-=== 7. Delete RKE2 services on the node.
+=== 6. Delete RKE2 services and shut down the node.
 
 . Log in to the node using the root account.
-. Run the script `/opt/rke2/bin/rke2-uninstall.sh`.
++
+. Run the script `/opt/rke2/bin/rke2-uninstall.sh` to delete RKE2 services running on the node.
++
+. Shut down the node.
+
+=== 7. Remove the node.
+
+. On the Harvester UI, go to the **Hosts** screen.
++
+. Locate the node that you want to remove, and then click **⋮ -> Delete**.
++
+image::host/delete-node.png[]
 
 [NOTE]
 ====
