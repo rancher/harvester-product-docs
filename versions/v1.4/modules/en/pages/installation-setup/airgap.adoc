@@ -43,3 +43,24 @@ If the *Cloud Provider* option is configured to {harvester-product-name} in a gu
 image::cluster-registry.png[cluster-registry]
 
 As a result, we recommend monitoring each https://github.com/rancher/rke2/releases[RKE2 release] in your air gapped environment and pulling the required images into your private registry. Please refer to the https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/harvester-v1-1-2/[Support Matrix page] for the best Harvester cloud provider and CSI driver capability support.
+
+== Known Issues
+
+=== 1. Missing `rancher/rancher-agent:v2.9.2` image affects deployment in air-gapped environments. (Issue https://github.com/harvester/harvester/issues/7157[#7157])
+
+Rancher v2.9.2, which is embedded in Harvester v1.4.0, introduced a new cronjob (https://github.com/rancher/rancher/commit/53ba791e11f98a5594c6fa8a30d321602483446c[`rke2-machine-config-cleanup`]). This cronjob uses a container image (`rancher/rancher-agent:v2.9.2`) that is not included in the Harvester v1.4.0 ISO. To mitigate the issue, you can pull the image from the internet and then load it in the air-gapped environment.
+
+[,bash]
+----
+# on a computer which can reach the internet and harvester cluster
+docker pull rancher/rancher-agent:v2.9.2
+docker save rancher/rancher-agent:v2.9.2 -o rancher-agent-v2.9.2.tar
+
+# copy rancher-agent-v2.9.2.tar to the air-gapped environment
+scp rancher-agent-v2.9.2.tar rancher@<harvester-node-ip>:/tmp
+
+# ssh to the harvester node and load the image
+ssh rancher@<harvester-node-ip>
+sudo -i
+docker load -i /tmp/rancher-agent-v2.9.2.tar
+----
