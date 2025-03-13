@@ -67,6 +67,24 @@ image::vm/vm-backup-results.png[]
 
 Users can either restore a new virtual machine or replace an existing virtual machine using this backup.
 
+[NOTE]
+====
+The network configuration of a virtual machine running an Ubuntu release later than 16.04 is likely managed by `netplan` by default. Before creating backups, you must stop the virtual machine, edit the configuration (*Edit Config -> Advanced Options*), and then restart the virtual machine. Use the following `network` settings as reference for DHCP configuration.
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
+====
+
 === Restore a new virtual machine using a backup
 
 . Go to the `VM Backups` page.
@@ -103,9 +121,27 @@ Users can now restore a new virtual machine on another cluster by leveraging the
 
 ==== Upload the same virtual machine images to a new cluster
 
+. Download the virtual machine image from the existing cluster.
++
+image::vm/download-vm-image.png[]
+
+. Decompress the downloaded image.
++
+----
+$ gzip -d <image.gz>
+----
+
+. Host the image on a server that is accessible to the new cluster.
++
+Example (simple HTTP server):
++
+----
+$ python -m http.server
+----
+
 . Check the existing image name (normally starts with `image-`) and create the same one on the new cluster.
 +
-[,console]
+[,shell]
 ----
 $ kubectl get vmimages -A
 NAMESPACE   NAME                               DISPLAY-NAME                              SIZE         AGE
@@ -114,24 +150,30 @@ default     image-l7924                        harvester-v1.0.0-rc2-amd64.iso   
 default     image-lvqxn                        opensuse-leap-15.3.x86_64-nocloud.qcow2   568524800    5h35m
 ----
 
-. Apply a virtual machine image YAML with the same name and content in the new cluster.
+. Apply a `VirtualMachineImage` YAML with the same name and configuration in the new cluster.
 +
-[,console]
+Example:
++
 ----
 $ cat <<EOF | kubectl apply -f -
 apiVersion: harvesterhci.io/v1beta1
 kind: VirtualMachineImage
 metadata:
-  name: image-lvqxn
+  name: image-79hdq
   namespace: default
 spec:
-  displayName: opensuse-leap-15.3.x86_64-nocloud.qcow2
+  displayName: focal-server-cloudimg-amd64.img
   pvcName: ""
   pvcNamespace: ""
   sourceType: download
-  url: http://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.3/images/openSUSE-Leap-15.3.x86_64-NoCloud.qcow2
- EOF
+  url: https://<server-ip-to-host-image>:8000/<image-name>
+EOF
 ----
++
+[IMPORTANT]
+====
+{harvester-product-name} can restore virtual machines only if the image name and configuration on both old and new clusters are identical.
+====
 
 ==== Restore a new virtual machine in a new cluster
 
@@ -161,6 +203,24 @@ The `State` will be set to `Ready` once the snapshot is complete.
 image::vm/vm-snapshot-results.png[]
 
 Users can either restore a new virtual machine or replace an existing virtual machine using this snapshot.
+
+[NOTE]
+====
+The network configuration of a virtual machine running an Ubuntu release later than 16.04 is likely managed by `netplan` by default. Before creating backups, you must stop the virtual machine, edit the configuration (*Edit Config -> Advanced Options*), and then restart the virtual machine. Use the following `network` settings as reference for DHCP configuration.
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
+====
 
 === Restore a new virtual machine using a snapshot
 

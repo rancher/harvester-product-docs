@@ -104,9 +104,27 @@ You must manually configure the virtual machine images with the same name on the
 
 ==== Upload the same VM images to a new cluster
 
+. Download the virtual machine image from the existing cluster.
++
+image::vm/download-vm-image.png[]
+
+. Decompress the downloaded image.
++
+----
+$ gzip -d <image.gz>
+----
+
+. Host the image on a server that is accessible to the new cluster.
++
+Example (simple HTTP server):
++
+----
+$ python -m http.server
+----
+
 . Check the existing image name (normally starts with `image-`) and create the same one on the new cluster.
 +
-[,consol]
+[,shell]
 ----
 $ kubectl get vmimages -A
 NAMESPACE   NAME                               DISPLAY-NAME                              SIZE         AGE
@@ -115,21 +133,30 @@ default     image-l7924                        harvester-v1.0.0-rc2-amd64.iso   
 default     image-lvqxn                        opensuse-leap-15.3.x86_64-nocloud.qcow2   568524800    5h35m
 ----
 
-. Apply a VM image YAML with the same name and content in the new cluster.
-
- $ cat <<EOF | kubectl apply -f -
- apiVersion: harvesterhci.io/v1beta1
- kind: VirtualMachineImage
- metadata:
-   name: image-lvqxn
-   namespace: default
- spec:
-   displayName: opensuse-leap-15.3.x86_64-nocloud.qcow2
-   pvcName: ""
-   pvcNamespace: ""
-   sourceType: download
-   url: http://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.3/images/openSUSE-Leap-15.3.x86_64-NoCloud.qcow2
- EOF
+. Apply a `VirtualMachineImage` YAML with the same name and configuration in the new cluster.
++
+Example:
++
+----
+$ cat <<EOF | kubectl apply -f -
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: image-79hdq
+  namespace: default
+spec:
+  displayName: focal-server-cloudimg-amd64.img
+  pvcName: ""
+  pvcNamespace: ""
+  sourceType: download
+  url: https://<server-ip-to-host-image>:8000/<image-name>
+EOF
+----
++
+[IMPORTANT]
+====
+{harvester-product-name} can restore virtual machines only if the image name and configuration on both old and new clusters are identical.
+====
 
 ==== Restore a new VM in a new cluster
 
