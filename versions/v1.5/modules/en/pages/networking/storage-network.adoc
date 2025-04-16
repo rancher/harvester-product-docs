@@ -2,7 +2,7 @@
 
 Harvester uses Longhorn as its built-in storage system to provide block device volumes for VMs and Pods. If the user wishes to isolate Longhorn replication traffic from the Kubernetes cluster network (i.e. the management network) or other cluster-wide workloads. Users can allocate a dedicated storage network for Longhorn replication traffic to get better network bandwidth and performance.
 
-For more information, please see https://longhorn.io/docs/1.8.1/advanced-resources/deploy/storage-network/[Longhorn Storage Network]
+For more information, see https://documentation.suse.com/cloudnative/storage/1.8.0/en/longhorn-system/networking/storage-network.html[Longhorn Storage Network].
 
 [NOTE]
 ====
@@ -61,21 +61,24 @@ kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/de
 +
 ** IP range should be in IPv4 CIDR format and Longhorn pods use Storage Network as follows:
 +
-** `+instance-manager+` pods: Longhorn Instance Manager components were https://longhorn.io/docs/1.5.0/deploy/important-notes/#instance-managers-consolidated[consolidated in Longhorn v1.5.0]. The Engine Instance Manager and Replica Instance Manager are now deprecated. One IP is required for each node. During an upgrade, two versions of these pods will exist (old and new), and the old version will be deleted once the upgrade is successful.
+*** `+instance-manager+` pods: Longhorn Instance Manager components were consolidated in Longhorn v1.5.0. The Engine Instance Manager and Replica Instance Manager are now deprecated. One IP is required for each node. During an upgrade, two versions of these pods will exist (old and new), and the old version will be deleted once the upgrade is successful.
 +
-** `backing-image-ds` pods: These are employed to process on-the-fly uploads and downloads of backing image data sources. These pods will be removed once the image uploads or downloads are completed.
+*** `backing-image-ds` pods: These are employed to process on-the-fly uploads and downloads of backing image data sources. These pods will be removed once the image uploads or downloads are completed.
 +
-** `backing-image-manager` pods: 1 IP per disk, similar to the instance manager pods. Two versions of these will coexist during an upgrade, and the old ones will be removed after the upgrade is completed.
+*** `backing-image-manager` pods: 1 IP per disk, similar to the instance manager pods. Two versions of these will coexist during an upgrade, and the old ones will be removed after the upgrade is completed.
 +
 ** The required number of IPs is calculated using a simple formula: `Required Number of IPs = (Number of Nodes * 2) + (Number of Disks * 2) + Number of Images to Download/Upload`
 +
 Example: If a cluster has five nodes with two disks each, and ten images will be uploaded simultaneously, the IP range should be greater than or equal to `/26` (`(5 * 2) + (5 * 2) + 10 = 30`).
++
+* Exclude IP addresses that Longhorn pods and the storage network must not use, such as addresses reserved for xref:../integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX volume support], the gateway, and other components.
 
 We will take the following configuration as an example to explain the details of the Storage Network
 
-* VLAN ID for Storage Network: `100`
-* Cluster Network: `storage`
+* VLAN ID for storage network: `100`
+* Cluster network: `storage`
 * IP range: `192.168.0.0/24`
+* IP address to be excluded: `192.168.0.1/32`
 
 == Configuration Process
 
@@ -130,9 +133,12 @@ The value format is JSON string or empty string as shown in below.
 [,json]
 ----
 {
-    "vlan": 100,
-    "clusterNetwork": "storage",
-    "range": "192.168.0.0/24"
+  "vlan": 100,
+  "clusterNetwork": "storage",
+  "range": "192.168.0.0/24",
+  "exclude":[
+    "192.168.0.100/32"
+  ]
 }
 ----
 
@@ -144,7 +150,7 @@ apiVersion: harvesterhci.io/v1beta1
 kind: Setting
 metadata:
   name: storage-network
-value: '{"vlan":100,"clusterNetwork":"storage","range":"192.168.0.0/24"}'
+value: '{"vlan":100,"clusterNetwork":"storage","range":"192.168.0.0/24", "exclude":["192.168.0.100/32"]}'
 ----
 
 [CAUTION]
