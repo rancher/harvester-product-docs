@@ -134,15 +134,11 @@ Make sure to check <<Upgrade support matrix>> section first about upgradable ver
 
 == Free system partition space requirement
 
-_Available as of v1.2.0_
-
-The minimum free system partition space requirement in Harvester v1.2.0 is 30 GiB, which will be revised in each release.
-
-Harvester will check the amount of free system partition space on each node when you select *Upgrade*. If any node does not meet the requirement, the upgrade will be denied as follows
+{harvester-product-name} checks the amount of free system partition space on each node when you select *Upgrade*. If any node does not meet the requirement, the upgrade is denied as follows:
 
 image::upgrade/upgrade_free_space_check.png[]
 
-If some nodes do not have enough free system partition space, but you still want to try upgrading, you can customize the upgrade by updating the `harvesterhci.io/minFreeDiskSpaceGB` annotation of `Version` object.
+If you want to try upgrading even if the free system partition space is insufficient on some nodes, you can update the `harvesterhci.io/minFreeDiskSpaceGB` annotation of the `Version` object.
 
 [,yaml]
 ----
@@ -163,6 +159,28 @@ spec:
 [CAUTION]
 ====
 Setting a smaller value than the pre-defined value may cause the upgrade to fail and is not recommended in a production environment.
+====
+
+The following sections describe solutions for issues related to this requirement.
+
+=== Free system partition space manually
+
+{harvester-product-name} attempts to remove unnecessary container images after an upgrade is completed. However, this automatic image cleanup may not be performed for various reasons. You can use https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[a script] to manually remove images. For more information, see issue https://github.com/harvester/harvester/issues/6620[#6620].
+
+=== Set up a private container registry and skip image preloading
+
+The system partition might still lack free space even after you remove images. To address this, set up a private container registry for both current and new images, and configure the setting xref:../installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`] with following value:
+
+[,shell]
+----
+{"imagePreloadOption":{"strategy":{"type":"skip"}}, "restoreVM": false}
+----
+
+{harvester-product-name} skips the upgrade image preloading process. When the deployments on the nodes are upgraded, the container runtime loads the images stored in the private container registry.
+
+[CAUTION]
+====
+Do not rely on the public container registry. Note any potential internet service interruptions and how close you are to reaching your https://www.docker.com/increase-rate-limits[Docker Hub rate limit]. Failure to download any of the required images may cause the upgrade to fail and may leave the cluster in a middle state.
 ====
 
 == Longhorn Manager Crashes Due to Backing Image Eviction
