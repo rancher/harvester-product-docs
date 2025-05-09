@@ -163,6 +163,28 @@ spec:
 Setting a smaller value than the pre-defined value may cause the upgrade to fail and is not recommended in a production environment.
 ====
 
+The following sections describe solutions for issues related to this requirement.
+
+=== Free system partition space manually
+
+{harvester-product-name} attempts to remove unnecessary container images after an upgrade is completed. However, this automatic image cleanup may not be performed for various reasons. You can use https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[a script] to manually remove images. For more information, see issue https://github.com/harvester/harvester/issues/6620[#6620].
+
+=== Set up a private container registry and skip image preloading
+
+The system partition might still lack free space even after you remove images. To address this, set up a private container registry for both current and new images, and configure the setting xref:../installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`] with following value:
+
+[,json]
+----
+{"imagePreloadOption":{"strategy":{"type":"skip"}}, "restoreVM": false}
+----
+
+{harvester-product-name} skips the upgrade image preloading process. When the deployments on the nodes are upgraded, the container runtime loads the images stored in the private container registry.
+
+[CAUTION]
+====
+Do not rely on the public container registry. Note any potential internet service interruptions and how close you are to reaching your https://www.docker.com/increase-rate-limits[Docker Hub rate limit]. Failure to download any of the required images may cause the upgrade to fail and may leave the cluster in a middle state.
+====
+
 == Virtual Machine Backup Compatibility
 
 You may encounter certain limitations when creating and restoring backups that involve external storage.
