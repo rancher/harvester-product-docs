@@ -9,13 +9,13 @@ Here are some tips to troubleshoot a failed upgrade:
 
 == Investigate the Upgrade Flow
 
-The Harvester upgrade process includes several phases.
+The upgrade process includes several phases.
 
 image::upgrade/ts_upgrade_phases.png[]
 
 === Phase 1: Provision upgrade repository VM.
 
-The Harvester controller downloads a Harvester release ISO file and uses it to provision a VM. During this phase you can see the upgrade status windows show:
+The {harvester-product-name} controller downloads a release ISO file and uses it to provision a VM. During this phase you can see the upgrade status windows show:
 
 image::upgrade/ts_status_phase1.png[]
 
@@ -35,7 +35,7 @@ virt-launcher-upgrade-repo-hvst-upgrade-9gmg2-4mnmq     1/1     Running     0   
 
 === Phase 2: Preload container images
 
-The Harvester controller creates jobs on each Harvester node to download images from the repository VM and preload them. These are the container images required for the next release.
+The {harvester-product-name} controller creates jobs on each node to download images from the repository VM and preload them. These are the container images required for the next release.
 
 During this stage you can see the upgrade status windows shows:
 
@@ -59,7 +59,7 @@ It's also safe to <<Start over an upgrade,start over the upgrade>> if an upgrade
 
 image::upgrade/ts_status_phase3.png[]
 
-In this phase, Harvester controller upgrades component Helm charts with a job. The user can check the `apply-manifest` job with the following command:
+The {harvester-product-name} controller upgrades component Helm charts with a job. The user can check the `apply-manifest` job with the following command:
 
 [,console]
 ----
@@ -75,7 +75,7 @@ $ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
 
 image::upgrade/ts_status_phase4.png[]
 
-The Harvester controller creates jobs on each node (one by one) to upgrade nodes' OSes and RKE2 runtime. For multi-node clusters, there are two kinds of jobs to update a node:
+The {harvester-product-name} controller creates jobs on each node (one by one) to upgrade nodes' OSes and RKE2 runtime. For multi-node clusters, there are two kinds of jobs to update a node:
 
 * *pre-drain* job: live-migrate or shutdown VMs on a node. When the job completes, the embedded Rancher service upgrades RKE2 runtime on a node.
 * *post-drain* job: upgrade OS and reboot.
@@ -99,37 +99,90 @@ $ kubectl logs -n harvester-system jobs/hvst-upgrade-9gmg2-post-drain-node2
 
 [CAUTION]
 ====
-Please do not start over an upgrade if the upgrade fails at this phase.
+Do not <<Restart the upgrade,restart the upgrade>> if the process fails at this point. Identify the cause and then contact https://www.suse.com/support[SUSE Support], if necessary.
 ====
 
 === Phase 5: Clean-up
 
-The Harvester controller deletes the upgrade repository VM and all files that are no longer needed.
+The {harvester-product-name} controller deletes the upgrade repository VM and all files that are no longer needed.
 
 == Common operations
 
-=== Start over an upgrade
+=== Stop the ongoing upgrade
+
+[CAUTION]
+====
+If an ongoing upgrade fails or becomes stuck at <<Phase 4: Upgrade nodes>>, identify the cause first.
+====
+
+You can stop the upgrade by performing the following steps:
 
 . Log in to a control plane node.
-. List `Upgrade` CRs in the cluster:
+
+. Retrieve a list of `Upgrade` CRs in the cluster.
 +
+[,console]
 ----
- # become root
- $ sudo -i
+# become root
+$ sudo -i
 
- # list the on-going upgrade
- $ kubectl get upgrade.harvesterhci.io -n harvester-system -l harvesterhci.io/latestUpgrade=true
- NAME                 AGE
- hvst-upgrade-9gmg2   10m
+# list the on-going upgrade
+$ kubectl get upgrade.harvesterhci.io -n harvester-system -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-9gmg2   10m
 ----
 
-. Delete the Upgrade CR
+. Delete the `Upgrade` CR.
 +
+[,console]
 ----
- $ kubectl delete upgrade.harvesterhci.io/hvst-upgrade-9gmg2 -n harvester-system
+$ kubectl delete upgrade.harvesterhci.io/hvst-upgrade-9gmg2 -n harvester-system
 ----
 
-. Click the upgrade button in the Harvester dashboard to start an upgrade again.
+. Resume the paused ManagedCharts.
++
+ManagedCharts are paused to avoid a data race between the upgrade and other processes. You must manually resume all paused ManagedCharts.
++
+[,console]
+----
+cat > resumeallcharts.sh << 'FOE'
+resume_all_charts() {
+
+  local patchfile="/tmp/charttmp.yaml"
+  
+  cat >"$patchfile" << 'EOF'
+spec:
+  paused: false
+EOF
+  echo "the to-be-patched file"
+  cat "$patchfile"
+
+  local charts="harvester harvester-crd rancher-monitoring-crd rancher-logging-crd"
+
+  for chart in $charts; do
+    echo "unapuse managedchart $chart"
+    kubectl patch managedcharts.management.cattle.io $chart -n fleet-local --patch-file "$patchfile" --type merge || echo "failed, check reason"
+  done
+
+  rm "$patchfile"
+}
+
+resume_all_charts
+
+FOE
+
+chmod +x ./resumeallcharts.sh
+
+./resumeallcharts.sh
+----
+
+=== Restart the upgrade
+
+. <<Stop the ongoing upgrade>>.
+
+. Click the *Upgrade* button on the UI *Dashboard* screen.
++
+If you xref:./upgrades.adoc#_customize_the_version[customized the version], you might need to xref:./upgrades.adoc#_prepare_the_version[create the version object] again.
 
 === Download upgrade logs
 
@@ -145,7 +198,7 @@ Log entries will be collected as files for each upgrade-related Pod, even for in
 
 image::upgrade/upgradelog_archive.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
 
-After the upgrade ended, Harvester stops collecting the upgrade logs to avoid occupying the disk space. In addition, you can click the *Dismiss it* button to purge the upgrade logs.
+After the upgrade ended, {harvester-product-name} stops collecting the upgrade logs to avoid occupying the disk space. In addition, you can click the *Dismiss it* button to purge the upgrade logs.
 
 image::upgrade/dismiss_upgrade_to_remove_upgradelog.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
 
@@ -200,7 +253,7 @@ deployment.apps/hvst-upgrade-xxxxx-upgradelog-downloader scaled
 
 The default value of `imageGCHighThresholdPercent` in https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration[KubeletConfiguration] is `85`. When disk usage exceeds 85%, the kubelet attempts to remove unused images.
 
-New images are loaded to each Harvester node during upgrades. When disk usage exceeds 85%, these new images may be marked for cleanup because they are not used by any containers. In air-gapped environments, removal of new images from the cluster may break the upgrade process.
+New images are loaded to each {harvester-product-name} node during upgrades. When disk usage exceeds 85%, these new images may be marked for cleanup because they are not used by any containers. In air-gapped environments, removal of new images from the cluster may break the upgrade process.
 
 If you encounter the error message `Node xxx will reach xx.xx% storage space after loading new images. It's higher than kubelet image garbage collection threshold 85%.`, run `crictl rmi --prune` to clean up unused images before starting a new upgrade.
 
