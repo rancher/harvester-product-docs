@@ -1,0 +1,47 @@
+= Post-Installation Tasks
+
+You can enhance the security and performance of your {harvester-product-name} cluster by performing the following procedures after installation is completed.
+
+== Disable the SSH password authentication
+
+By default, SSH password authentication is enabled on {harvester-product-name} nodes during installation. This allows the administrator to access the nodes for post-installation diagnosis.
+
+Once installation is completed, however, disabling SSH password authentication is recommended. You can run the following command, which uses `kubectl` to apply a https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`] configuration, to disable SSH password authentication on all {harvester-product-name} nodes:
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* The `matchSelector` field is used to select {harvester-product-name} nodes with specific labels.
+* All the affected nodes must be rebooted for the `CloudInit` configuration to take effect.
+====
+
+Once the configuration is applied, any attempts to access the {harvester-product-name} nodes with the SSH password are denied.
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----
