@@ -2,7 +2,7 @@
 
 == Replace Ethernet NICs
 
-You may want to replace the Ethernet NICs of a bare-metal node in a Harvester cluster for various reasons, including the following:
+You may want to replace the Ethernet NICs of a bare-metal node in a {harvester-product-name} cluster for various reasons, including the following:
 
 * Malfunction or damage
 * Insufficent hardware capacity
@@ -12,17 +12,17 @@ You can follow the steps below and run them in each node step by step.
 
 === Pre-Replacement Checks
 
-. Verify that the installed Harvester version supports the new NICs.
+. Verify that the installed {harvester-product-name} version supports the new NICs.
 . Test the new NICs in non-production environment.
-. On the xref:/virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[*Virtual Machines* screen of the Harvester UI], verify that the status of all VMs is either __Running__ or __Stopped__.
-. On the xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[embedded Longhorn dashboard], verify that the status of all Longhorn volumes is __Healthy__.
+. On the xref:/virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[*Virtual Machines* screen of the {harvester-product-name} UI], verify that the status of all VMs is either __Running__ or __Stopped__.
+. On the xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[embedded {longhorn-product-name} UI], verify that the status of all {longhorn-product-name} volumes is __Healthy__.
 . (Optional) On the *Harvester Support* screen, generate a xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[support bundle] for comparison purposes.
 
 === Collect Information
 
 Before any action is taken, it is important to collect the current network information and status.
 
-* Harvester network configuration: By default, Harvester creates a bond interface named `mgmt-bo` for the management network and one new bond interface for each cluster network. Harvester saves network configuration details in the file `/oem/90_custom.yaml`.
+* {harvester-product-name} network configuration: By default, {harvester-product-name} creates a bond interface named `mgmt-bo` for the management network and one new bond interface for each cluster network. {harvester-product-name} saves network configuration details in the file `/oem/90_custom.yaml`.
 +
 Example: A NIC named `ens3` was added to the `mgmt-bo` bond interface.
 +
@@ -94,7 +94,7 @@ Example (`lspci -v`):
 
 * Linux kernel log: You can use the command `dmesg` to display kernel messages, which include most of the required information. If you save the messages to `kernel.log`, you can check the driver and link status.
 +
-Harvester places sub-NICs into the bond interfaces. In the following example, an additional bond interface named `data-bo` is created in the cluster.
+{harvester-product-name} places sub-NICs into the bond interfaces. In the following example, an additional bond interface named `data-bo` is created in the cluster.
 +
 ----
   $ grep "(slave" kernel.log  (or: dmesg | grep "(slave")
@@ -158,7 +158,7 @@ The enabled NICs are detected.
 
 === (Optional) Update the Network Config
 
-There are one or more xref:./cluster-network.adoc#_create_a_new_cluster_network[Network Config] under every xref:./cluster-network.adoc#_cluster_network[Cluster Network] on Harvester. Each `Network Config` is backed by a `VlanConfig` CRD object.
+There are one or more xref:./cluster-network.adoc#_create_a_new_cluster_network[Network Config] under every xref:./cluster-network.adoc#_cluster_network[Cluster Network] on {harvester-product-name}. Each `Network Config` is backed by a `VlanConfig` CRD object.
 
 [IMPORTANT]
 ====
@@ -167,7 +167,7 @@ Updating the `Network Config` is *required* if the new NICs will be placed in di
 
 . Check the node.
 +
-When a Harvester cluster node belongs to a `Network Config`, the `Node` object has a label with the key `network.harvesterhci.io/vlanconfig`.
+When a {harvester-product-name} cluster node belongs to a `Network Config`, the `Node` object has a label with the key `network.harvesterhci.io/vlanconfig`.
 +
 Example:
 +
@@ -238,25 +238,23 @@ Example:
 
 === (Optional) Drain the Node
 
-You may find that some Longhorn replicas remain active on the node even after completing the previously outlined procedures.
+You may find that some {longhorn-product-name} replicas remain active on the node even after completing the previously outlined procedures.
 
-. Drain the node. (This is optional in Harvester.)
- ** Scenario 1: The `numReplicas` value of all volumes is `3`, which means that each Longhorn volume has three active replicas.
+. Drain the node. (This is optional in {harvester-product-name}.)
+ ** Scenario 1: The `numReplicas` value of all volumes is `3`, which means that each {longhorn-product-name} volume has three active replicas.
 +
-The Longhorn Engine recognizes that it can no longer communicate with the replica on the drained node, and then marks that replica as failed. None of the replicas hold any special significance to Longhorn so it functions as long as it can communicate with at least one replica.
+The Longhorn Engine recognizes that it can no longer communicate with the replica on the drained node, and then marks that replica as failed. None of the replicas hold any special significance to {longhorn-product-name} so it functions as long as it can communicate with at least one replica.
 
- ** Scenario 2: Some Longhorn volumes have _fewer_ than three active replicas, or you manually attached volumes using the Harvester UI or Longhorn UI.
+ ** Scenario 2: Some {longhorn-product-name} volumes have _fewer_ than three active replicas, or you manually attached volumes using the {harvester-product-name} UI or {longhorn-product-name} UI.
 +
-You must manually detach the replicas or move them to other nodes, and then https://longhorn.io/docs/1.4.3/volumes-and-nodes/maintenance/#updating-the-node-os-or-container-runtime[drain the node] using the command `kubectl drain --ignore-daemonsets <node name>`. The option `--ignore-daemonsets` is required because Longhorn deploys daemonsets such as Longhorn Manager, Longhorn CSI plugin, and Longhorn Engine image.
+You must manually detach the replicas or move them to other nodes, and then https://documentation.suse.com/cloudnative/storage/1.8.0/en/troubleshooting-maintenance/maintenance.html#_updating_the_node_os_or_container_runtime[drain the node] using the command `kubectl drain --ignore-daemonsets <node name>`. The option `--ignore-daemonsets` is required because {longhorn-product-name} deploys daemonsets such as Longhorn Manager, Longhorn CSI plugin, and Longhorn Engine image.
 +
 Replicas running on the node are stopped and marked as `Failed`. Longhorn Engine processes running on the node are migrated with the pod to other nodes. Once the node is fully drained, no replicas and engine processes should remain running on the node.
 . Replenish replicas.
 +
-After a node is shut down, Longhorn does not start rebuilding the replicas on other nodes until the `replica-replenishment-wait-interval` (default value: 600 seconds) is reached. If the node comes back online before the wait interval value is reached, Longhorn reuses the replicas. Otherwise, Longhorn rebuilds the replicas on another node.
+After a node is shut down, {longhorn-product-name} does not start rebuilding the replicas on other nodes until the `replica-replenishment-wait-interval` (default value: 600 seconds) is reached. If the node comes back online before the wait interval value is reached, {longhorn-product-name} reuses the replicas. Otherwise, {longhorn-product-name} rebuilds the replicas on another node.
 +
-During system maintenance, you can modify the https://longhorn.io/docs/1.4.3/references/settings/#replica-replenishment-wait-interval[`replica-replenishment-wait-interval`] value using the xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[embedded Longhorn UI] to enable faster replica rebuilding.
-+
-Harvester v1.3.0 uses Longhorn v1.6.0, while Harvester v1.2.1 uses Longhorn v1.4.3.
+During system maintenance, you can modify the https://documentation.suse.com/cloudnative/storage/1.8.0/en/longhorn-system/settings.html#_replica_replenishment_wait_interval[`replica-replenishment-wait-interval`] value using the xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[embedded {longhorn-product-name} UI] to enable faster replica rebuilding.
 
 === Replace the Nics
 
@@ -295,7 +293,7 @@ The status of the `VlanStatus` object's `ready` condition changes to `"True"`.
 
 === Troubleshooting
 
-Harvester uses multiple network-related pods and CRDs. When troubleshooting, check the pod logs and the status of CRD objects.
+{harvester-product-name} uses multiple network-related pods and CRDs. When troubleshooting, check the pod logs and the status of CRD objects.
 
 Pods:
 
