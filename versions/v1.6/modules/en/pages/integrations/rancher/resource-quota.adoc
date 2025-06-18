@@ -2,7 +2,7 @@
 
 https://kubernetes.io/docs/concepts/policy/resource-quotas/[ResourceQuota] is used to limit the usage of resources within a namespace. It helps administrators control and restrict the allocation of cluster resources to ensure fairness and controlled resource distribution among namespaces.
 
-In Harvester, ResourceQuota can define usage limits for the following resources:
+In {harvester-product-name}, ResourceQuota can define usage limits for the following resources:
 
 * *CPU*: Limits compute resource usage, including CPU cores and CPU time.
 * *Memory*: Limits the usage of memory resources in bytes or other recognizable memory units.
@@ -10,15 +10,25 @@ In Harvester, ResourceQuota can define usage limits for the following resources:
 
 == Set ResourceQuota via Rancher
 
-xref:./virtualization-management.adoc[Test]
+Administrators can configure resource quotas for namespaces by performing the following steps:
 
-In the Rancher UI, administrators can configure resource quotas for namespaces through the following steps:
+. On the {rancher-short-name} UI, go to *≡ -> Virtualization Management*.
 
-. Click the hamburger menu and choose the *Virtualization Management* tab.
-. Choose one of the clusters and go to *Projects/Namespaces* > *Create Project*.
-. Specify the desired project *Name*. Next, go to the *Resource Quotas* tab and select the *Add Resource* option. Within the *Resource Type* field, select either *CPU Limit* or *Memory Limit* and define the *Project Limit* and *Namespace Default Limit* values.
+. Select a cluster, go to *Projects/Namespaces*, and then click *Create Project*.
+
+. In the general information section, specify a name and description for the project.
+
+. On the *Resource Quotas* tab, click *Add Resource*, select a resource type, and specify the corresponding limit values.
 +
 image::rancher/create-project.png[]
+
+. Click *Create*.
+
+[NOTE]
+====
+The *VM Default Resource Limit* tab contains resource reservation and limit settings that are applied only to pod workloads running within the namespace.
+Values configured on this tab correspond to the `defaultRequest` and `default` values of the namespace's https://kubernetes.io/docs/concepts/policy/limit-range/[`LimitRange`] policy. These settings may be removed in a future release.
+====
 
 You can configure the *Namespace* limits as follows:
 
@@ -30,7 +40,7 @@ image::rancher/create-namespace.png[]
 
 [NOTE]
 ====
-Attempts to provision virtual machines for guest clusters are blocked when the resource quotas are reached. Rancher responds by creating a new virtual machine in a loop, in which each failed creation attempt is immediately followed by another attempt. This results in a transient error state in the cluster that is not recorded as the virtual machine is recreated.
+Attempts to provision virtual machines for guest clusters are blocked when the resource quotas are reached. {rancher-short-name} responds by creating a new virtual machine in a loop, in which each failed creation attempt is immediately followed by another attempt. This results in a transient error state in the cluster that is not recorded as the virtual machine is recreated.
 ====
 
 == Overhead memory of virtual machine
@@ -69,12 +79,12 @@ For more information on how the memory overhead is calculated in Kubevirt, refer
 
 When the allocated resource quota controlled by the `ResourceQuota` object reaches its limit, migrating a VM becomes unfeasible. The migration process automatically creates a new pod mirroring the resource requirements of the source VM. If these pod creation prerequisites surpass the defined quota, the migration operation cannot proceed.
 
-In Harvester, the `ResourceQuota` values will dynamically expand ahead of migration to accommodate the resource needs of the target virtual machine. After migration, the ResourceQuotas will be reinstated to their prior configurations.
+In {harvester-product-name}, the `ResourceQuota` values will dynamically expand ahead of migration to accommodate the resource needs of the target virtual machine. After migration, the ResourceQuotas will be reinstated to their prior configurations.
 
 Please be aware of the following constrains of the automatic resizing of `ResourceQuota`:
 
 * `ResourceQuota` cannot be changed during VM migration.
-* When raising the `ResourceQuota` value, if you create, start, or restore other VMs, Harvester will verify if the resources are sufficient based on the original `ResourceQuota`. If the conditions are not met, the system will alert that the migration process is not feasible.
+* When raising the `ResourceQuota` value, if you create, start, or restore other VMs, {harvester-product-name} will verify if the resources are sufficient based on the original `ResourceQuota`. If the conditions are not met, the system will alert that the migration process is not feasible.
 * After expanding `ResourceQuota`, potential resource contention may occur between non-VM pods and VM pods, leading to migration failures. Therefore, deploying custom container workloads and VMs to the same namespace is not recommended.
 * Due to the concurrent limitation of the webhook validator, the VM controller will execute a secondary validation to confirm resource sufficiency. If the resource is insufficient, it will auto config the VM's `RunStrategy` to `Halted`, and a new annotation `harvesterhci.io/insufficient-resource-quota` will be added to the VM object, informing you that the VM was shut down due to insufficient resources.
 +
@@ -82,9 +92,9 @@ image::rancher/vm-annotation-insufficient-resource-quota.png[]
 
 === Disable Automatic Adjustment of ResourceQuota During Migration
 
-When a `ResourceQuota` object has the annotation `harvesterhci.io/skipResourceQuotaAutoScaling: "true"`, Harvester does not automatically adjust the values of that object. This feature is useful for debugging, troubleshooting and other tasks.
+When a `ResourceQuota` object has the annotation `harvesterhci.io/skipResourceQuotaAutoScaling: "true"`, {harvester-product-name} does not automatically adjust the values of that object. This feature is useful for debugging, troubleshooting and other tasks.
 
 [IMPORTANT]
 ====
-You must set the annotation before the migration starts. If the annotation is set while the values are already being adjusted, Harvester is unable to automatically restore the previous configuration.
+You must set the annotation before the migration starts. If the annotation is set while the values are already being adjusted, {harvester-product-name} is unable to automatically restore the previous configuration.
 ====
