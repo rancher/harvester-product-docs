@@ -7,18 +7,54 @@
 UI::
 +
 --
-**Header Section**
+*Header Section*
 
 . Set the Volume `Name`.
 . (Optional) Provide a `Description` for the Volume. 
 
-**Basics Tab**
+*Basics Tab*
 
 . Choose `New` in `Source`. 
 . Select an existing `StorageClass`. 
 . Configure the `Size` of the volume.
 +
 image::volume/create-empty-volume.png[create empty volume]
+
+*Oversized volumes*
+
+In {harvester-product-name} v1.4.3, which uses {longhorn-product-name} v1.7.3, oversized volumes (for example, 999999 Gi in size) are marked **Not Ready** and cannot be deleted.
+
+To resolve this issue, perform the following steps:
+
+. Temporarily remove the PVC webhook rule.
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. Wait for the related PVC to be deleted.
+
+. Restore the PVC webhook rule to re-enable validation.
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+The issue will be addressed in {longhorn-product-name} v1.8.2, which will likely be included in {harvester-product-name} v1.5.1.
+
+Related issues: https://github.com/harvester/harvester/issues/8096[#8096] and https://github.com/longhorn/longhorn/issues/10741[#10741]
 --
 
 API::
@@ -45,7 +81,7 @@ spec:
 
 Terraform::
 +
-To create an empty volume on Harvester with Terraform using the https://registry.terraform.io/providers/harvester/harvester/latest[Harvester Terraform Provider], define a `harvester_volume` resource block: 
+To create an empty volume on {harvester-product-name} with Terraform using the https://registry.terraform.io/providers/harvester/harvester/latest[Harvester Terraform Provider], define a `harvester_volume` resource block: 
 +
 [,json]
 ----
@@ -78,7 +114,7 @@ UI::
 +
 [CAUTION]
 ====
-When creating volumes from a VM image, ensure that the volume size is greater than or equal to the image size. The volume may become corrupted if the configured volume size is less than the size of the underlying image. This is particularly important for qcow2 images because the virtual size is typically greater than the physical size. By default, Harvester will set the volume size to the virtual size of the image.
+When creating volumes from a VM image, ensure that the volume size is greater than or equal to the image size. The volume may become corrupted if the configured volume size is less than the size of the underlying image. This is particularly important for qcow2 images because the virtual size is typically greater than the physical size. By default, {harvester-product-name} will set the volume size to the virtual size of the image.
 ====
 +
 image::volume/create-image-volume.png[create image volume]
@@ -112,7 +148,7 @@ spec:
 
 Terraform::
 +
-To create a volume on Harvester using Terraform and initialize it with the contents of an image, define a `harvester_volume` resource block and set the `image` property:
+To create a volume on {harvester-product-name} using Terraform and initialize it with the contents of an image, define a `harvester_volume` resource block and set the `image` property:
 +
 [,json]
 ----
