@@ -53,27 +53,29 @@ In the diagram above, we can see that:
 
 Overall, this diagram provides a clear visualization of the relationship between cluster networks, network configurations, and VM networks, as well as how they impact VM scheduling on hosts.
 
-== Cluster Network Details
+== Cluster network details
 
-=== Built-in Cluster Network
+Cluster networks are traffic-isolated forwarding paths for transmission of network traffic within a Harvester cluster.
 
-{harvester-product-name} provides a built-in cluster network called `mgmt`. It's different from the custom cluster network. The `mgmt` cluster network:
+A cluster network called `mgmt` is automatically created when a Harvester cluster is deployed. You can also create custom cluster networks that can be dedicated to virtual machine traffic.
 
-* Cannot be deleted.
-* Does not need any network configuration.
-* Is enabled on all hosts and cannot be disabled.
-* Shares the same traffic egress with the management network.
+=== Built-in cluster network
 
-If there is no need for traffic separation, you can put all your network under the mgmt cluster network.
+When a {harvester-product-name} cluster is deployed, a cluster network named `mgmt` is automatically created for intra-cluster communications. `mgmt` consists of the same bridge, bond, and NICs as the external infrastructure network to which each {harvester-product-name} host attaches with management NICs. Because of this design, `mgmt` also allows virtual machines to be accessed from the external infrastructure network for cluster management purposes.
 
-=== Custom Cluster Network
+`mgmt` does not require a network configuration and is always enabled on all hosts. You cannot disable and delete `mgmt`.
 
-You are allowed to add the custom cluster network, which will not be available until it's enabled on some hosts by adding a network configuration.
+[CAUTION]
+====
+Certain https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt[ARP settings] can break cluster communications. With `arp_ignore=2`, for example, replies are sent only if the sender IP address is in the same subnet as the target IP address for which the MAC address is requested. This is not the case in a {harvester-product-name} cluster, so using `arp_ignore=2` on all interfaces results in failed connectivity checks and prevents {longhorn-product-name} pods (specifically, `backing-image` and `instance-manager`) from transitioning to the `Ready` state. Volumes cannot be attached to virtual machines if these {longhorn-product-name} pods are not ready.
+====
+
+=== Custom cluster network
+
+If more than one network interface is attached to each host, you can create custom cluster networks for better traffic isolation. Each cluster network must have at least one network configuration with a defined scope and bonding mode.
 
 [NOTE]
 ====
-Before creating a new cluster network, ensure that the xref:../installation-setup/requirements.adoc#_hardware_requirements[hardware requirements] are met.
-
 The xref:../hosts/witness-node.adoc[witness node] is generally not involved in the custom cluster network.
 ====
 
@@ -85,6 +87,8 @@ The xref:../hosts/witness-node.adoc[witness node] is generally not involved in t
 ====
 To simplify cluster maintenance, create one network configuration for each node or group of nodes. Without dedicated network configurations, certain maintenance tasks (for example, replacing old NICs with NICs in different slots) will require you to stop and/or migrate the affected virtual machines before updating the network configuration.
 ====
+
+. Ensure that the xref:../installation-setup/requirements.adoc#_hardware_requirements[hardware requirements] are met.
 
 . Go to *Networks -> ClusterNetworks/Configs*, and then click *Create*.
 
@@ -111,14 +115,21 @@ image::networking/select-nodes.png[Network configuration node selector]
 . On the *Uplink* tab, configure the following settings:
 +
 ** *NICs*: The list contains NICs that are common to all selected nodes. NICs that cannot be selected are unavailable on one or more nodes and must be configured. Once troubleshooting is completed, refresh the screen and verify that the NICs can be selected.
-** *Bond Options*: The default value is *active-backup*.
-** *Attributes*
+** *Bond Options*: The default bonding mode is `active-backup`.
+** *Attributes*: You must use the same MTU across all network configurations of a custom cluster network. If you do not specify an MTU, the default value `1500` is used.
 +
 image::networking/config-uplink.png[Network configuration uplink settings]
+
+. Click *Save*.
 
 === Change a network configuration
 
 Changes to existing network configurations may affect {harvester-product-name} virtual machines and workloads, and external devices such as switches and routers. For more information, see xref:./deep-dive.adoc#_network_topology[Network Topology].
+
+[IMPORTANT]
+====
+You must stop all affected virtual machines before changing a network configuration.
+====
 
 The following sections outline the steps you must perform to change the MTU of a network configuration. The sample cluster network used in these sections has `cn-data` that was built with an MTU value of `1500` and is intended to be changed to `9000`.
 
@@ -169,7 +180,7 @@ When the state is `UNKNOWN`, it is likely that the MTU values on {harvester-prod
 +
 You must send the messages to a {harvester-product-name} node with the new MTU or a node with an external IP.
 +
-In the following example, the CIDR `192.168.100.0/24` and gateway `192.168.100.1` are prepared for the `cn-data` network.
+In the following example, the network is `cn-data`, the CIDR is `192.168.100.0/24`, and the gateway is `192.168.100.1`.
 +
 .. Set the IP `192.168.100.100` on the bridge device.
 +
@@ -223,7 +234,7 @@ $ ip addr delete 192.168.100.100/24 dev cn-data-br
 +
 [IMPORTANT]
 ====
-You must change the MTU in each one, and verify that the new MTU was applied.
+You must change the MTU in each network configuration, and verify that the new MTU was applied.
 ====
 
 . Edit the YAML of all virtual machine networks that are attached to the target cluster network.
@@ -270,7 +281,7 @@ You can also use `kubectl` to change the MTU. In the following example, the netw
 
 . Start all virtual machines that are attached to the target cluster network.
 +
-The virtual machines should have inherited the new MTU. You can verify this in the guest operating system using the Linux `ip link` command and `ping 8.8.8.8 -s 8800` command.
+The virtual machines should have inherited the new MTU. You can verify this in the guest operating system using the commands `ip link` and `ping 8.8.8.8 -s 8800`.
 
 . Verify that the virtual machine workloads are running normally.
 
@@ -312,7 +323,7 @@ If multiple network configurations exist, record the node selector for each and 
 You must also change the MTU on the peer external switch or router.
 ====
 
-. Verify that the MTU was changed using the Linux `ip link` command.
+. Verify that the MTU was changed using the `ip link` command.
 +
 If the network configuration selects multiple {harvester-product-name} nodes, run the command on each node.
 +
@@ -335,7 +346,7 @@ When the state is `UNKNOWN`, it is likely that the MTU values on {harvester-prod
 +
 You must send the messages to a {harvester-product-name} node with the new MTU or to a node with an external IP.
 +
-In the following example, the CIDR `192.168.100.0/24` and gateway `192.168.100.1` are prepared for the `cn-data` network.
+In the following example, the network is `cn-data`, the CIDR is `192.168.100.0/24`, and the gateway is `192.168.100.1`.
 +
 .. Set the IP `192.168.100.100` on the bridge device.
 +
@@ -385,11 +396,16 @@ $ ip route delete 8.8.8.8 via 192.168.100.1 dev cn-data-br
 $ ip addr delete 192.168.100.100/24 dev cn-data-br
 ----
 
-. Add back the network configurations that you removed, change the MTU in each one, and verify that the new MTU was applied.
+. Add back the network configurations that you removed.
++
+[IMPORTANT]
+====
+You must change the MTU in each network configuration, and verify that the new MTU was applied.
+====
 
 . Enable and configure the xref:./storage-network.adoc#_storage_network_setting[storage network setting], ensuring that the xref:./storage-network.adoc#_prerequisites[prerequisites] are met.
-+
-Allow some time for the setting to be enabled, and then xref:./storage-network.adoc#_verify_configuration_is_completed[verify that the change was applied].
+
+. Allow some time for the setting to be enabled, and then xref:./storage-network.adoc#_verify_configuration_is_completed[verify that the change was applied].
 
 . Edit the YAML of all virtual machine networks that are attached to the target cluster network.
 +
