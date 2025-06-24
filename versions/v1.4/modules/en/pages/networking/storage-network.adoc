@@ -1,6 +1,6 @@
 = Storage Network
 
-{harvester-product-name} uses {longhorn-product-name} as its built-in storage system to provide block device volumes for VMs and Pods. If the user wishes to isolate {longhorn-product-name} replication traffic from the Kubernetes cluster network (i.e. the management network) or other cluster-wide workloads. Users can allocate a dedicated storage network for {longhorn-product-name} replication traffic to get better network bandwidth and performance.
+{harvester-product-name} uses {longhorn-product-name} as its built-in storage system to provide block device volumes for virtual machines and pods. If the user wishes to isolate {longhorn-product-name} replication traffic from the Kubernetes cluster network (i.e. the management network) or other cluster-wide workloads. Users can allocate a dedicated storage network for {longhorn-product-name} replication traffic to get better network bandwidth and performance.
 
 For more information, see https://documentation.suse.com/cloudnative/storage/1.7.0/en/longhorn-system/networking/storage-network.html[Storage Network] in the {longhorn-product-name} documentation.
 
@@ -12,7 +12,7 @@ For more information, see https://documentation.suse.com/cloudnative/storage/1.7
 
 == Prerequisites
 
-There are some prerequisites before configuring the {harvester-product-name} storage network setting.
+There are some prerequisites before configuring the {harvester-product-name} `storage-network` setting.
 
 * Well-configured Cluster Network and VLAN Config.
 +
@@ -24,19 +24,19 @@ There are some prerequisites before configuring the {harvester-product-name} sto
 +
 ** `kubectl get -A vmi`
 +
-* All pods that are attached to {longhorn-product-name} Volumes should be stopped.
+* All pods that are attached to {longhorn-product-name} volumes should be stopped.
 +
 * All ongoing image uploads or downloads should be either completed or deleted.
 
 [CAUTION]
 ====
-If the {harvester-product-name} cluster was upgraded from v1.0.3, please check if Whereabouts CNI is installed properly before you move on to the next step. We will always recommend following this guide to check. https://github.com/harvester/harvester/issues/3168[Issue 3168] describes that the {harvester-product-name} cluster will not always install Whereabouts CNI properly.
+If the {harvester-product-name} cluster was upgraded from v1.0.3, please check if Whereabouts CNI is installed properly before you move on to the next step. https://github.com/harvester/harvester/issues/3168[Issue 3168] describes that the {harvester-product-name} cluster will not always install Whereabouts CNI properly.
 
 * Verify the `ippools.whereabouts.cni.cncf.io` CRD exists with the following command.
 +
 ** `kubectl get crd ippools.whereabouts.cni.cncf.io`
 +
-* If the {harvester-product-name} cluster doesn't have `ippools.whereabouts.cni.cncf.io`, please add https://github.com/harvester/harvester/tree/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds[these two CRDs] before configuring `storage-network` setting.
+* If the {harvester-product-name} cluster doesn't have `ippools.whereabouts.cni.cncf.io`, please add https://github.com/harvester/harvester/tree/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds[these two CRDs] before configuring the `storage-network` setting.
 
 [,console]
 ----
@@ -45,7 +45,7 @@ kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/de
 ----
 ====
 
-== Configuration Example
+== Configuration example
 
 * VLAN ID
 +
@@ -73,18 +73,18 @@ Example: If a cluster has five nodes with two disks each, and ten images will be
 +
 * Exclude IP addresses that {longhorn-product-name} pods and the storage network must not use, such as addresses reserved for xref:/integrations/rancher/csi-driver.adoc#_rwx_volume_support[RWX volume support], the gateway, and other components.
 
-We will take the following configuration as an example to explain the details of the storage network
+We will take the following configuration as an example to explain the details of the storage network.
 
 * VLAN ID for storage network: `100`
 * Cluster network: `storage`
 * IP range: `192.168.0.0/24`
 * IP address to be excluded: `192.168.0.1/32`
 
-== Configuration Process
+== Configuration process
 
-{harvester-product-name} will create Multus NetworkAttachmentDefinition from the configuration, stop pods related to {longhorn-product-name} Volume, update {longhorn-product-name} setting, and restart previous pods.
+{harvester-product-name} creates a Multus `NetworkAttachmentDefinition` from the configuration, stops pods related to {longhorn-product-name} volumes, updates {longhorn-product-name} settings, and restarts previous pods.
 
-=== Before applying storage network setting
+=== Before applying the `storage-network` setting
 
 Here we have two cases.
 
@@ -93,7 +93,7 @@ Here we have two cases.
 
 {longhorn-product-name} will send replication traffic through the specific interfaces shown as the red line in the figure.
 
-==== Same Physical Interfaces
+==== Same physical interfaces
 
 Take `eth2` and `eth3` as an example for VM VLAN traffic and {longhorn-product-name} storage network simultaneously.
 
@@ -101,7 +101,7 @@ Please refer Networking page to configure `ClusterNetwork` and `VLAN Config` wit
 
 image::storagenetwork/storagenetwork-same.png[storagenetwork-same.png]
 
-==== Different Physical Interfaces
+==== Different physical interfaces
 
 `eth2` and `eth3` are for VM VLAN Traffic. `eth4` and `eth5` are for {longhorn-product-name} storage network.
 
@@ -109,7 +109,7 @@ Please refer Networking page to configure `ClusterNetwork` and `VLAN Config` wit
 
 image::storagenetwork/storagenetwork-diff.png[storagenetwork-diff.png]
 
-=== Storage network setting
+=== `storage-network` setting
 
 The xref:../installation-setup/config/settings.adoc#_storage_network[`storage-network` setting] allows you to configure the network used to isolate in-cluster storage traffic when segregation is required.
 
@@ -198,7 +198,7 @@ metadata:
 
 Follow the instructions in xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[Change the MTU of a network configuration with an attached storage network].
 
-=== After applying storage network setting
+=== After applying the `storage-network` setting
 
 {harvester-product-name} will stop all pods that are related to {longhorn-product-name} volumes. Currently, {harvester-product-name} has some pods listed below that will be stopped during setting.
 
@@ -216,11 +216,11 @@ Once the {longhorn-product-name} setting is updated, {longhorn-product-name} wil
 {harvester-product-name} will not start VM automatically. Users should check whether the configuration is completed or not in the next section and start VM manually on demand.
 ====
 
-=== Verify Configuration is Completed
+=== Verify that the configuration is completed
 
 ==== Step 1
 
-Check if storage network setting's status is `True` and the type is `configured`.
+Check if the `storage-network` setting's status is `True` and the type is `configured`.
 
 [,bash]
 ----
@@ -443,11 +443,11 @@ The storage network may malfunction because of issues with the external network,
 * Physical NICs (installed on {harvester-product-name} nodes) that are associated with the storage network were not added to the same VLAN in the external switches.
 * The external switches are not correctly connected and configured.
 
-=== Start VM Manually
+=== Start virtual machines manually
 
 After verifying the configuration, users could start VM manually on demand.
 
-== Best Practices
+== Best practices
 
 * When configuring an <<Configuration Example,IP range>> for the storage network, ensure that the allocated IP addresses can service the future needs of the cluster. This is important because {longhorn-product-name} pods (`instance-manager` and `backing-image-manager`) stop running when new nodes are added to the cluster or more disks are added to a node after the storage network is configured, and when the required number of IPs exceeds the allocated IPs. Resolving the issue involves reconfiguring the storage network with the correct IP range.
 
