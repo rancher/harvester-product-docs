@@ -12,7 +12,7 @@ For air-gapped environments, see xref:./upgrades.adoc#_prepare_an_air_gapped_upg
 
 === 1. Air-gapped upgrade stuck with `ImagePullBackOff` error in Fluentd and Fluent Bit pods
 
-The upgrade may become stuck at the very beginning of the process, as indicated by 0% progress and items marked *Pending* in the *Upgrade* dialog of the Harvester UI.
+The upgrade may become stuck at the very beginning of the process, as indicated by 0% progress and items marked *Pending* in the *Upgrade* dialog of the {harvester-product-name} UI.
 
 image::upgrade/upgrade-dialog-with-empty-status.png[]
 
@@ -139,3 +139,59 @@ kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
 The issue will be addressed in {longhorn-product-name} v1.8.2, which will likely be included in {harvester-product-name} v1.5.1.
 
 Related issues: https://github.com/harvester/harvester/issues/8096[#8096] and https://github.com/longhorn/longhorn/issues/10741[#10741]
+
+=== 3. Non-root users on guest clusters unable to access RWX volumes
+
+Non-root users on guest clusters encounter unexpected "Permission denied" errors when accessing RWX volumes. This is caused by a https://github.com/nfs-ganesha/nfs-ganesha/issues/1132[regression issue] in `nfs-ganesha` v6.0+, which affects v1.7.3 of the `longhorn-share-manager` image.
+
+You can resolve the issue by replacing `longhorn-share-manager:v1.7.3` with the hotfixed image `longhorn-share-manager:v1.7.3-hotfix-1`.
+
+[CAUTION]
+====
+Do not use the hotfixed image if you are not affected by the issue.
+====
+
+. Edit the `longhorn-manager` DaemonSet by running the following command:
++
+[,bash]
+----
+  kubectl -n longhorn-system edit daemonset/longhorn-manager
+----
+
+. In the `spec.containers.command` field, change the `--share-manager-image` to `longhornio/longhorn-share-manager:v1.7.3-hotfix-1`.
++
+[,yaml]
+----
+  ...
+    spec:
+      containers:
+      - command:
+        - longhorn-manager
+        - -d
+        - daemon
+        - --engine-image
+        - longhornio/longhorn-engine:v1.7.3
+        - --instance-manager-image
+        - longhornio/longhorn-instance-manager:v1.7.3
+        - --share-manager-image
+        - longhornio/longhorn-share-manager:v1.7.3-hotfix-1
+        - --backing-image-manager-image
+        - longhornio/backing-image-manager:v1.7.3
+        - --support-bundle-manager-image
+        - longhornio/support-bundle-kit:v0.0.51
+        - --manager-image
+        - longhornio/longhorn-manager:v1.7.3
+        - --service-account
+        - longhorn-service-account
+        - --upgrade-version-check
+  ...
+----
+
+. Once the update is applied, restart workloads that are using RWX volumes.
+
+[IMPORTANT]
+====
+If you are using the hotfixed image and want to upgrade {harvester-product-name} v1.5.x, you must edit the `longhorn-manager` DaemonSet and revert to the `longhorn-share-manager:v1.7.3` image before starting the upgrade.
+====
+
+Related issues: https://github.com/harvester/harvester/issues/8354[8354] and https://github.com/longhorn/longhorn/issues/10621[10621]
