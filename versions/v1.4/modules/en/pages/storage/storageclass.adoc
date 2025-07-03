@@ -1,11 +1,18 @@
 = StorageClass
 
-A StorageClass allows administrators to describe the *classes* of storage they offer. Different {longhorn-product-name} StorageClasses might map to replica policies, or to node schedule policies, or disk schedule policies determined by the cluster administrators. This concept is sometimes called *profiles* in other storage systems.
+{harvester-product-name} uses StorageClasses to describe how {longhorn-product-name} must provision volumes. {longhorn-product-name} StorageClasses can map to replica policies, node schedule policies, or disk schedule policies created by the cluster administrators. This concept is referred to as _profiles_ in other storage systems.
 
 [NOTE]
 ====
-For information about leveraging external storage, see xref:./csidriver.adoc[Third-Party Storage Support].
+The default StorageClass `harvester-longhorn` has a replica count value of `3` for high availability. If you use `harvester-longhorn` in a single-node cluster, {longhorn-product-name} is unable to create the default number of replicas, and volumes are marked as _Degraded_ on the {harvester-product-name} UI. 
+
+To avoid this issue, you can perform either of the following actions: 
+
+* Change the xref:installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[replica count] of `harvester-longhorn` to `1` using a configuration file.
+* xref:storage/storageclass.adoc#_creating_a_storageclass[Create a new StorageClass] with the *Number of Replicas* parameter set to `1`. Once created, locate the new StorageClass in the list and then select *⋮ -> Set as Default*.
 ====
+
+For information about leveraging external storage, see xref:./csidriver.adoc[Third-Party Storage Support].
 
 == Creating a StorageClass
 
@@ -23,34 +30,34 @@ Once the StorageClass is created, you can only edit the description. All other s
 +
 image::storageclass/create_storageclasses_entry.png[]
 
-. In the general information section, configure the following settings:
+. In the general information section, configure the following:
 +
 * *Name*: Name of the StorageClass.
 * *Description* (optional): Description of the StorageClass.
 * *Provisioner*: Provisioner that determines the volume plugin to be used for provisioning volumes.
 
-. On the *Parameters* tab, configure the following settings:
+. On the *Parameters* tab, configure the following:
 +
 * *Number of Replicas*: Number of replicas created for each {longhorn-product-name} volume. The default value is `3`. 
 * *Stale Replica Timeout*: Number of minutes {longhorn-product-name} waits before cleaning up a replica with the status `ERROR`. The default value is `30`.
 * *Node Selector* (optional): Node tags to be matched during volume scheduling. You can add node tags on the host configuration screen (*Host -> Edit Config*).
 * *Disk Selector* (optional): Disk tags to be matched during volume scheduling. You can add disk tags on the host configuration screen (*Host -> Edit Config*).
-* *Migratable*: Whether xref:../virtual-machines/live-migration.adoc[Live Migration] is supported. The default value is `Yes`.
+* *Migratable*: Setting that enables xref:virtual-machines/live-migration.adoc[Live Migration] for volumes created using the StorageClass. The default value is `Yes`.
 
-. On the *Customize* tab, configure the following settings:
+. On the *Customize* tab, configure the following:
 +
-* *Reclaim Policy*: Volumes dynamically created by a StorageClass have the reclaim policy specified in the *Reclaim Policy* field of the StorageClass. The default value is `Delete`.
+* *Reclaim Policy*: Reclaim policy that applies to volumes created using the StorageClass. The default value is `Delete`.
 ** *Delete*: Deletes volumes and the underlying devices when the volume claim is deleted.
 ** *Retain*: Retains the volume for manual cleanup.
 +
-* *Allow Volume Expansion*: Volumes can be configured to be expandable. The default value is `Enabled`, which allows you to resize the volume by editing the corresponding PVC object.
+* *Allow Volume Expansion*: Setting that allows volume expansion, which involves resizing of the block device and expansion of the filesystem. When the setting is enabled, you can increase the volume size by editing the corresponding PVC object.
 +
 [NOTE]
 ====
 You can only use the volume expansion feature to increase the volume size.
 ====
 +
-* *Volume Binding Mode*: You can specify when volume binding and dynamic provisioning should occur. The default value is `Immediate`.
+* *Volume Binding Mode*: Setting that controls when volume binding and dynamic provisioning occur. The default value is `Immediate`.
 ** *Immediate*: Binds and provisions a volume once the PVC is created.
 ** *WaitForFirstConsumer*: Binds and provisions a volume once a virtual machine using the PVC is created. 
 
@@ -103,7 +110,7 @@ resource "harvester_storageclass" "single-replica" {
 
 You can use the `dataLocality` parameter when at least one replica of a {longhorn-product-name} volume must be scheduled on the same node as the pod that uses the volume (whenever possible).
 
-{harvester-product-name} officially supports data locality. This applies even to volumes created from xref:../virtual-machines/vm-images/upload-image.adoc[images]. To configure data locality, create a new StorageClass on the {harvester-product-name} UI (*Storage Classess -> Create -> Parameters*) and then add the following parameter:
+{harvester-product-name} officially supports data locality. This applies even to volumes created from xref:virtual-machines/vm-images/upload-image.adoc[images]. To configure data locality, create a new StorageClass on the {harvester-product-name} UI (*Storage Classess -> Create -> Parameters*) and then add the following parameter:
 
 * *Key*: `dataLocality`
 * *Value*: `disabled` or `best-effort`
@@ -119,7 +126,7 @@ image::storageclass/data-locality.png[]
 
 [NOTE]
 ====
-{longhorn-product-name} provides a third option called `strict-local`, which forces {longhorn-product-name} to keep only one replica on the same node as the pod that uses the volume. {harvester-product-name} does not support this option because it can affect certain operations such as xref:../virtual-machines/live-migration.adoc[VM Live Migration].
+{longhorn-product-name} provides a third option called `strict-local`, which forces {longhorn-product-name} to keep only one replica on the same node as the pod that uses the volume. {harvester-product-name} does not support this option because it can affect certain operations such as xref:virtual-machines/live-migration.adoc[VM Live Migration].
 ====
 
 For more information, see https://documentation.suse.com/cloudnative/storage/1.7.0/en/high-availability/data-locality.html[Data Locality] in the {longhorn-product-name} documentation.
@@ -137,7 +144,7 @@ HDD is not recommended for guest RKE2 clusters or VMs with good performance disk
 
 ==== Recommended Practice
 
-First, add your HDD on the `Host` page and specify the disk tags as needed, such as `HDD` or `ColdStorage`. For more information on how to add extra disks and disk tags, see xref:../hosts/hosts.adoc#_multi_disk_management[Multi-disk Management] for details.
+First, add your HDD on the `Host` page and specify the disk tags as needed, such as `HDD` or `ColdStorage`. For more information on how to add extra disks and disk tags, see xref:hosts/hosts.adoc#_multi_disk_management[Multi-disk Management] for details.
 
 image::storageclass/add_hdd_on_host_page.png[]
 
