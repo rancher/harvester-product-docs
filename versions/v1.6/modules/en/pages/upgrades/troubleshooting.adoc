@@ -7,23 +7,25 @@ Here are some tips to troubleshoot a failed upgrade:
 * Check xref:./upgrades.adoc#_upgrade_support_matrix[version-specific upgrade notes]. You can click the version in the support matrix table to see if there are any known issues.
 * Dive into the upgrade https://github.com/harvester/harvester/blob/master/enhancements/20220413-zero-downtime-upgrade.md[design proposal]. The following section briefly describes phases within an upgrade and possible diagnostic methods.
 
-== Investigate the Upgrade Flow
+== Upgrade flow
 
 The upgrade process includes several phases.
 
 image::upgrade/ts_upgrade_phases.png[]
 
-=== Phase 1: Provision upgrade repository VM.
+=== Phase 1: Provision upgrade repository virtual machine
 
-The {harvester-product-name} controller downloads a release ISO file and uses it to provision a VM. During this phase you can see the upgrade status windows show:
+The {harvester-product-name} controller downloads a release ISO file and uses it to provision a repository virtual machine. The virtual machine name uses the format `upgrade-repo-hvst-xxxx`.
 
 image::upgrade/ts_status_phase1.png[]
 
-The time to complete the phase depends on the user's network speed and cluster resource utilization. We see failures in this phase due to network speed. If this happens, the user can <<Restart the upgrade,restart the upgrade>> again.
+Network speed and cluster resource utilization influence the amount of time required to complete this phase. Upgrades typically fail because of network speed issues.
 
-We can also check the repository VM (named with the format `upgrade-repo-hvst-xxxx`) status and its corresponding pod:
+If the upgrade fails at this point, check the status of the repository virtual machine and its corresponding pod before <<Restart the upgrade,restarting the upgrade>>. You can check the status using the command `kubectl get vm -n harvester-system`.
 
-[,console]
+Example:
+
+[,shell]
 ----
 $ kubectl get vm -n harvester-system
 NAME                              AGE    STATUS     READY
@@ -35,15 +37,17 @@ virt-launcher-upgrade-repo-hvst-upgrade-9gmg2-4mnmq     1/1     Running     0   
 
 === Phase 2: Preload container images
 
-The {harvester-product-name} controller creates jobs on each node to download images from the repository VM and preload them. These are the container images required for the next release.
+The {harvester-product-name} controller creates jobs that download and preload container images from the repository virtual machine. These images are required for the next release.
 
-During this stage you can see the upgrade status windows shows:
+Allow some time for the images to be downloaded and preloaded on all nodes.
 
 image::upgrade/ts_status_phase2.png[]
 
-It will take a while for all nodes to preload images. If the upgrade fails at this phase, the user can check job logs in the `cattle-system` namespace:
+If the upgrade fails at this point, check the job logs in the `cattle-system` namespace before <<Restart the upgrade,restarting the upgrade>>. You can check the logs using the command `kubectl get jobs -n cattle-system | grep prepare`.
 
-[,console]
+Example:
+
+[,shell]
 ----
 $ kubectl get jobs -n cattle-system | grep prepare
 apply-hvst-upgrade-9gmg2-prepare-on-node1-with-2bbea1599a-f0e86   0/1           47s        47s
@@ -53,15 +57,17 @@ $ kubectl logs jobs/apply-hvst-upgrade-9gmg2-prepare-on-node1-with-2bbea1599a-f0
 ...
 ----
 
-It's also safe to <<Restart the upgrade,restart the upgrade>> if an upgrade fails at this phase.
-
 === Phase 3: Upgrade system services
+
+The {harvester-product-name} controller creates a job that upgrades component Helm charts.
 
 image::upgrade/ts_status_phase3.png[]
 
-The {harvester-product-name} controller upgrades component Helm charts with a job. The user can check the `apply-manifest` job with the following command:
+You can check the `apply-manifest` job using the command `$ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest`.
 
-[,console]
+Example:
+
+[,shell]
 ----
 $ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
 NAME                                 COMPLETIONS   DURATION   AGE
@@ -71,20 +77,31 @@ $ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
 ...
 ----
 
+[CAUTION]
+====
+If the upgrade fails at this point, you must generate a xref:troubleshooting/operating-system.adoc#_generate_a_support_bundle[support bundle] before <<Restart the upgrade,restarting the upgrade>>. The support bundle contains logs and resource manifests that can help identify the cause of the failure.
+====
+
 === Phase 4: Upgrade nodes
+
+The {harvester-product-name} controller creates the following jobs on each node:
+
+* Multi-node clusters:
++
+** `pre-drain` job: Live-migrates or shuts down virtual machines on the node. Once completed, the embedded {rancher-short-name} service upgrades the {rke2-short-name} runtime on the node.
+** `post-drain` job: Upgrades and reboots the operating system.
+
+* Single-node clusters:
++
+** `single-node-upgrade` job: Upgrades the operating system and {rke2-short-name} runtime. The job name uses the format `hvst-upgrade-xxx-single-node-upgrade-<hostname>`.
 
 image::upgrade/ts_status_phase4.png[]
 
-The {harvester-product-name} controller creates jobs on each node (one by one) to upgrade nodes' OSes and RKE2 runtime. For multi-node clusters, there are two kinds of jobs to update a node:
+You can check the jobs running on each node by running the command `kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=node`.
 
-* *pre-drain* job: live-migrate or shutdown VMs on a node. When the job completes, the embedded {rancher-short-name} service upgrades RKE2 runtime on a node.
-* *post-drain* job: upgrade OS and reboot.
+Example:
 
-For single-node clusters, there is only one `single-node-upgrade` type job for each node (named with the format `hvst-upgrade-xxx-single-node-upgrade-<hostname>`).
-
-The user can check node jobs by:
-
-[,console]
+[,shell]
 ----
 $ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=node
 NAME                                  COMPLETIONS   DURATION   AGE
@@ -97,16 +114,31 @@ $ kubectl logs -n harvester-system jobs/hvst-upgrade-9gmg2-post-drain-node2
 ...
 ----
 
-[CAUTION]
+[WARNING]
 ====
-Do not <<Restart the upgrade,restart the upgrade>> if the process fails at this point. Identify the cause and then contact https://www.suse.com/support[SUSE Support], if necessary.
+If the upgrade fails at this point, **do not restart** the upgrade unless instructed by https://www.suse.com/support[SUSE Support].
 ====
 
-=== Phase 5: Clean-up
+=== Phase 5: Cleanup
 
-The {harvester-product-name} controller deletes the upgrade repository VM and all files that are no longer needed.
+The {harvester-product-name} controller deletes the repository virtual machine and all files that are no longer necessary.
 
 == Common operations
+
+=== Restart the upgrade
+
+[WARNING]
+====
+If the ongoing upgrade fails or becomes stuck at <<Phase 4: Upgrade nodes>>, **do not restart** the upgrade unless instructed by https://www.suse.com/support[SUSE Support].
+====
+
+. Generate a xref:troubleshooting/operating-system.adoc#_generate_a_support_bundle[support bundle].
+
+. <<Stop the ongoing upgrade>>.
+
+. Click the *Upgrade* button on the *Dashboard* screen.
++
+If you xref:./upgrades.adoc#_customize_the_version[customized the version], you might need to xref:./upgrades.adoc#_prepare_the_version[create the version object] again.
 
 === Stop the ongoing upgrade
 
@@ -121,7 +153,7 @@ You can stop the upgrade by performing the following steps:
 
 . Retrieve a list of `Upgrade` CRs in the cluster.
 +
-[,console]
+[,shell]
 ----
 # become root
 $ sudo -i
@@ -134,7 +166,7 @@ hvst-upgrade-9gmg2   10m
 
 . Delete the `Upgrade` CR.
 +
-[,console]
+[,shell]
 ----
 $ kubectl delete upgrade.harvesterhci.io/hvst-upgrade-9gmg2 -n harvester-system
 ----
@@ -176,17 +208,9 @@ chmod +x ./resumeallcharts.sh
 ./resumeallcharts.sh
 ----
 
-=== Restart the upgrade
-
-. <<Stop the ongoing upgrade>>.
-
-. Click the *Upgrade* button on the UI *Dashboard* screen.
-+
-If you xref:./upgrades.adoc#_customize_the_version[customized the version], you might need to xref:./upgrades.adoc#_prepare_the_version[create the version object] again.
-
 === Download upgrade logs
 
-We have designed and implemented a mechanism to automatically collect all the upgrade-related logs and display the upgrade procedure. By default, this is enabled. You can also choose to opt out of such behavior.
+{harvester-product-name} automatically collects all the upgrade-related logs and display the upgrade procedure. By default, this is enabled. You can also choose to opt out of such behavior.
 
 image::upgrade/enable_logging.png[The "Enable Logging" checkbox on the upgrade confirmation dialog]
 
@@ -198,7 +222,7 @@ Log entries will be collected as files for each upgrade-related Pod, even for in
 
 image::upgrade/upgradelog_archive.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
 
-After the upgrade ended, {harvester-product-name} stops collecting the upgrade logs to avoid occupying the disk space. In addition, you can click the *Dismiss it* button to purge the upgrade logs.
+After the upgrade ends, {harvester-product-name} stops collecting the upgrade logs to avoid occupying the disk space. In addition, you can click the *Dismiss it* button to purge the upgrade logs.
 
 image::upgrade/dismiss_upgrade_to_remove_upgradelog.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
 
@@ -206,9 +230,9 @@ For more details, please refer to the https://github.com/harvester/harvester/blo
 
 [CAUTION]
 ====
-The storage volume for storing upgrade-related logs is 1GB by default. If an upgrade went into issues, the logs may consume all the available space of the volume. To work around such kind of incidents, try the following steps:
+The default size of the volume that stores upgrade-related logs is 1 GB. When errors occur, these logs may completely consume the volume's available space. To work around this issue, you can perform the following steps:
 
-. Detach the `log-archive` Volume by scaling down the `fluentd` StatefulSet and `downloader` Deployment.
+. Detach the `log-archive` volume by scaling down the `fluentd` StatefulSet and `downloader` deployment.
 +
 ----
 # Locate the StatefulSet and Deployment
@@ -219,7 +243,6 @@ hvst-upgrade-xxxxx-upgradelog-infra-fluentd   1/1     43s
 $ kubectl -n harvester-system get deployments -l harvesterhci.io/upgradeLogComponent=downloader
 NAME                                            READY   UP-TO-DATE   AVAILABLE   AGE
 hvst-upgrade-xxxxx-upgradelog-downloader   1/1     1            1           38s
-
 
 # Scale down the resources to terminate any Pods using the volume
 $ kubectl -n harvester-system scale statefulset hvst-upgrade-xxxxx-upgradelog-infra-fluentd --replicas=0
@@ -237,7 +260,7 @@ $ kubectl -n harvester-system get pvc -l harvesterhci.io/upgradeLogComponent=log
 pvc-63355afb-ce61-46c4-8781-377cf962278a
 ----
 
-. Recover the `fluentd` StatefulSet and `downloader` Deployment.
+. Recover the `fluentd` StatefulSet and `downloader` deployment.
 +
 [,console]
 ----
@@ -249,7 +272,7 @@ deployment.apps/hvst-upgrade-xxxxx-upgradelog-downloader scaled
 ----
 ====
 
-=== Clean Up Unused Images
+=== Clean up unused images
 
 The default value of `imageGCHighThresholdPercent` in https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration[KubeletConfiguration] is `85`. When disk usage exceeds 85%, the kubelet attempts to remove unused images.
 
