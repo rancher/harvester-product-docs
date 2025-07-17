@@ -240,7 +240,7 @@ Once created, you can use the StorageClass to create virtual machine images, roo
 
 == Known issues
 
-=== Infinite image download loop
+=== 1. Infinite image download loop
 
 The image download process loops endlessly when the StorageClass for the image uses the LVM CSI driver. This issue is related to the scratch volume, which is created by CDI and is used to temporarily store the image data. When the issue exists in your environment, you might find the following error messages in `importer-prime-xxx` pod logs:
 
@@ -283,3 +283,53 @@ Increasing the overhead value does not affect the image PVC size. The scratch vo
 ====
 
 Related issue: https://github.com/harvester/harvester/issues/7993[#7993] (See https://github.com/harvester/harvester/issues/7993#issuecomment-2790260841[this comment].)
+
+=== 2. Multipath support
+
+The `multipathd` service is disabled in {harvester-product-name} by default. However, certain third-party CSIs may require you to enable the service.
+
+After installing {harvester-product-name}, you can enable and start `multipathd` by logging into each cluster node and running the following commands:
+
+[,shell]
+----
+systemctl enable multipathd
+systemctl start multipathd
+----
+
+Alternatively, you can create a {elemental-product-name} CloudInit file in the `/oem` directory on each host (for example, `/oem/99-start-multipathd.yaml`) with the following contents:
+
+[,yaml]
+----
+stages:
+   default:
+   - name: "start multipathd"
+     systemctl:
+       enable:
+         - multipathd
+       start:
+         - multipathd
+----
+
+This process can be automated across the Harvester cluster using a `CloudInit` CRD.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-mutlitpathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-mutlitpathd
+  contents: |
+    stages:
+      default:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----

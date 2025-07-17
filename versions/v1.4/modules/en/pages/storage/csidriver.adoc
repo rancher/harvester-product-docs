@@ -68,3 +68,55 @@ image::advanced/rook-ceph-vm-external.png[rook-ceph-vm-external]
 
 * https://harvesterhci.io/kb/use_rook_ceph_external_storage[Use Rook Ceph External Storage with Harvester]
 * https://harvesterhci.io/kb/install_netapp_trident_csi[Using NetApp Storage on Harvester]
+
+== Known issues
+
+=== 1. Multipath support
+
+The `multipathd` service is disabled in {harvester-product-name} by default. However, certain third-party CSIs may require you to enable the service.
+
+After installing {harvester-product-name}, you can enable and start `multipathd` by logging into each cluster node and running the following commands:
+
+[,shell]
+----
+systemctl enable multipathd
+systemctl start multipathd
+----
+
+Alternatively, you can create a {elemental-product-name} CloudInit file in the `/oem` directory on each host (for example, `/oem/99-start-multipathd.yaml`) with the following contents:
+
+[,yaml]
+----
+stages:
+   default:
+   - name: "start multipathd"
+     systemctl:
+       enable:
+         - multipathd
+       start:
+         - multipathd
+----
+
+This process can be automated across the Harvester cluster using a `CloudInit` CRD.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-mutlitpathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-mutlitpathd
+  contents: |
+    stages:
+      default:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----
