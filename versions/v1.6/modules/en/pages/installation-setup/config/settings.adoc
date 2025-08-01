@@ -161,6 +161,18 @@ You must configure the following information before using features related to ba
 }
 ----
 
+=== `csi-online-expand-validation`
+
+*Definition*: Setting that allows you to mark storage providers with confirmed support for online volume expansion as validated.
+
+Depending on the underlying storage provider, you may need to take extra steps to use the online volume expansion feature.
+
+* *{longhorn-product-name}*: {harvester-product-name} considers {longhorn-product-name} to have support for online volume expansion, even if differences exist between versions of the Longhorn Data Engine. Currently, the V1 Data Engine fully supports online volume expansion, while the V2 Data Engine does not support volume expansion at all (regardless of the volume's attachment state). The {harvester-product-name} webhook manages the differences between these versions.
+
+* *Third-party storage*: {harvester-product-name} rejects online volume expansion requests for third-party storage by default. If you have confirmed that your storage provider supports online volume expansion, you can use this setting to mark that storage provider as validated and force {harvester-product-name} to allow associated online expansion requests.
+
+*Default value*: `{"driver.longhorn.io":true}`
+
 === `default-vm-termination-grace-period-seconds`
 
 *Definition*: Number of seconds {harvester-product-name} waits before forcibly shutting down a VM that was stopped using the UI.
@@ -655,7 +667,15 @@ The default value is `0`, which is equivalent to following the cluster's node co
 {harvester-product-name} deploys an upgrade-repo service on the cluster that serves as an HTTP server for nodes that need to preload the container images. When a `concurrency` value is set, each batch of nodes downloads the container images from this upgrade-repo in parallel. Because of this, you must consider the speed of the {harvester-product-name} management network and the read speed of the default disk for {longhorn-product-name}.
 ====
 +
-* `restoreVM`: Option that enables {harvester-product-name} to automatically restore running virtual machines after a single-node cluster is upgraded. The default value is `false`, which causes all virtual machines to be stopped after the upgrade is completed. When set to `true`, {harvester-product-name} restarts virtual machines that were running before the upgrade was started. Virtual machines that were paused before the upgrade are not restarted.
+* `restoreVM`: Option that enables {harvester-product-name} to automatically restore previously running non-migratable virtual machines after the upgrade is _successfully_ completed. You can specify either of the following values:
++
+** `true`: {harvester-product-name} forcibly shuts down *running* and *paused* non-migratable virtual machines on each node. After the upgrade is completed, the previously running virtual machines are automatically restarted, while the paused virtual machines remain shut down.
+** `false`: This is the default value. In multi-node environments, you must stop all non-migratable virtual machines to allow the upgrade to proceed. {harvester-product-name} does not restart these virtual machines after the upgrade is completed.
++
+[NOTE]
+====
+All virtual machines are considered non-migratable in single-node environments. {harvester-product-name} forcibly shuts down all virtual machines before starting the upgrade process.
+====
 
 *Example*:
 
