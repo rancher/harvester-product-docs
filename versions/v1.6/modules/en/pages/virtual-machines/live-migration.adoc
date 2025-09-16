@@ -1,5 +1,5 @@
 = Live Migration
-:revdate: 2025-05-09
+:revdate: 2025-09-16
 :page-revdate: {revdate}
 
 Live migration means moving a virtual machine to a different host without downtime.
@@ -63,7 +63,9 @@ Live migration will be aborted if it exceeds the completion timeout of 800s per 
 
 Live migration will also be aborted when copying memory doesn't make any progress in 150s.
 
-== Limitation
+== Limitations
+
+### CPU models
 
 `host-model` only allows migration of the virtual machine to a node with same CPU model. However, specifying a CPU model is not always required. When no CPU model is specified, you must shut down the virtual machine, assign a CPU model that is supported by all nodes, and then restart the virtual machine.
 
@@ -78,3 +80,24 @@ Migrating a virtual machine with `host-model` is not possible because the values
 * Individual virtual machines: Modify the virtual machine configuration to include `spec.template.spec.domain.cpu.model: "123"`.
 
 Both methods require the restarting the virtual machines. If you are certain that all nodes in the cluster support a specific CPU model, you can define this at the cluster level before creating any virtual machines. In doing so, you eliminate the need to restart the virtual machines (to assign the CPU model) during live migration.
+
+=== Network outages
+
+Live migration is highly sensitive to network outages. Any interruption to the network connection between the source and target nodes during migration can have a variety of outcomes.
+
+==== `mgmt` network outages
+
+Live migration via `mgmt` (the built-in cluster network) relies on the availability of the management interfaces on the source and target nodes. `mgmt` network outages are considered critical because they not only disrupt the migration process but also affect overall node management.
+
+==== VM migration network outages
+
+A xref:networking/vm-migration-network.adoc[VM migration network] isolates migration traffic from other network activities. While this setup improves migration performance and reliability, especially in environments with high network traffic, it also makes the migration process dependent on the availability of that specific network.
+
+An outage on the VM migration network can affect the migration process in the following ways:
+
+* Brief interruption: The migration process abruptly stops. Once connectivity is restored, the process resumes and can be completed successfully, albeit with a delay.
+* Extended outage: The migration operation times out and fails. The source virtual machine continues to run normally on the source node.
+
+The migration process runs in peer-to-peer mode, which means that the libvirt daemon (libvirtd) on the source node controls the migration by calling the destination daemon directly. In addition, a built-in keepalive mechanism ensures that the client connection remains active during the migration process. If the connection remains inactive for a specific period, it is closed, and the migration process is aborted.
+
+By default, the keepalive interval is set to 5 seconds, and the retry count is set to 5. Given these default values, the migration process is aborted if the connection is inactive for 30 seconds. However, the migration may fail earlier or later, depending on the actual cluster conditions.
