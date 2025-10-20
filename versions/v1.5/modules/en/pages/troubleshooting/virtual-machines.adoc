@@ -1,8 +1,8 @@
 = Virtual Machine Issues
-:revdate: 2025-02-18
+:revdate: 2025-10-20
 :page-revdate: {revdate}
 
-The following sections contain information useful in troubleshooting issues related to Harvester VM management.
+The following sections contain information useful in troubleshooting issues related to {harvester-product-name} VM management.
 
 == VM Start Button is Not Visible
 
@@ -442,3 +442,75 @@ After deleting the directory, you must restart the virtual machine so that cloud
 === Related Issue
 
 https://github.com/harvester/harvester/issues/6644
+
+== Unschedulable virtual machines
+
+A virtual machine may be marked `Unschedulable` because of an unsatisfied affinity rule.
+
+Specifically, the `VirtualMachine` object contains an affinity rule similar to the following:
+
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: vm100
+  namespace: default
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: network.harvesterhci.io/cn2
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+The pod status is `Pending`, and the error message indicates that no node meets the affinity rule's criteria.
+
+Example:
+
+[,shell]
+----
+$ kubectl get pods
+NAME                        READY   STATUS    RESTARTS   AGE
+virt-launcher-vm100-f4nh4   0/2     Pending   0          5m12s
+$ kubectl get pods virt-launcher-vm100-f4nh4 -oyaml
+apiVersion: v1
+kind: Pod
+metadata:
+  name: virt-launcher-vm100-f4nh4
+  namespace: default
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: network.harvesterhci.io/cn2
+            operator: In
+            values:
+            - "true"
+...
+status:
+  conditions:
+  - lastProbeTime: null
+    lastTransitionTime: "2025-07-28T16:21:56Z"
+    message: '0/2 nodes are available: 1 node(s) didn''t match Pod''s node affinity/selector,
+      1 node(s) had untolerated taint {node.kubernetes.io/unreachable: }. preemption:
+      0/2 nodes are available: 2 Preemption is not helpful for scheduling.'
+    reason: Unschedulable
+    status: "False"
+    type: PodScheduled
+...
+----
+
+=== Root cause
+
+{harvester-product-name} may xref:virtual-machines/create-vm.adoc#_automatically_applied_affinity_rules[automatically apply affinity rules] based on how a virtual machine is configured. In the example, the virtual machine `vm100` attaches to the cluster network `cn2`, and {harvester-product-name} applies the affinity rule `network.harvesterhci.io/cn2`. However, no nodes meet the rule's criteria, so the virtual machine cannot be scheduled.
+
+=== Solution
+
+To ensure that the `Pending` pod can be scheduled, verify that the cluster network (for example, `cn2`) is configured on the active nodes and that the corresponding label (for example, `network.harvesterhci.io/cn2`) is applied to those same nodes.
