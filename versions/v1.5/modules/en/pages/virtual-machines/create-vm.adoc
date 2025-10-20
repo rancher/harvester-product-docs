@@ -234,6 +234,115 @@ For instance, you can combine `Required` with `Affinity` to instruct the schedul
 
 See the https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod Affinity and Anti-Affinity Documentation] for more details.
 
+=== Automatically applied affinity rules
+
+{harvester-product-name} may automatically apply certain affinity rules depending on how a virtual machine is configured. These rules dictate which nodes are eligible as scheduling or migration targets. If no other nodes meet the criteria, the virtual machine cannot be scheduled or migrated.
+
+For more information, see xref:troubleshooting/virtual-machines.adoc#_unschedulable_virtual_machines[Unschedulable virtual machines].
+
+[IMPORTANT]
+====
+The {harvester-product-name} webhook reverts manual changes to automatically applied rules.
+====
+
+==== Related networking concepts
+
+The general process for setting up networks for virtual machines involves the following:
+
+* A xref:networking/cluster-network.adoc#_cluster_network[cluster network] and a corresponding xref:networking/cluster-network.adoc#_network_configuration[network configuration] are created. Only nodes that are covered by the network configuration set up the network devices.
+
+* A xref:networking/vm-network.adoc#_create_a_vm_network[VM network] is created with a specific VLAN ID.
+
+In the following example, steps are taken to set up a cluster network and define a virtual machine that connects to this cluster network.
+
+* A cluster network named `cn2` is created.
+
+* A network configuration named `cn2-vc1` is created. `cn2-vc1` covers `node1` and `node2`.
+
+* A VM network named `cn2-nad-100` is created with the VLAN ID `vlan id 100`.
+
+* A virtual machine named `VM vm1` attaches to a secondary network named `cn2-nad-100`.
+
+{harvester-product-name} ensures the following:
+
+* The {harvester-product-name} controller automatically labels Kubernetes `node` objects.
++
+[,shell]
+----
+kubectl get node node1 -oyaml
+...
+metadata:
+  labels:
+    network.harvesterhci.io/cn2: "true"
+    network.harvesterhci.io/mgmt: "true"
+    network.harvesterhci.io/vlanconfig: cn2-vc1
+...
+----
+
+* The {harvester-product-name} webhook automatically updates the `virtualmachine` object.
++
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: network.harvesterhci.io/cn2
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+* The virtual machine is scheduled only on `node1` or `node2`.
+
+[IMPORTANT]
+====
+{harvester-product-name} applies multiple affinity rules when a virtual machine connects to multiple VM networks that are backed by multiple cluster networks. The applied rules collectively determine the nodes that are eligible as scheduling or migration targets.
+
+No affinity rules are applied when a virtual machine connects to VM networks that are backed by xref:networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] (the built-in cluster network). `mgmt` covers all nodes by default, so all nodes are eligible as scheduling or migration targets.
+====
+
+==== Related CPU pinning concepts
+
+When you enable the xref:virtual-machines/cpu-pinning.adoc#_enable_and_disable_cpu_manager[CPU Manager] on nodes, {harvester-product-name} applies the following label to related `node` objects.
+
+[,yaml]
+----
+...
+metadata:
+  labels:
+    cpumanager: "true"
+...
+----
+
+When you enable xref:virtual-machines/cpu-pinning.adoc#_enable_cpu_pinning_on_a_new_vm[CPU pinning] during virtual machine creation, {harvester-product-name} applies an affinity rule that ensures the virtual machine is scheduled only on nodes where CPU Manager is enabled.
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cpumanager
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+== Annotations
+
+{harvester-product-name} allows you to attach custom metadata to virtual machines using annotations. These key-value pairs enable extended features or behaviors without requiring changes to the core virtual machine configuration.
+
+You can use the `harvesterhci.io/custom-ip` annotation to set an IP address on the {harvester-product-name} UI *for display purposes*. This is useful when the virtual machine is unable to report its IP address because of a missing `qemu-guest-agent` or other reasons.
+
 == Advanced Options
 
 === Run Strategy
