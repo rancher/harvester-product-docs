@@ -15,38 +15,11 @@ image::host/host.png[host.png]
 
 == Node Maintenance
 
-Admin users can enable Maintenance Mode (select *⋮ -> Enable Maintenance Mode*) to automatically evict all virtual machines from a node. This mode leverages the *live migration* feature to migrate the virtual machines to other nodes, which is useful when you need to reboot, upgrade firmware, or replace hardware components. At least two active nodes are required to use this feature.
+Admin users can enable Maintenance Mode (select **⋮ > Enable Maintenance Mode**) to automatically evict all virtual machines from a node. This mode leverages xref:../virtual-machines/live-migration.adoc#_automatically_triggered_batch_migration[batch migration] to move the xref:../virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[live-migratable virtual machines] to other nodes, which is useful when you need to reboot, upgrade firmware, or replace hardware components. At least two active nodes are required to use this feature.
 
-[WARNING]
-====
-A https://github.com/harvester/harvester/issues/7128[bug] may cause an I/O error to occur in virtual machines while Maintenance Mode is enabled on the underlying node. To mitigate the issue, you can set a taint on the node before enabling Maintenance Mode.
+xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[Non-migratable virtual machines] can prevent the node from activating Maintenance Mode. When this occurs, you must identify and manually shut down those virtual machines. For more information, see xref:../virtual-machines/live-migration.adoc[Live Migration].
 
-. Set the taint on the target node.
-+
-[,sh]
-----
-kubectl taint node <NODE> --overwrite kubevirt.io/drain=draining:NoSchedule
-----
-+
-. Wait for all virtual machines to be live-migrated out of the node.
-+
-. On the UI *Hosts* screen, select the target node, and then select *⋮ -> Enable Maintenance Mode*.
-
-Once the maintenance tasks are completed, perform the following steps to allow scheduling of workloads on the node.
-
-. Remove the taint on the node.
-+
-[,sh]
-----
-kubectl taint node <NODE> kubevirt.io/drain-
-----
-+
-. On the UI *Hosts* screen, select the node, and then select *⋮ -> Disable Maintenance Mode*.
-
-For more information, see [Issue #7128](https://github.com/harvester/harvester/issues/7128).
-====
-
-If you want to force individual VMs to shut down instead of migrating to other nodes, add the label `harvesterhci.io/maintain-mode-strategy` and one of the following values to those VMs:
+To force individual VMs to shut down instead of migrating to other nodes, add the label `harvesterhci.io/maintain-mode-strategy` and one of the following values to those VMs:
 
 * `Migrate`: Live-migrates the VM to another node in the cluster. This is the default behavior if the label `harvesterhci.io/maintain-mode-strategy` is not set.
 * `ShutdownAndRestartAfterEnable`: Restarts the VM after the node switches to maintenance mode. The VM is scheduled on a different node.
@@ -55,7 +28,7 @@ If you want to force individual VMs to shut down instead of migrating to other n
 
 You can force a collective shutdown of all VMs on a node on the *Enable Maintenance Mode* screen. This disables individual settings using the `harvesterhci.io/maintain-mode-strategy` label.
 
-If you want to execute a special command before shutting down a VM, consider using the https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks[container lifecycle hook] `PreStop`.
+To execute a special command before shutting down a VM, consider using the https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks[container lifecycle hook] `PreStop`.
 
 image::host/node-maintenance.png[node-maintenance.png]
 
@@ -120,25 +93,17 @@ Removing a control plane node in this situation is not recommended because etcd 
 Eviction cannot be completed if the remaining nodes cannot accept replicas from the node to be removed. In this case, some volumes will remain in the *Degraded* state until you add more nodes to the cluster.
 ====
 
-=== 4. Manage non-migratable VMs.
+=== 4. Manage non-migratable Virtual Machines
 
-xref:../virtual-machines/live-migration.adoc[Live migration] cannot be performed for VMs with certain properties.
-
-* The VM has PCI passthrough devices or vGPU devices.
-+
-A PCI device is bound to a node. You must remove the PCI device from the VM, or delete the VM and then create a new VM from a backup or snapshot.
-
-* The VM has a node selector or affinity rules that bind it to the node to be removed.
-+
-You must change the node selector or affinity rules.
-
-* The VM is on a VM network that binds it to the node to be removed.
-+
-You must select a different VM network.
+Check if there are any xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable virtual machine].
 
 [TIP]
 ====
-Create a backup or snapshot for each non-migratable VM before modifying the settings that bind it to the node that you want to remove.
+* Create a backup or snapshot for each non-migratable virtual machine.
+* You can remove the node specific volumes/devices and node selectors to enable the virtual machines to be scheduled to other nodes. 
++
+NOTE: As current node is to be deleted, the un-saved/un-migrated virtual machines will be lost.
+* Stop the remaining non-migratable virtual machines manually.
 ====
 
 === 5. Evict workloads from the node to be removed.
