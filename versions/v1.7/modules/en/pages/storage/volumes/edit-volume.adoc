@@ -1,0 +1,39 @@
+= Edit a Volume
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+After creating a volume, you can edit your volume by clicking the `⋮` button and selecting the `Edit Config` option.
+
+== Expand a Volume
+
+You can expand a volume by increasing the value of the `Size` parameter directly. To prevent the expansion from interference by unexpected data R/W, {harvester-product-name} supports `offline` expansion only. You must shut down the VM or detach the volume first if it is attached to a VM, and the detached volume will automatically attach to a random node with https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[maintenance mode] to expand automatically.
+
+image::volume/expand-volume.png[expand-volume]
+
+=== Online volume expansion
+
+To minimize downtime, {harvester-product-name} allows you to expand volumes that are attached to a running virtual machine or have a PVC that is attached to a running pod in the guest cluster. Depending on the underlying storage provider, you may need to take extra steps to use this feature.
+
+* *{longhorn-product-name}*: {harvester-product-name} considers {longhorn-product-name} to have support for online volume expansion, even if differences exist between versions of the Longhorn Data Engine. Currently, the V1 Data Engine fully supports online volume expansion, while the V2 Data Engine does not support volume expansion at all (regardless of the volume's attachment state).
+
+* *Third-party storage*: {harvester-product-name} rejects online volume expansion requests for third-party storage by default. If you have confirmed that your storage provider supports online volume expansion, you can use the xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`] setting to mark that storage provider as validated.
+
+[IMPORTANT]
+====
+Online resizing of hotplugged filesystem volumes is not supported. When a filesystem volume is bind-mounted in the `virt-launcher` pod, hotplugging a new filesystem volume triggers `NodeUnPublish` and `NodeUnstage` operations on the previous volume, which prevents further resizing.
+
+Additionally, you cannot use the xref:virtual-machines/edit-vm.adoc[Edit Config] feature on the {harvester-product-name} UI *Virtual Machines* screen to resize a volume while the virtual machine is running. Certain limitations prevent the current UI from accurately displaying the results of volume expansion operations. For more information, see https://github.com/harvester/harvester/issues/8669[issue #8669].
+====
+
+== Cancel a Failed Volume Expansion
+
+If you specify a size larger than {longhorn-product-name}'s capacity during the expansion, the status of the volume expansion will be stuck in `Resizing`. You can cancel the failed volume expansion by clicking the `⋮` button and selecting the `Cancel Expand` option.
+
+image::volume/cancel-failed-volume-expansion.png[cancel-failed-volume-expansion]
+
+== Change the StorageClass of an Existing Volume
+
+The StorageClass of an existing volume cannot be changed. However, you can change the StorageClass while restoring a new volume from the snapshot by following the steps below:
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[Take a volume snapshot].
+. Select StorageClass when xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[restoring the volume using snapshot].
