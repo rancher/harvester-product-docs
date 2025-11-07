@@ -148,10 +148,10 @@ A disk can be made accessible via the following types:
 | type | description
 
 | disk
-| This type will expose the volume as an ordinary disk to the virtual machine.
+| This type exposes the volume as an ordinary disk to the virtual machine.
 
 | cd-rom
-| This type will expose the volume as a cd-rom drive to the virtual machine. It is read-only by default.
+| This type exposes the volume as a cd-rom drive to the virtual machine. It is read-only by default.
 |===
 
 A volume's xref:../storage/storageclass.adoc[StorageClass] can be specified when adding a new empty volume; for other volumes (such as virtual machine images), the StorageClass is defined during image creation.
@@ -172,7 +172,7 @@ image::vm/create-vm-volumes.png[create-vm]
 
 A container disk is an ephemeral storage volume that can be assigned to any number of virtual machines and provides the ability to store and distribute virtual machine disks in the container image registry. A container disk is:
 
-* An ideal tool if you want to replicate a large number of virtual machine workloads or inject machine drivers that do not require persistent data. Ephemeral volumes are designed for virtual machines that need more storage but don't care whether that data is stored persistently across virtual machine restarts or only expect some read-only input data to be present in files, like configuration data or secret keys.
+* An ideal tool to replicate a large number of virtual machine workloads or inject machine drivers that do not require persistent data. Ephemeral volumes are designed for virtual machines that need more storage but do not care whether that data is stored persistently across virtual machine restarts or only expect some read-only input data to be present in files, like configuration data or secret keys.
 * Not a good solution for any workload that requires persistent root disks across virtual machine restarts.
 
 A container disk is added when creating a virtual machine by providing a Docker image. When creating a virtual machine, follow these steps:
@@ -224,7 +224,45 @@ In bridge VLAN, virtual machines are connected to the host network through a lin
 
 `Node Scheduling` allows you to constrain which nodes your virtual machines can be scheduled on based on node labels.
 
-See the https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity[Kubernetes Node Affinity Documentation] for more details.
+image::vm/vm-node-scheduling.png[]
+
+You can choose to run virtual machines on the following:
+
+* Any available node
+
+* A specific node
+
+In the following example, the target node has the hostname `harv21`.
+
+----
+nodeSelector:
+  kubernetes.io/hostname: harv21
+----
+
+[NOTE]
+====
+The virtual machine may be xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] if you limit scheduling to a specific node.
+====
+
+* Nodes that match scheduling rules
+
+You gain greater flexibility by scheduling a virtual machine on a group of nodes. In the following example, the virtual machine can be scheduled on nodes with a specific label. The key is `harvesterhci.io/group` and the value can be either `engineering` or `qa`.
+
+----
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: harvesterhci.io/group
+                operator: In
+                values:
+                  - engineering
+                  - qa
+----
+
+For more information, see https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity[Kubernetes Node Affinity Documentation].
 
 == Virtual Machine Scheduling
 
@@ -306,6 +344,8 @@ spec:
 No affinity rules are applied when a virtual machine connects to VM networks that are backed by xref:networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] (the built-in cluster network). `mgmt` covers all nodes by default, so all nodes are eligible as scheduling or migration targets.
 ====
 
+NOTE: The virtual machine is xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] when there is only one node in the cluster network.
+
 ==== Related CPU pinning concepts
 
 When you enable the xref:virtual-machines/cpu-pinning.adoc#_enable_and_disable_cpu_manager[CPU Manager] on nodes, {harvester-product-name} applies the following label to related `node` objects.
@@ -336,6 +376,8 @@ spec:
                     values:
                       - 'true'
 ----
+
+NOTE: The virtual machine is xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] if CPU Manager is enabled on only one node.
 
 == Annotations
 
