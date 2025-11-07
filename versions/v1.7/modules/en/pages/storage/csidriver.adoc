@@ -1,0 +1,342 @@
+= Third-Party Storage Support
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} supports provisioning of root volumes and data volumes using external https://kubernetes-csi.github.io/docs/introduction.html[Container Storage Interface (CSI)] drivers. This enhancement allows you to select drivers that meet specific requirements, such as performance optimization or seamless integration with existing internal storage solutions.
+
+The {harvester-product-name} team has validated the following CSI drivers:
+
+* Longhorn V2 Data Engine: `driver.longhorn.io`
+* LVM: `lvm.driver.harvesterhci.io`
+* NFS: `nfs.csi.k8s.io`
+* Rook (RADOS Block Device): `rook-ceph.rbd.csi.ceph.com`
+
+These validated CSI drivers have the following capabilities:
+
+|===
+| Storage Solution | VM Image | VM Root Disk | VM Data Disk | Volume Export To VM Image | VM Template Generator | VM Live Migration | VM Snapshot | VM Backup
+
+| Longhorn V2 Data Engine
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10006;
+
+| LVM
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10004;
+| &#10006;
+
+| NFS
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10006;
+
+| Rook (RADOS Block Device)
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+|===
+
+[NOTE]
+====
+Support for third-party storage equates to support for provisioning of root volumes and data volumes using external container storage interface (CSI) drivers. This means that storage vendors can validate their storage appliances with {harvester-product-name} to ensure greater interoperability. 
+
+You can find information about enterprise-grade storage solutions that are certified to be compatible with {harvester-product-name} in the {rancher-product-name} documentation, which is accessible through the https://scc.suse.com/home[SUSE Customer Center].
+====
+
+== Prerequisites
+
+To enable {harvester-product-name} to function well, use CSI drivers that support the following capabilities:
+
+* Volume expansion (online resizing)
+* Snapshot creation (volume and virtual machine snapshots)
+* Cloning (volume and virtual machine clones)
+* Usage of Read-Write-Many (RWX) volumes for xref:../virtual-machines/live-migration.adoc[Live Migration]
+
+== Create a {harvester-product-name} cluster
+
+{harvester-product-name}'s operating system follows an immutable design, meaning that most OS files revert to their pre-configured state after a reboot. Therefore, you might need to perform additional configurations before installing the {harvester-product-name} cluster for third-party CSI drivers.
+
+Some CSI drivers require additional persistent paths on the host. You can add these paths to xref:../installation-setup/config/configuration-file.adoc#_os_persistent_state_paths[`os.persistent_state_paths`].
+
+Some CSI drivers require additional software packages on the host. You can install these packages with xref:../installation-setup/config/configuration-file.adoc#_os_after_install_chroot_commands[`os.after_install_chroot_commands`].
+
+[NOTE]
+====
+Upgrading {harvester-product-name} causes the changes to the OS in the `after-install-chroot` stage to be lost. You must also configure the `after-upgrade-chroot` to make your changes persistent across an upgrade. Refer to https://rancher.github.io/elemental-toolkit/docs/customizing/runtime_persistent_changes/[Runtime persistent changes] before upgrading {harvester-product-name}.
+====
+
+== Install the CSI driver
+
+After installing the {harvester-product-name} cluster is complete, refer to xref:../troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[How can I access the kubeconfig file?] to get the kubeconfig of the cluster.
+
+With the kubeconfig of the {harvester-product-name} cluster, you can install the third-party CSI drivers into the cluster by following the installation instructions for each CSI driver. You must also refer to the CSI driver documentation to create the `StorageClass` and `VolumeSnapshotClass` in the {harvester-product-name} cluster.
+
+== Configure the {harvester-product-name} cluster
+
+Before you can make use of {harvester-product-name}'s *Backup & Snapshot* features, you need to set up some essential configurations through the {harvester-product-name} xref:../installation-setup/config/settings.adoc#_csi_driver_config[csi-driver-config] setting. Follow these steps to make these configurations:
+
+. Login to the {harvester-product-name} UI, then navigate to *Advanced -> Settings*.
+. Find and select *csi-driver-config*, and then select *⋮ -> Edit Setting* to access the configuration options.
+. Set the *Provisioner* to the third-party CSI driver in the settings.
+. Next, Configure the *Volume Snapshot Class Name*. This setting points to the name of the `VolumeSnapshotClass` used for creating volume snapshots or VM snapshots.
+
+image::third-party-storage/csi-driver-config-external.png[]
+
+[NOTE]
+====
+Backup currently only works with the Longhorn v1 Data Engine. If you are using other storage providers, you can skip the *Backup VolumeSnapshot Class Name* configuration.
+
+For more information, see https://documentation.suse.com/cloudnative/virtualization/v1.4/en/storage/csidriver.html#_virtual_machine_backup_compatibility[Virtual Machine Backup Compatibility].
+====
+
+== Use the CSI driver
+
+Once the CSI driver is installed and the {harvester-product-name} cluster is configured, an external storage solution can be used in tasks that involve storage management.
+
+=== Virtual machine image creation
+
+You can use an external storage solution to store and manage virtual machine images.
+
+When xref:../virtual-machines/vm-images/upload-image.adoc[uploading a virtual machine image] using the {harvester-product-name} UI (*Image -> Create*), you must select the StorageClass for the external storage solution on the *Storage* tab. In the following example, the StorageClass is *nfs-csi*.
+
+image::third-party-storage/create-image-with-nfs-csi.png[]
+
+{harvester-product-name} stores the created image in the external storage solution.
+
+image::third-party-storage/created-image-with-nfs-csi.png[]
+
+=== Virtual machine creation
+
+Your virtual machines can use root and data volumes in external storage.
+
+When xref:../virtual-machines/create-vm.adoc[creating a virtual machine] using the {harvester-product-name} UI (*Virtual Machine -> Create*), you must perform the following actions on the *Volumes* tab:
+
+* Select a virtual machine image stored in the external storage solution, and then configure the required settings.
+* Add a data volume.
+
+image::third-party-storage/various-volumes-for-vm-creating.png[]
+
+In the following example, the root volume is created using NFS, and the data volume is created using the Longhorn V2 Data Engine.
+
+image::third-party-storage/various-volumes-for-vm-created.png[]
+
+=== Volume creation
+
+You can create volumes in your external storage solution.
+
+When xref:./volumes/create-volume.adoc[creating a volume] using the {harvester-product-name} UI (*Volumes -> Create*), you must perform the following actions:
+
+* *Storage Class*: Select the target StorageClass (for example, *nfs-csi*).
+* *Volume Mode*: Select the corresponding volume mode (for example, *Filesystem*).
+
+image::third-party-storage/create-fs-volume.png[]
+
+== Advanced topics
+
+=== Storage profiles
+
+You can now use the CDI API to create custom https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[storage profiles] that simplify definition of data volumes. Storage profiles allow multiple data volumes to share the same provisioner settings.
+
+The following is an example of an LVM storage profile:
+
+[,yaml]
+----
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: StorageProfile
+metadata:
+  name: lvm-node-1-striped
+spec:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+status:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+  cloneStrategy: snapshot
+  dataImportCronSourceFormat: pvc
+  provisioner: lvm.driver.harvesterhci.io
+  snapshotClass: lvm-snapshot
+  storageClass: lvm-node-1-striped
+----
+
+You can define the fields to override the default configuration. For more information, see https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[Storage Profiles] in the CDI documentation.
+
+[CAUTION]
+====
+Avoid changing the storage profile or CDI directly. Instead, allow the {harvester-product-name} controller to synchronize and persist the storage profile configuration through the use of xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[CDI annotations].
+====
+
+=== Limitations
+
+* Backup support is currently limited to Longhorn V1 Data Engine volumes. {harvester-product-name} is unable to create backups of volumes in external storage. 
+* There is a limitation in the CDI which prevents {harvester-product-name} from converting attached PVCs to virtual machine images. Before exporting a volume in external storage, ensure that the PVC is not attached to workloads. This prevents the resulting image from getting stuck in the *Exporting* state.
+
+image::third-party-storage/convert-pvc-to-image-stuck.png[]
+
+=== NFS CSI driver deployment
+
+[NOTE]
+====
+You can deploy the NFS CSI driver only when the NFS server is already installed and running.
+If the server is already running, check the `squash` option. You must disable squashing of remote root users (`no_root_squash` or `no_all_squash`) because KubeVirt needs the QEMU UID/GID to ensure that the volume can be synced properly.
+====
+
+. Install the driver using the `csi-driver-nfs` Helm chart.
++
+[,shell]
+----
+$ helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+$ helm install csi-driver-nfs csi-driver-nfs/csi-driver-nfs --namespace kube-system --version v4.10.0
+----
+
+. Create the StorageClass for NFS.
++
+For more information about parameters, see https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/docs/driver-parameters.md[Driver Parameters: Storage Class Usage] in the Kubernetes NFS CSI Driver documentation.
++
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <your-nfs-server-ip>
+  share: <your-nfs-share>
+  # csi.storage.k8s.io/provisioner-secret is only needed for providing mountOptions in DeleteVolume
+  # csi.storage.k8s.io/provisioner-secret-name: "mount-options"
+  # csi.storage.k8s.io/provisioner-secret-namespace: "default"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.2
+----
++
+Once created, you can use the StorageClass to create virtual machine images, root volumes, and data volumes.
+
+== References
+
+* https://harvesterhci.io/kb/use_rook_ceph_external_storage[Use Rook Ceph External Storage with Harvester]
+* https://harvesterhci.io/kb/install_netapp_trident_csi[Using NetApp Storage on Harvester]
+* https://github.com/harvester/harvester/blob/master/enhancements/20250203-third-party-storage-support.md[Third Party Storage Support]
+
+== Known issues
+
+=== 1. Infinite image download loop
+
+The image download process loops endlessly when the StorageClass for the image uses the LVM CSI driver. This issue is related to the scratch volume, which is created by CDI and is used to temporarily store the image data. When the issue exists in your environment, you might find the following error messages in `importer-prime-xxx` pod logs:
+
+[,shell]
+----
+E0418 01:59:51.843459       1 util.go:98] Unable to write file from dataReader: write /scratch/tmpimage: no space left on device
+E0418 01:59:51.861235       1 data-processor.go:243] write /scratch/tmpimage: no space left on device
+unable to write to file
+kubevirt.io/containerized-data-importer/pkg/importer.streamDataToFile
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/util.go:101
+kubevirt.io/containerized-data-importer/pkg/importer.(*HTTPDataSource).Transfer
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/http-datasource.go:162
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).initDefaultPhases.func2
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:173
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessDataWithPause
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:240
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessData
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:149
+main.handleImport
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:188
+main.main
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:148
+runtime.main
+----
+
+The message `no space left on device` indicates that the filesystem created using the scratch volume is not enough to store the image data. CDI creates the scratch volume based on the size of the target volume, but some space is lost to filesystem overhead. The default overhead value is `0.055` (equivalent to 5.5%), which is sufficient in most cases. However, if the image size is less than 1 GB and its virtual size is very close to the image size, the default overhead is likely to be insufficient.
+
+The workaround is to increase the filesystem overhead to 20% using the following command:
+
+[,shell]
+----
+# kubectl patch cdi cdi --type=merge -p '{"spec":{"config":{"filesystemOverhead":{"global":"0.2"}}}}'
+----
+
+The image should be downloaded once the filesystem overhead is increased.
+
+[NOTE]
+====
+Increasing the overhead value does not affect the image PVC size. The scratch volume is deleted after the image is imported.
+====
+
+Related issue: https://github.com/harvester/harvester/issues/7993[#7993] (See https://github.com/harvester/harvester/issues/7993#issuecomment-2790260841[this comment].)
+
+=== 2. Multipath support
+
+The `multipathd` service is disabled in {harvester-product-name} by default. However, certain third-party CSIs may require you to enable the service.
+
+After installing {harvester-product-name}, you can enable and start `multipathd` by logging into each cluster node and running the following commands:
+
+[,shell]
+----
+systemctl enable multipathd
+systemctl start multipathd
+----
+
+Alternatively, you can create a {elemental-product-name} CloudInit file in the `/oem` directory on each host (for example, `/oem/99-start-multipathd.yaml`) with the following contents:
+
+[,yaml]
+----
+stages:
+   default:
+   - name: "start multipathd"
+     systemctl:
+       enable:
+         - multipathd
+       start:
+         - multipathd
+----
+
+This process can be automated across the Harvester cluster using a `CloudInit` CRD.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-mutlitpathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-mutlitpathd
+  contents: |
+    stages:
+      default:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----

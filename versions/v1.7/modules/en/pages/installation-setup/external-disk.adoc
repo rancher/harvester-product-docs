@@ -1,0 +1,75 @@
+= External Disk Support
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== Overview
+
+{harvester-product-name} can be installed on and booted from external disks. This is particularly useful in environments where hosts have NICs or HBA cards that support booting from external iSCSI devices or SAN storage arrays. Such diskless systems are common in large datacenters.
+
+The following sections provide information about installing {harvester-product-name} on an external iSCSI device. The workflow for SAN arrays is similar, but a different set of kernel arguments may be needed to allow {harvester-product-name} to successfully boot from a SAN array.
+
+== iSCSI-Based Installation
+
+=== Configure the iSCSI Target
+
+[NOTE]
+====
+Necessary changes to the BIOS or firmware will depend on the hardware that you use.
+====
+
+When the installation destination powers on or resets, you must enter the firmware setup menu to change the boot settings and enable booting via iSCSI. The settings vary from system to system.
+
+Entering the firmware setup menu usually requires pressing a designated key (for example, F2, F7, or ESC). The system will likely display a list of keys that are available for specific firmware functions. However, this list is displayed for a very short time, so you must select a menu option before the list disappears and the system starts to boot.
+
+image::install/target-details.png[target-details]
+
+Configuration tasks that you must perform include the following:
+
+* Enable UEFI boot
++
+* Configure iSCSI initiator and target parameters
++
+* Enable the iSCSI device in the boot menu
++
+* Set the boot order so that your system boots from the iSCSI device
+
+See your system provider's documentation for more information about boot settings and firmware functions.
+
+=== Install {harvester-product-name}
+
+You can load the {harvester-product-name} ISO using any of the standard methods. The installer should automatically detect the iSCSI device. Select this device when you are prompted to specify the installation disk.
+
+The information displayed on the installer differs slightly when you select an iSCSI target.
+
+* Network configuration screen: Does not show the network interfaces that are used for mounting the iSCSI volumes.
++
+* Disk configuration screen: Shows the first path to a multipath'd remote disk. However, after installation (assuming `os.externalStorageConfig` is provided), the operating system boots from the multipath device.
+
+During installation, you must provide a configuration file (`config.yaml`) that contains multipath and additional kernel arguments. The information is added to the installed operating system to allow subsequent boots from an iSCSI target.
+
+Example (`config.yaml`):
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+    - vendor: "IET"
+      product: "MediaFiles"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+The test setup uses multiple tagged VLANs, such as VLAN 2017 (used for connecting with the iSCSI volume) and VLAN 2011 (used for the {harvester-product-name} management interface).
+
+The kernel argument `vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none` is necessary only if the iSCSI volume is accessible via an interface on a tagged VLAN. The arguments ensure that an additional tagged interface is created during boot and that a static address is allocated to the interface. See https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline] for more information about configuring the kernel arguments to match your use case.
+
+The `write_files` directive is needed to ensure that the management interface is used as the default gateway. This is essential because RKE2 uses the interface with the default gateway as the node address.
