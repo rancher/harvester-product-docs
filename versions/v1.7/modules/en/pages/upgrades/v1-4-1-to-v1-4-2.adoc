@@ -1,5 +1,5 @@
 = Upgrade from v1.4.1 to v1.4.2
-:revdate: 2025-07-07
+:revdate: 2025-11-10
 :page-revdate: {revdate}
 
 == General information
@@ -48,73 +48,7 @@ You may encounter certain limitations when creating and restoring backups that i
 
 == Known issues
 
-=== 1. Upgrade stuck in "Pre-drained" state
-
-The upgrade process may become stuck in the "Pre-drained" state. Kubernetes is supposed to drain the workload on the node, but some factors may cause the process to stall.
-
-image::upgrade/3730-stuck.png[]
-
-A possible cause is processes related to orphan engines of the Longhorn Instance Manager. To determine if this applies to your situation, perform the following steps:
-
-. Check the name of the `instance-manager` pod on the stuck node.
-+
-Example:
-+
-The stuck node is `harvester-node-1`, and the name of the Instance Manager pod is `instance-manager-d80e13f520e7b952f4b7593fc1883e2a`.
-+
-[,shell]
-----
-$ kubectl get pods -n longhorn-system --field-selector spec.nodeName=harvester-node-1 | grep instance-manager
-instance-manager-d80e13f520e7b952f4b7593fc1883e2a          1/1     Running   0              3d8h
-----
-
-. Check the Longhorn Manager logs for informational messages.
-+
-Example:
-+
-[,shell]
-----
-$ kubectl -n longhorn-system logs daemonsets/longhorn-manager
-...
-time="2025-01-14T00:00:01Z" level=info msg="Node instance-manager-d80e13f520e7b952f4b7593fc1883e2a is marked unschedulable but removing harvester-node-1 PDB is blocked: some volumes are still attached InstanceEngines count 1 pvc-9ae0e9a5-a630-4f0c-98cc-b14893c74f9e-e-0" func="controller.(*InstanceManagerController).syncInstanceManagerPDB" file="instance_manager_controller.go:823" controller=longhorn-instance-manager node=harvester-node-1
-----
-+
-The `instance-manager` pod cannot be drained because of the engine `pvc-9ae0e9a5-a630-4f0c-98cc-b14893c74f9e-e-0`.
-
-. Check if the engine is still running on the stuck node.
-+
-Example:
-+
-[,shell]
-----
-$ kubectl -n longhorn-system get engines.longhorn.io pvc-9ae0e9a5-a630-4f0c-98cc-b14893c74f9e-e-0 -o jsonpath='{"Current state: "}{.status.currentState}{"\nNode ID: "}{.spec.nodeID}{"\n"}'
-Current state: stopped
-Node ID:
-----
-+
-The issue likely exists if the output shows that the engine is either not running or not found.
-
-. Check if all volumes are healthy.
-+
-[,shell]
-----
-kubectl get volumes -n longhorn-system -o yaml | yq '.items[] | select(.status.state == "attached")| .status.robustness'
-----
-+
-All volumes must be marked `healthy`. If this is not the case, report the issue.
-
-. Remove the `instance-manager` pod's PodDisruptionBudget (PDB).
-+
-Example:
-+
-[,shell]
-----
-kubectl delete pdb instance-manager-d80e13f520e7b952f4b7593fc1883e2a -n longhorn-system
-----
-
-Related issues: https://github.com/harvester/harvester/issues/7366[#7366] and https://github.com/longhorn/longhorn/issues/6764[#6764]
-
-=== 2. High CPU usage
+=== High CPU usage
 
 High CPU usage may occur because of the `backup-target` setting's `refreshIntervalInSeconds` field. If the field is left empty or is set to `0`, {harvester-product-name} constantly refreshes the backup target, resulting in high CPU usage.
 
@@ -129,7 +63,7 @@ value: '{"type":"nfs","endpoint":"nfs://longhorn-test-nfs-svc.default:/opt/backu
 
 Related issue: https://github.com/harvester/harvester/issues/7885[#7885]
 
-=== 3. Upgrade restarts unexpectedly after the "Dismiss it" button is clicked
+=== Upgrade restarts unexpectedly after the "Dismiss it" button is clicked
 
 When you use {rancher-short-name} to upgrade {harvester-product-name}, the {rancher-short-name} UI displays a dialog with a button labeled "Dismiss it". Clicking this button may result in the following issues:
 
@@ -150,7 +84,7 @@ kubectl -n harvester-system label upgrades -l harvesterhci.io/latestUpgrade=true
 
 Related issue: https://github.com/harvester/harvester/issues/7791[#7791]
 
-=== 4. Virtual machines that use migratable RWX volumes restart unexpectedly
+=== Virtual machines that use migratable RWX volumes restart unexpectedly
 
 Virtual machines that use migratable xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX volumes] restart unexpectedly when the CSI plugin pods are restarted. This issue affects {harvester-product-name} v1.4.x, v1.5.0, and v1.5.1.
 
