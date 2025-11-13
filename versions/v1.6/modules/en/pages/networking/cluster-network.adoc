@@ -1,5 +1,5 @@
 = Cluster Network
-:revdate: 2025-06-23
+:revdate: 2025-11-13
 :page-revdate: {revdate}
 
 == Concepts
@@ -32,7 +32,7 @@ Please refer to xref:./vm-network.adoc[network part] for more details about netw
 
 The following diagram shows the relationship between a cluster network, a network config, and a VM network.
 
-image::networking/relation.png[Harvester networking concepts]
+image::networking/relation.png[{harvester-product-name} networking concepts]
 
 All `Network Configs` and `VM Networks` are grouped under a cluster network.
 
@@ -57,9 +57,9 @@ Overall, this diagram provides a clear visualization of the relationship between
 
 == Cluster network details
 
-Cluster networks are traffic-isolated forwarding paths for transmission of network traffic within a Harvester cluster.
+Cluster networks are traffic-isolated forwarding paths for transmission of network traffic within a {harvester-product-name} cluster.
 
-A cluster network called `mgmt` is automatically created when a Harvester cluster is deployed. You can also create custom cluster networks that can be dedicated to virtual machine traffic.
+A cluster network called `mgmt` is automatically created when a {harvester-product-name} cluster is deployed. You can also create custom cluster networks that can be dedicated to virtual machine traffic.
 
 === Built-in cluster network
 
@@ -67,12 +67,45 @@ When a {harvester-product-name} cluster is deployed, a cluster network named `mg
 
 `mgmt` does not require a network configuration and is always enabled on all hosts. You cannot disable and delete `mgmt`.
 
+[NOTE]
+====
+In {harvester-product-name} v1.5.x and earlier versions, the entire VLAN ID range (2 to 4094) was assigned to the `mgmt` interfaces. However, this exceeded the upper limit of supported VLANs on certain network cards, so hardware VLAN offloading stopped working correctly.
+
+For more information, see https://github.com/harvester/harvester/issues/7650[issue #7650].
+====
+
+Starting with v1.6.0, only the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[primary VLAN ID] provided during installation is automatically added to the `mgmt-br` bridge and the `mgmt-bo` interface. You can <<Add secondary VLAN interfaces,add secondary VLAN interfaces>> after installation is completed.
+
 During installation of the first cluster node, you can configure the MTU value for `mgmt` using the xref:../installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting. The default value of the `mtu` field is `1500`, which is what `mgmt` typically uses. However, if you specify an MTU value other than `0` or `1500`, you must xref:#_annotate_a_non_default_mtu_value_to_mgmt_after_installation[add a corresponding annotation] after the cluster is deployed.
 
 [CAUTION]
 ====
 * Certain https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt[ARP settings] can break cluster communications. With `arp_ignore=2`, for example, replies are sent only if the sender IP address is in the same subnet as the target IP address for which the MAC address is requested. This is not the case in a {harvester-product-name} cluster, so using `arp_ignore=2` on all interfaces results in failed connectivity checks and prevents {longhorn-product-name} pods (specifically, `backing-image` and `instance-manager`) from transitioning to the `Ready` state. Volumes cannot be attached to virtual machines if these {longhorn-product-name} pods are not ready.
 * All nodes in a {harvester-product-name} cluster must use the same MTU value. Because {harvester-product-name} does not automatically detect discrepancies when nodes join, you must manually ensure that the values are identical to prevent unexpected system behavior.
+====
+
+=== Add secondary VLAN interfaces
+
+Add the following commands to the `/oem/90_custom.yaml` file and reboot the node.
+
+* `/etc/wicked/scripts/setup_bond.sh` section
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE
+----
+
+* `/etc/wicked/scripts/setup_bridge.sh` section
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE self
+bridge vlan add vid <vlan-id> dev mgmt-bo
+----
+
+[IMPORTANT]
+====
+You must include a separate command for each distinct VLAN ID. Ensure that the `vlan-id` placeholder is replaced with the actual ID.
 ====
 
 === Annotate a Non-Default MTU Value to `mgmt` After Installation 
