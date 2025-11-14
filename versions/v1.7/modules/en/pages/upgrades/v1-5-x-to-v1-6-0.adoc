@@ -1,12 +1,12 @@
 = Upgrade from v1.5.x to v1.6.0
-:revdate: 2025-11-11
+:revdate: 2025-11-13
 :page-revdate: {revdate}
 
 == General information
 
 An *Upgrade* button appears on the *Dashboard* screen whenever a new {harvester-product-name} version that you can upgrade to becomes available. For more information, see xref:./upgrades.adoc#_start_an_upgrade[Start an upgrade].
 
-Clusters running v1.5.0 and v1.5.1 can upgrade to v1.6.x directly because Harvester allows a maximum of one minor version upgrade for underlying components. v1.5.0, v1.5.1, and v1.5.2 use the same minor version of {rke2-short-name} (v1.32), while v1.6.0 uses the next minor version (v1.33). For more information, see xref:upgrades/upgrades.adoc#_upgrade_paths)[Upgrade paths].
+Clusters running v1.5.0 and v1.5.1 can upgrade to v1.6.x directly because {harvester-product-name} allows a maximum of one minor version upgrade for underlying components. v1.5.0, v1.5.1, and v1.5.2 use the same minor version of {rke2-short-name} (v1.32), while v1.6.0 uses the next minor version (v1.33). For more information, see xref:upgrades/upgrades.adoc#_upgrade_paths)[Upgrade paths].
 
 [NOTE]
 ====
@@ -153,3 +153,86 @@ esac
 The workaround is to replace the outdated script contents. Use the scripts in the `/oem/90_custom.yaml` file generated from `gopkg.in/yaml.v3`. Once the scripts are updated, the upgrade is resumed.
 
 Related issue: https://github.com/harvester/harvester/issues/9033[#9033]
+
+=== Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network
+
+{harvester-product-name} v1.6.0 introduced a change to reduce unnecessary VLAN provisioning. Previously, all secondary VLAN interfaces were attached to the `mgmt-br` bridge and the `mgmt-bo` interface. Now, only required VLAN interfaces are attached. Consequently, when a cluster is upgraded to v1.6.x, all secondary VLAN interfaces that were previously attached to `mgmt-br` and `mgmt-bo` are removed from the management hosts.
+
+[WARNING]
+====
+Workloads that rely on these interfaces will lose network connectivity.
+
+For more information, see https://github.com/harvester/harvester/issues/7650[issue #7650].
+====
+
+After upgrading to v1.6.x, perform the following steps:
+
+. Verify the VLANs attached to `mgmt-br` and `mgmt-bo` by running the following command on management hosts:
++
+[,shell]
+----
+bridge vlan show
+----
++
+This command outputs only the primary VLAN of `mgmt-br` and `mgmt-bo`.
+
+. Manually add the required secondary VLANs to the `mgmt-br` bridge and the `mgmt-bo` interface by adding the following commands to the `/oem/90_custom.yaml` file:
++  
+** `/etc/wicked/scripts/setup_bond.sh` section
++  
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE
+----
++
+** `/etc/wicked/scripts/setup_bridge.sh` section
++  
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE self
+bridge vlan add vid <vlan-id> dev mgmt-bo
+----
++
+[IMPORTANT]
+====
+You must include a separate command for each distinct VLAN ID. Ensure that the `vlan-id` placeholder is replaced with the actual ID.
+====
+
+. Once the `/oem/90_custom.yaml` file is updated, reboot the management hosts.
+
+. Verify that all required VLANs were added by running the following command on the hosts:
++
+[,shell]
+----
+bridge vlan show
+----
+
+==== Upgrade scenario example
+
+In the following example, a v1.5.x cluster was initially installed with a xref:installation-setup/config/configuration-file.adoc#_install_management_interface[primary VLAN interface] (VLAN ID: `2021`). To add a secondary VLAN interface (VLAN ID: `2113`), the `/oem/99_vlan-ifcfg.yaml` file  was created on the management hosts with the following contents:
+
+[,yaml]
+----
+stages:
+  initramfs:
+    - name: "Host VLAN interface mgmt-br.353"
+      files:
+        - path: /etc/sysconfig/network/ifcfg-mgmt-br.2113
+          owner: 0
+          group: 0
+          permissions: 384
+          content: |
+            STARTMODE='onboot'
+            BOOTPROTO='static'
+            IPADDR='10.255.113.150/24'
+            VLAN_ID='2113'
+            ETHERDEVICE='mgmt-br'
+            VLAN='yes'
+            DEFROUTE='no'
+----
+
+The typical expectation is that an additional VLAN sub-interface is created on the `mgmt` interface (`mgmt-br.2113`) and assigned an IPv4 address. In addition, this sub-interface and the primary interface (`mgmt-br.2021`) are both expected to be used for L3 connectivity after the cluster is upgraded to v1.6.x.
+
+In actuality, after the upgrade to v1.6.0, the VLAN sub-interface is created but the secondary VLAN (VLAN ID: `2113`) is removed from the `mgmt-br` bridge and the `mgmt-bo` interface. After a reboot, only the primary VLAN ID is assigned to the `mgmt-br` bridge and the `mgmt-bo` interface (using the `/oem/90_custom.yaml` file).
+
+To mitigate the effects of this change, you must perform the workaround described in the <<Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network,previous section>>. This involves identifying secondary VLAN interfaces and then adding the necessary ones to the `mgmt-br` bridge and the `mgmt-bo` interface.
