@@ -1,5 +1,5 @@
 = Virtual Machine Issues
-:revdate: 2025-10-20
+:revdate: 2025-12-05
 :page-revdate: {revdate}
 
 The following sections contain information useful in troubleshooting issues related to {harvester-product-name} VM management.
@@ -8,13 +8,13 @@ The following sections contain information useful in troubleshooting issues rela
 
 === Issue Description
 
-On rare occasions, the *Start* button is unavailable on the Harvester UI for VMs that are _Off_. Without that button, users are unable to start the VMs.
+On rare occasions, the *Start* button is unavailable on the {harvester-product-name} UI for VMs that are _Off_. Without that button, users are unable to start the VMs.
 
 image::troubleshooting/vm-start-button-is-not-visible.png[]
 
 === VM General Operations
 
-On the Harvester UI, the *Stop* button is visible after a VM is created and started.
+On the {harvester-product-name} UI, the *Stop* button is visible after a VM is created and started.
 
 image::troubleshooting/stop-vm-from-webui.png[]
 
@@ -46,7 +46,7 @@ NAME                      READY   STATUS    RESTARTS   AGE
 virt-launcher-vm8-tl46h   1/1     Running   0          80s
 ----
 
-==== A VM Stopped Using the Harvester UI
+==== A VM Stopped Using the {harvester-product-name} UI
 
 Only the object `vm` exists and its status is `Stopped`. Both `vmi` and `pod` disappear.
 
@@ -231,19 +231,19 @@ func (vf *vmformatter) isVMStarting(vm *kubevirtv1.VirtualMachine) bool {
 
 To address the issue, you can force delete the pod using the command `kubectl delete pod virt-launcher-ocffm031v000-rrkss -n namespace --force`.
 
-After the pod is successfully deleted, the `Start` button becomes visible again on the Harvester UI.
+After the pod is successfully deleted, the `Start` button becomes visible again on the {harvester-product-name} UI.
 
 === Related Issue
 
 https://github.com/harvester/harvester/issues/4659
 
-== VM Stuck in Starting State with Error Messsage 'not a device node'
+== VM Stuck in Starting State with Error Messsage `not a device node`
 
 _Impacted versions: v1.3.0_
 
 === Issue Description
 
-Some VMs may fail to start and then become unresponsive after the cluster or some nodes are restarted. On the *Dashboard* screen of the Harvester UI, the status of the affected VMs is stuck at _Starting_.
+Some VMs may fail to start and then become unresponsive after the cluster or some nodes are restarted. On the *Dashboard* screen of the {harvester-product-name} UI, the status of the affected VMs is stuck at _Starting_.
 
 image::troubleshooting/vm-stuck-at-starting.png[]
 
@@ -349,7 +349,7 @@ Cluster level operation:
  default                    vm1-disk-0-9gc6h           Bound    pvc-f1798969-5b72-4d76-9f0e-64854af7b59c   1Gi        RWX            longhorn-image-fxsqr   7d22h
 ----
 
-. <<General VM Related Objects,Stop>> the affected VMs from Harvester UI.
+. <<General VM Related Objects,Stop>> the affected VMs from {harvester-product-name} UI.
 +
 The VM may stuck in `Stopping`, continue the next step.
 
@@ -407,7 +407,7 @@ The newly generated csi file is an expected device file.
 
 ==== Description
 
-The **Virtual Machines** screen on the Harvester UI does not display the IP address of a newly created or imported virtual machine.
+The *Virtual Machines* screen on the {harvester-product-name} UI does not display the IP address of a newly created or imported virtual machine.
 
 ==== Analysis
 
@@ -424,7 +424,7 @@ The output does not contain the string `guest-agent` when the `qemu-guest-agent`
 
 You can xref:../virtual-machines/create-vm.adoc#_installing_the_qemu_guest_agent[install the QEMU guest agent] by editing the virtual machine configuration.
 
-. On the Harvester UI, go to *Virtual Machines*.
+. On the {harvester-product-name} UI, go to *Virtual Machines*.
 
 . Locate the affected virtual machine, and then select *⋮ -> Edit Config*.
 
@@ -453,7 +453,7 @@ The {harvester-product-name} UI does not display the IP address of the virtual m
 
 ==== Analysis
 
-The QEMU guest agent is responsible for reporting information about the guest operating system, including interface details, to the virtual machine instance for displaying on the Harvester UI. The issue occurs when the virtual machine's pod interface acquires an IPv6 link-local address and reports it to the virtual machine instance before the QEMU guest agent can provide its own information. Once this happens, the IPv4 address from the QEMU guest agent is never reported due to a bug in KubeVirt.
+The QEMU guest agent is responsible for reporting information about the guest operating system, including interface details, to the virtual machine instance for displaying on the {harvester-product-name} UI. The issue occurs when the virtual machine's pod interface acquires an IPv6 link-local address and reports it to the virtual machine instance before the QEMU guest agent can provide its own information. Once this happens, the IPv4 address from the QEMU guest agent is never reported due to a bug in KubeVirt.
 
 You can check the IP address of the pod interface and the virtual machine instance using the following steps:
 
@@ -596,3 +596,63 @@ status:
 === Solution
 
 To ensure that the `Pending` pod can be scheduled, verify that the cluster network (for example, `cn2`) is configured on the active nodes and that the corresponding label (for example, `network.harvesterhci.io/cn2`) is applied to those same nodes.
+
+== Unintentional virtual machine template modification via cloud config YAML
+
+When you use a template to create a virtual machine and then modify that virtual machine's user data using the *Edit as YAML* feature, the source template may be unintentionally modified once you save the changes.
+
+This issue occurs because the system does not properly dissociate the configuration inheritance. Because the new configuration remains linked to the source template, saving the changes automatically overwrites the template's data.
+
+[TIP]
+====
+Avoid using the *Edit as YAML* feature when creating virtual machines, especially when using a template. Instead, use the dedicated fields and options available on the *Virtual Machine: Create* screen.
+====
+
+To mitigate the issue, perform the following steps:
+
+. Identify the name and namespace of the affected virtual machine.
+
+. Identify the Cloud Config secret that is associated with the affected virtual machine.
++
+[,bash]
+----
+# Get the current Secret name linked to the VM's cloudInitNoCloud volume source:
+VM_NAME=<VM_NAME>
+VM_NAMESPACE=<VM_NAMESPACE>
+
+SECRET=$(kubectl get vm $VM_NAME -n $VM_NAMESPACE -o jsonpath='{.spec.template.spec.volumes[?(@.cloudInitNoCloud)].cloudInitNoCloud.secretRef.name}')
+SECRET_NAMESPACE=$(kubectl get secret -A | grep $SECRET  | awk '{print $1}')
+echo "Current Secret: $SECRET_NAMESPACE -> $SECRET"
+----
+
+. Create an independent copy of the secret.
++
+Export the current secret, remove the identifying metadata, assign a unique name, and then apply the secret.
++
+[,bash]
+----
+# Define a new, unique name for the secret
+NEW_SECRET="$VM_NAME-$(date +%s)"
+# Export, clean, rename, and create the new Secret
+kubectl get secret $SECRET -n $SECRET_NAMESPACE -o json | \
+  jq 'del(.metadata.creationTimestamp, .metadata.resourceVersion, .metadata.uid, .metadata.ownerReferences, .metadata.annotations["kubectl.kubernetes.io/last-applied-configuration"], .metadata.selfLink)' | \
+  jq '.metadata.name = "'"$NEW_SECRET"'"' | \
+  jq '.metadata.namespace = "'"$VM_NAMESPACE"'"' | \
+  kubectl apply -n $VM_NAMESPACE -f -
+----
+
+. Update the virtual machine configuration to use the new secret.
++
+Point the virtual machine's `cloudInitNoCloud` volume source to the new secret.
++
+[,bash]
+----
+# Patch the VM to replace the secretRef name
+VOLUME_INDEX=$(kubectl get vm $VM_NAME -n $NAMESPACE -o json | jq '.spec.template.spec.volumes |  to_entries[] |    select(.value.cloudInitNoCloud != null) | .key')
+kubectl patch vm $VM_NAME -n $VM_NAMESPACE --type='json' \
+  -p='[{"op": "replace", "path": "/spec/template/spec/volumes/'$VOLUME_INDEX'/cloudInitNoCloud/secretRef/name", "value": "'"$NEW_SECRET"'"}, {"op": "replace", "path": "/spec/template/spec/volumes/'$VOLUME_INDEX'/cloudInitNoCloud/networkDataSecretRef/name", "value": "'"$NEW_SECRET"'"}]'
+----
+
+Once the Cloud Config is backed by a unique secret, you can use the {harvester-product-name} UI's YAML editor to edit the virtual machine configuration without affecting the source template.
+
+Related issue: https://github.com/harvester/harvester/issues/9207[#9207]
