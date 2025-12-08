@@ -1,5 +1,5 @@
 = Installation Issues
-:revdate: 2025-06-04
+:revdate: 2025-12-08
 :page-revdate: {revdate}
 
 The following sections contain tips to troubleshoot or get assistance with failed installations.
@@ -33,7 +33,7 @@ For more information, see xref:/installation-setup/methods/pxe-boot-install.adoc
 == Modifying cluster token on agent nodes
 
 When an agent node fails to join the cluster, it can be related to the cluster token not being identical to the server node token.
-In order to confirm the issue, connect to your agent node (i.e. with xref:./operating-system.adoc#_how_to_log_in_to_a_harvester_node[SSH] and check the `rancherd` service log with the following command:
+In order to confirm the issue, connect to your agent node (i.e. with xref:./operating-system.adoc#_how_to_log_in_to_a_harvester_node[SSH]) and check the `rancherd` service log with the following command:
 
 [,shell]
 ----
@@ -48,7 +48,7 @@ msg="Bootstrapping Rancher (v2.7.5/v1.25.9+rke2r1)"
 msg="failed to bootstrap system, will retry: generating plan: response 502: 502  Bad Gateway getting cacerts: <html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
 ----
 
-Note that the Rancher version and IP address depend on your environment and might differ from the message above.
+Note that the {rancher-short-name} version and IP address depend on your environment and might differ from the message above.
 
 To fix the issue, you need to update the token value in the `rancherd` configuration file `/etc/rancher/rancherd/config.yaml`.
 
@@ -127,3 +127,70 @@ image::troubleshooting/installation-support-config-example.png[]
 ====
 A failure PXE Boot installation automatically generates a tarball if the xref:/installation-setup/config/configuration-file.adoc#_install_debug[`install.debug`] field is set to `true` in the configuration file.
 ====
+
+== Console shows `Setting up Harvester` after day 0 installation
+
+=== Issue description
+
+After a successful installation, the console persistently shows `Setting up Harvester`. While most UI and CLI operations remain unaffected, attempts to xref:upgrades/upgrades.adoc#_start_an_upgrade[start an upgrade] are blocked.
+
+The following information is displayed after you run the command `kubectl get managedchart -n fleet-local harvester -oyaml`:
+
+[,yaml]
+----
+...
+status:
+  conditions:
+  - lastUpdateTime: "2025-10-22T08:01:18Z"
+    message: 'NotReady(1) [Cluster fleet-local/local]; daemonset.apps harvester-system/harvester-network-controller
+      modified {"spec":{"template":{"spec":{"containers":[{"args":["agent"],"command":["harvester-network-controller"],
+      "env":[{"name":"NODENAME","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"spec.nodeName"}}},
+      {"name":"NAMESPACE","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"metadata.namespace"}}}],
+      "image":"rancher/harvester-network-controller:master-head","imagePullPolicy":"IfNotPresent","name":"harvester-network",
+      "resources":{"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}},
+      "securityContext":{"privileged":true},"terminationMessagePath":"/dev/termination-log","terminationMessagePolicy":"File",
+      "volumeMounts":[{"mountPath":"/dev","name":"dev"},{"mountPath":"/lib/modules","name":"modules"}]}]}}}};'
+    status: "False"
+    type: Ready
+----
+
+=== Root cause
+
+The console runs the following command to determine if the status of the `harvester` ManagedChart (in the `fleet-local` namespace) is `Ready`.
+
+[,console]
+----
+cmd := exec.Command("/bin/sh", "-c", kubectl -n fleet-local get ManagedChart harvester -o jsonpath='{.status.conditions}' | 
+jq 'map(select(.type == "Ready" and .status == "True")) | length')
+----
+
+The `ManagedChart` CRD is used by https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] to manage resources via GitOps. If any of those resources are directly modified, `ManagedChart` records and flags the deviations. In the above example, the error occurred because a custom image tag was directly applied to the `harvester-system/harvester-network-controller` DaemonSet.
+
+To retrieve the full list of `ManagedChart` resources, run the command `kubectl get bundle -n fleet-local mcc-harvester -oyaml`.
+
+[,yaml]
+----
+apiVersion: fleet.cattle.io/v1alpha1
+kind: Bundle
+metadata:
+  name: mcc-harvester
+  namespace: fleet-local
+spec:
+  resources:
+  - content: H4s...===
+    encoding: base64+gz
+    charts/harvester-network-controller/templates/daemonset.yaml
+  - content: ...
+----
+
+=== Workaround
+
+You can perform either of the following actions:
+
+* Revert the direct changes made to the affected resources.
+
+* Update the `ManagedChart` CRD with the desired custom configuration using `kubectl edit managedchart -n fleet-local harvester`.
+
+=== Related issue
+
+https://github.com/harvester/harvester/issues/8655[#8655]
