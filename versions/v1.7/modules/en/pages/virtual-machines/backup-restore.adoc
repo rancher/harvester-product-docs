@@ -1,5 +1,5 @@
 = Virtual Machine Backup, Snapshot & Restore
-:revdate: 2025-10-20
+:revdate: 2025-12-08
 :page-revdate: {revdate}
 
 == Virtual Machine Backup & Restore
@@ -87,75 +87,6 @@ network:
 ----
 
 The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
-====
-
-==== Filesystem freeze error in a RHEL 9 virtual machine
-
-When a data disk is mounted on a running Red Hat Enterprise Linux (RHEL) 9 virtual machine, attempts to create a backup or snapshot of the virtual machine may fail because of a `Failed to freeze filesystem` error.
-
-===== Cause: QEMU Guest Agent access denied
-
-This issue is typically caused by SELinux denying read access to the QEMU Guest Agent (`qemu-ga`). You can verify this using the following steps:
-
-. Access the virtual machine's virt-launcher `compute` container.
-+
-[,bash]
-----
-POD=$(kubectl get pods -n default \
-  -l vm.kubevirt.io/name=vm1 \
-  -o jsonpath='{.items[0].metadata.name}')
-kubectl exec -it $POD -n default -c compute -- bash
-----
-
-. Attempt to freeze the filesystem using the https://github.com/kubevirt/kubevirt/blob/main/docs/freeze.md#virt-freezer[virt-freezer] application, which is available in the `compute` container.
-+
-[,bash]
-----
-virt-freezer --freeze --namespace <VM namespace> --name <VM name>
-----
-
-. Check for SELinux `Permission denied` errors.
-+
-If you see a message similar to the following, SELinux is blocking the required access.
-+
-[,bash]
-----
-{"component":"freezer","level":"error","msg":"Freezing VMI failed","reason":"server error. command Freeze failed: \"LibvirtError(Code=1, Domain=10, Message='internal error: unable to execute QEMU agent command 'guest-fsfreeze-freeze': failed to open /data: Permission denied')\""}
-----
-
-===== Solution: Generate a SELinux policy to allow QEMU Guest Agent access
-
-{harvester-product-name} does not manage guest virtual machine configuration. To resolve the issue, you must create and install a custom SELinux policy module.
-
-[CAUTION]
-====
-Using `audit2allow` may grant broad permissions, as it allows all actions found in the logs. Review the policy carefully, or consider mounting the volume with an appropriate SELinux label for tighter security.
-====
-
-. Generate a custom SELinux policy module from audit logs.
-+
-[,bash]
-----
-grep qemu-ga /var/log/audit/audit.log | audit2allow -M my_qemu_ga
-----
-
-. Install the generated policy module.
-+
-[,bash]
-----
-semodule -i my_qemu_ga.pp
-----
-
-. Repeat steps 1 and 2 until virt-freezer can successfully freeze the filesystems.
-
-[IMPORTANT]
-====
-You must unfreeze the virtual machine filesystems before performing other operations.
-
-[,bash]
-----
-virt-freezer --unfreeze --namespace <VM namespace> --name <VM name>
-----
 ====
 
 === Restore a new virtual machine using a backup
@@ -295,11 +226,6 @@ network:
 The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
 ====
 
-[NOTE]
-====
-Virtual machine snapshots may encounter a `filesystem freeze failed` error when performed on a running RHEL9 guest VM. For troubleshooting steps and solutions, see <<Filesystem freeze error in a RHEL 9 virtual machine>>.
-====
-
 === Restore a new virtual machine using a snapshot
 
 . Go to the `VM Snapshots` page.
@@ -361,7 +287,106 @@ image::vm/edit-quota-vm-save.png[]
 +
 image::vm/edit-quota-vm-read.png[]
 
-== Scheduled Virtual Machine Backups and Snapshots
+== Filesystem freeze for virtual machine backups and snapshots
+
+When a guest virtual machine is connected with the *QEMU Guest Agent*, the {harvester-product-name} controller performs filesystem freeze operations through Kubevirt's https://github.com/kubevirt/kubevirt/blob/main/docs/freeze.md#virt-freezer[virt-freezer] application to ensure filesystem consistency during virtual machine backups and snapshots.
+
+This feature is particularly valuable for virtual machines with high I/O activity or critical data that requires point-in-time consistency guarantees.
+
+=== Prerequisites
+
+Filesystem freeze and thaw functionality depends on virtual machine configuration, which is _not controlled by {harvester-product-name}_. You must ensure that virtual machines are configured correctly and support the required libvirt commands.
+
+* *Red Hat Enterprise Linux (RHEL)* and *SUSE Linux Enterprise (SLE) Micro*: These systems may lack sufficient permissions for filesystem freeze operations by default. You may be required to create custom SELinux policies.
+
+* *Windows*: Filesystem freeze operations are available on these systems only when the Volume Shadow Copy Service (VSS) service is enabled.
+
+[NOTE]
+====
+When the virt-freezer application is triggered, KubeVirt communicates with the QEMU Guest Agent to translate operating system-specific calls. Linux systems use fsfreeze syscalls, while Windows systems use VSS APIs.
+====
+
+=== Verifying filesystem freeze compatibility
+
+To verify that your virtual machine supports filesystem freeze operations, perform the following steps:
+
+. Access the virtual machine's virt-launcher `compute` container.
++
+[,bash]
+----
+POD=$(kubectl get pods -n default \
+  -l vm.kubevirt.io/name=vm1 \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $POD -n default -c compute -- bash
+----
+
+. Attempt to freeze the filesystem using the virt-freezer application, which is available in the `compute` container:
++
+[,bash]
+----
+virt-freezer --freeze --namespace <VM namespace> --name <VM name>
+----
+
+. Verify the result of the freeze operation.
++
+[IMPORTANT]
+====
+Do not skip this step. In addition, you must thaw virtual machine filesystems before performing any other operations.
+====
+
+=== Troubleshooting filesystem freeze issues
+
+==== Filesystem freeze error due to insufficient permissions
+
+A `Failed to freeze filesystem` error may cause backup or snapshot failures on some Linux distributions.
+
+This issue typically occurs when SELinux denies read access to the QEMU Guest Agent (`qemu-ga`). You can verify the cause using the following steps:
+
+. [Verify that your virtual machine supports filesystem freeze operations](#verifying-filesystem-freeze-compatibility).
+
+. Check for SELinux `Permission denied` errors in the system logs.
++
+If you see a message similar to the following, SELinux is blocking the required access:
++
+[,console]
+----
+{"component":"freezer","level":"error","msg":"Freezing VMI failed","reason":"server error. command Freeze failed: \"LibvirtError(Code=1, Domain=10, Message='internal error: unable to execute QEMU agent command 'guest-fsfreeze-freeze': failed to open /data: Permission denied')\""}
+----
+
+To resolve the issue, you must create and install a custom SELinux policy module. This solution has been verified to work with *RHEL* and *SLE Micro*.
+
+[CAUTION]
+====
+Using `audit2allow` may grant broad permissions, as it allows all actions found in the logs. Carefully review the generated policy, or consider mounting volumes with appropriate SELinux labels for enhanced security.
+====
+
+. Generate a custom SELinux policy module from audit logs.
++
+[,bash]
+----
+grep qemu-ga /var/log/audit/audit.log | audit2allow -M my_qemu_ga
+----
+
+. Install the generated policy module.
++
+[,bash]
+----
+semodule -i my_qemu_ga.pp
+----
+
+. Repeat steps 1 and 2 until *virt-freezer* can successfully freeze the filesystems.
++
+[IMPORTANT]
+====
+You must thaw virtual machine filesystems before performing other operations.
+
+[,bash]
+----
+virt-freezer --unfreeze --namespace <VM namespace> --name <VM name>
+----
+====
+
+== Scheduled virtual machine backups and snapshots
 
 {harvester-product-name} supports the creation of virtual machine backups and snapshots on a scheduled basis, with the option to retain a specific number of backups and snapshots. You can suspend, resume, and update the schedule at runtime.
 
@@ -383,9 +408,9 @@ image::vm/configure-schedule.png[]
 +
 [IMPORTANT]
 ====
-The backup or snapshot creation interval must be **at least one hour**. Frequent backup or snapshot deletion results in heavy I/O load.
+The backup or snapshot creation interval must be *at least one hour*. Frequent backup or snapshot deletion results in heavy I/O load.
 
-If two schedules have the same granularity level, each iteration's timing offset must be **at least 10 minutes**.
+If two schedules have the same granularity level, each iteration's timing offset must be *at least 10 minutes*.
 ====
 +
 ** *Retain*: Specify the number of up-to-date backups or snapshots to be retained.
@@ -446,7 +471,7 @@ The schedule is automatically suspended when the number of consecutive failed ba
 
 [NOTE]
 ====
-If a schedule was automatically suspended because the **Max Failure** value was exceeded, you must explicitly resume that schedule after verifying that the backup or snapshot can be created successfully. For example, when the backup target becomes reachable again after a period of disconnection, you can first create a backup manually and check the result.
+If a schedule was automatically suspended because the *Max Failure* value was exceeded, you must explicitly resume that schedule after verifying that the backup or snapshot can be created successfully. For example, when the backup target becomes reachable again after a period of disconnection, you can first create a backup manually and check the result.
 ====
 
 === Virtual Machine Operations and {harvester-product-name} Upgrades
@@ -462,3 +487,10 @@ image::vm/upgrade-vmbackup.png[]
 image::vm/upgrade-svmbackup.png[]
 
 To avoid such issues, SUSE plans to implement automatic suspension of all virtual machine schedules before the upgrade process is started. The suspended schedules will also be automatically resumed after the upgrade is completed. For more information, see https://github.com/harvester/harvester/issues/6759[Issue #6759].
+
+[CAUTION]
+====
+{longhorn-product-name} has a similar feature called https://longhorn.io/docs/1.10.0/snapshots-and-backups/scheduling-backups-and-snapshots/[recurring snapshots and backups], which uses recurring jobs to create periodic snapshots or backups of {longhorn-product-name} volumes. This feature is not integrated into {harvester-product-name} because it conflicts with certain operations (for example, virtual machine attachment and cluster upgrades). Recurring {longhorn-product-name} snapshot and backup jobs can also generate heavy I/O without {harvester-product-name}'s awareness, and in some cases, even destabilize the cluster.
+
+For best results, use the <<Scheduled virtual machine backups and snapshots,scheduled virtual machine backups and snapshots>> feature in {harvester-product-name}, which has safeguard mechanisms that mitigate heavy I/O when possible. Again, {harvester-product-name} does not support recurring {longhorn-product-name} snapshots and backups.
+====
