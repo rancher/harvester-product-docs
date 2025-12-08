@@ -1,30 +1,35 @@
 = NVIDIA Driver Toolkit
-:revdate: 2025-05-09
+:revdate: 2025-12-05
 :page-revdate: {revdate}
 
-nvidia-driver-toolkit is an add-on that allows you to deploy out-of-band NVIDIA GRID KVM drivers to your existing SUSE® Virtualization clusters.
+The `nvidia-driver-toolkit` add-on allows you to deploy out-of-band NVIDIA GRID KVM drivers to your existing {harvester-product-name} clusters.
 
 [NOTE]
 ====
-The toolkit only includes the correct SUSE® Virtualization OS image, build utilities, and kernel headers that allow NVIDIA drivers to be compiled and loaded from the container. You must download the NVIDIA KVM drivers using a valid NVIDIA subscription. For guidance on identifying the correct driver for your NVIDIA GPU, see the https://www.nvidia.com/en-au/drivers/vgpu-software-driver/[NVIDIA documentation].
+The toolkit only includes the correct {harvester-product-name} OS image, build utilities, and kernel headers that allow NVIDIA drivers to be compiled and loaded from the container. You must download the NVIDIA KVM drivers using a valid NVIDIA subscription. For guidance on identifying the correct driver for your NVIDIA GPU, see the https://www.nvidia.com/en-au/drivers/vgpu-software-driver/[NVIDIA documentation].
+
+Each new {harvester-product-name} version is released with the correct `nvidia-driver-toolkit` image to ensure that all dependencies required to install the NVIDIA vGPU KVM drivers are available in the image.
 ====
 
-The SUSE® Virtualization ISO does not include the nvidia-driver-toolkit container image. Because of its size, the image is pulled from Docker Hub by default. If you have an air-gapped environment, you can download and push the image to your private registry. The *Image Repository* and *Image Tag* fields on the *nvidia-driver-toolkit* screen provide information about the image that you must download.
+The {harvester-product-name} ISO does not include the `nvidia-driver-toolkit` container image. Because of its size, the image is pulled from Docker Hub by default. If you have an air-gapped environment, you can download and push the image to your private registry. The *Image Repository* and *Image Tag* fields on the *nvidia-driver-toolkit* screen provide information about the image that you must download.
 
 image::advanced/nvidia-driver-toolkit.png[]
 
-[NOTE]
-====
-Each new SUSE® Virtualization version will be released with the correct nvidia-driver-toolkit image to ensure that all dependencies required to install the NVIDIA vGPU KVM drivers are available in the image.
-====
+To enable the add-on, you must specify the HTTP location where the NVIDIA vGPU KVM driver file is located. You can also update the image repository and image tag, if necessary. Once the add-on is enabled, an `nvidia-driver-toolkit` daemonset is deployed to the cluster.
 
-To enable the add-on, users need to perform the following:
+On pod startup, the ENTRYPOINT script downloads the NVIDIA driver from the specified driver location. Install the driver and load the kernel drivers.
 
-* Provide the `Driver Location`: which is an http location where nvidia vgpu kvm driver file is located (as shown in the example)
-* update the `Image Repository` and `Image Tag` if needed
+The `pcidevices-controller` add-on can now leverage this add-on to manage the lifecycle of the vGPU devices on nodes containing supported GPU xref:../hosts/vgpu-support.adoc[devices].
 
-Once the add-on is enabled, a nvidia-driver-toolkit daemonset is deployed to the cluster.
+== Installing different NVIDIA driver versions
 
-On pod startup, the entrypoint script will download the nvidia driver from the speificied `Driver Location`, install the driver and load the kernel drivers.
+NVIDIA driver versions can vary across cluster nodes. If you want to install a specific driver version on a node, you must annotate the node before starting the `nvidia-driver-toolkit` add-on.
 
-The `PCIDevices` add-on can now leverage this add-on to manage the lifecycle of the vGPU devices on nodes containing supported GPU xref:../hosts/vgpu-support.adoc[devices].
+[,shell]
+----
+kubectl annotate nodes {node name} sriovgpu.harvesterhci.io/custom-driver=https://[driver location]
+----
+
+The add-on installs the specified driver upon starting.
+
+If an NVIDIA driver was previously installed, you must restart the pod to trigger the installation process again.
