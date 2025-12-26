@@ -1,5 +1,5 @@
 = Cluster Network
-:revdate: 2025-11-13
+:revdate: 2025-12-26
 :page-revdate: {revdate}
 
 == Concepts
@@ -86,27 +86,29 @@ During installation of the first cluster node, you can configure the MTU value f
 
 === Add secondary VLAN interfaces
 
-Add the following commands to the `/oem/90_custom.yaml` file and reboot the node.
-
-* `/etc/wicked/scripts/setup_bond.sh` section
+. Check the current VLAN settings for the `bond-mgmt` and `bridge-mgmt` connection profiles.
++
+Example (where the primary VLAN ID is 2017):
 +
 [,shell]
 ----
-bridge vlan add vid <vlan-id> dev $INTERFACE
+$ nmcli -f bridge-port.vlans con show bond-mgmt
+bridge-port.vlans:                      1 pvid untagged, 2017
+$ nmcli -f bridge.vlans con show bridge-mgmt
+bridge.vlans:                           2017
 ----
 
-* `/etc/wicked/scripts/setup_bridge.sh` section
+. Update the `bond-mgmt` and `bridge-mgmt` connection profiles to add the secondary VLAN ID.
++
+Example (where the primary VLAN ID is 2017 and the secondary VLAN ID is 2018):
 +
 [,shell]
 ----
-bridge vlan add vid <vlan-id> dev $INTERFACE self
-bridge vlan add vid <vlan-id> dev mgmt-bo
+$ nmcli con modify bond-mgmt bridge-port.vlans '1 pvid untagged, 2017, 2018'
+$ nmcli con modify bridge-mgmt bridge.vlans 2017,2018
 ----
 
-[IMPORTANT]
-====
-You must include a separate command for each distinct VLAN ID. Ensure that the `vlan-id` placeholder is replaced with the actual ID.
-====
+. Reboot each node to apply the change.
 
 === Annotate a Non-Default MTU Value to `mgmt` After Installation 
 
@@ -129,70 +131,43 @@ You must ensure the following:
 
 === Change the MTU Value of `mgmt` After Installation
 
-The MTU of the mgmt network is saved on an internal file `/oem/90_custom.yaml` on each node. The file stores a lot of basic configuration of the system.
-
-CAUTION: Exercise extreme caution when editing `/oem/90_custom.yaml`. Do not change the file's formatting and other settings to avoid breaking the system.
-
-. Create a backup of the `/oem/90_custom.yaml` file on each node. You can use this backup to restore the file when the node is unable to reboot.
-
 . Stop all virtual machines that are attached to the `mgmt` network.
 
-. (Optional) Disable the xref:./storage-network.adoc#_storage_network_setting[storage network] if it uses `mgmt`.
+. (Optional) Disable the xref:networking/storage-network.adoc#_storage_network_setting[storage network] if it uses `mgmt` and is enabled.
 
-. Change the MTU value in the `/oem/90_custom.yaml` file on each node. Locate the following paths, and then change the value in `MTU=1500`:
+. Change the MTU value for the `bond-mgmt`, `bridge-mgmt`, and the `vlan-mgmt` (if you are using a VLAN) connection profiles.
 +
-[bash, shell]
-----
-`path: /etc/sysconfig/network/ifcfg-mgmt-bo`
-`path: /etc/sysconfig/network/ifcfg-mgmt-br`
-----
+Example:
 +
-*Example:*
-+
-[bash, shell]
+[,shell]
 ----
-- path: /etc/sysconfig/network/ifcfg-mgmt-bo
-    permissions: 384
-    owner: 0
-    group: 0
-    content: |+
-      ...
-      MTU=1500     // MTU is the last under the content, and might be a blank line, add or change it
-    encoding: ""
-    ownerstring: ""
-    - path: /etc/sysconfig/network/ifcfg-mgmt-br
-    permissions: 384
-    owner: 0
-    group: 0
-    content: |+
-      ...
-      MTU=1500     // MTU is the last under the content, and might be a blank line, add or change it
-    encoding: ""
-    ownerstring: ""
+$ nmcli con modify bond-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify bridge-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify vlan-mgmt 802-3-ethernet.mtu 9000
+$ nmcli device reapply mgmt-bo
+$ nmcli device reapply mgmt-br
 ----
-
-. Verify that the file's formatting is still valid using the `yq -e /oem/90_custom.yaml` command. This command prints the file's contents.
-
-. Reboot each node to apply the change.
 
 . Check the MTU values using the `ip link` command.
 
 . Annotate the `mgmt` `clusternetwork` object with new MTU value.
-
-*Example:*
++
+Example:
++
+[,shell]
 ----
 $ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
 ----
-
++
 All VM networks that are attached to `mgmt` automatically inherit the new MTU value.
 
-. (Optional) Enable the xref:./storage-network.adoc#_storage_network_setting[storage network] that you disabled before changing the MTU value.
+. (Optional) Enable the xref:networking/storage-network.adoc#_storage_network_setting[storage network] that you disabled before changing the MTU value.
 
 . Start all virtual machines that are attached to `mgmt`.
 
 . Verify that the virtual machine workloads are running normally.
 
-For more information, see xref:#_change_the_mtu_of_a_network_configuration_with_no_attached_storage_network[Change the MTU of a Network Configuration with an Attached Storage Network](#change-the-mtu-of-a-network-configuration-with-an-attached-storage-network).
+For more information, see <<Change the MTU of a network configuration with an attached storage network>>.
 
 === Custom cluster network
 
