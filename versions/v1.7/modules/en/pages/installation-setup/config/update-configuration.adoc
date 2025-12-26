@@ -1,191 +1,124 @@
 = Update the Configuration After Installation
-:revdate: 2025-07-17
+:revdate: 2025-12-26
 :page-revdate: {revdate}
 
-The {harvester-product-name} operating system has an immutable design, which means most files in the  OS revert to their pre-configured state after a reboot. The operating system loads the pre-configured values of system components from configuration files during the boot time.
+The {harvester-product-name} operating system has an immutable design, which means most files in the operating system revert to their pre-configured state after a reboot. The operating system loads the pre-configured values of system components from configuration files during the boot time.
 
-This page describes how to edit some of the most-requested configurations. To update a configuration, you must first update the runtime value in the system and then update configuration files to make the changes persistent between reboots.
+To update a configuration, you must first update the runtime value in the system and then update configuration files to ensure that changes persist between reboots.
+
+However, starting with v1.7.0, network configuration changes made using the `nmcli` tool persist automatically because the `/etc/NetworkManager` directory is now included in the list of persistent paths.
 
 [NOTE]
 ====
 If you upgrade from a version before `v1.1.2`, the `cloud-init` file in examples will be `/oem/99_custom.yaml`. Please substitute the value if needed.
 ====
 
-== DNS servers
+== Password of `rancher` user
 
 === Runtime change
 
-. Log in to a node and become root. See xref:../../troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[how to log into a node] for more details.
-. Edit `/etc/sysconfig/network/config` and update the following line. Use a space to separate DNS server addresses if there are multiple servers.
-+
-[,yaml]
-----
- NETCONFIG_DNS_STATIC_SERVERS="8.8.8.8 1.1.1.1"
-----
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the `rancher` user account.
 
-. Update and reload the configuration with the following command:
+. Reset the password for the `rancher` user account by running the command `passwd`.
+
+=== Configuration persistence
+
+. Back up the {elemental-product-name} `cloud-init` file `/oem/90_custom.yaml`.
 +
 [,sh]
 ----
- netconfig update
+ cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
 ----
 
-. Confirm the file `/etc/resolv.conf` contains the correct DNS servers with the `cat` command:
+. Edit `/oem/90_custom.yaml` and update the yaml path `stages.initramfs[0].users.rancher.passwd`.
+
+For information about specifying the `rancher` user account password in an encrypted form, see [`os.password`](./harvester-configuration.md#ospassword).
+
+== NTP servers
+
+For information about NTP settings, see xref:hosts/hosts.adoc#_ntp_configuration[NTP servers].
+
+== DNS servers
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the root account.
+
+. Check the management interface configuration, and then run either of the following commands:
 +
-[,sh]
+** Not configured to use a VLAN:
++      
+[,shell]
 ----
- cat /etc/resolv.conf
+nmcli con modify bridge-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br
+----
+** Configured to use a VLAN:
++
+[,shell]
+----
+nmcli con modify vlan-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br.VLAN_ID
+----
++
+You must replace `VLAN_ID` with the actual ID. To view a list of configured connections and devices, run the command `nmcli con`.
+
+. Verify that the file `/etc/resolv.conf` contains the correct DNS servers by running the `cat` command.
++
+[,shell]
+----
+cat /etc/resolv.conf
 ----
 
-. Restart `rke2-coredns`.
+. Restart the `rke2-coredns` deployment.
 +
 [,shell]
 ----
 kubectl rollout restart deployment/rke2-coredns-rke2-coredns -n kube-system
 ----
 
-. Verify that `rke2-coredns` was rolled out successfully.
+. Verify that the `rke2-coredns` deployment was rolled out successfully.
 +
 [,shell]
 ----
 kubectl rollout status deployment/rke2-coredns-rke2-coredns -n kube-system
 ----
 
-=== Configuration persistence
-
-The persistent name of the cloud-init file is `/oem/90_custom.yaml`. {harvester-product-name} now uses a newer version of Elemental, which creates the file during installation.
-
-When upgrading from an earlier version, {harvester-product-name} retains the old file name (`/oem/99_custom.yaml`) to avoid confusion. You can manually rename the file to `/oem/90_custom.yaml` if necessary.
-
-. Backup the elemental `cloud-init` file `/oem/90_custom.yaml` as follows:
-+
-[,sh]
-----
- cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
-----
-
-. Edit `/oem/90_custom.yaml` and update the value under the yaml path `stages.initramfs[0].commands`. The `commands` array must contain a line to manipulate the `NETCONFIG_DNS_STATIC_SERVERS` config. Add the line if the line doesn't exist.
-+
-The following example adds a line to change the `NETCONFIG_DNS_STATIC_SERVERS` config:
-+
-[,yaml]
-----
- stages:
-   initramfs:
-     - commands:
-         - sed -i 's/^NETCONFIG_DNS_STATIC_SERVERS.*/NETCONFIG_DNS_STATIC_SERVERS="8.8.8.8 1.1.1.1"/' /etc/sysconfig/network/config
-----
-+
-Replace the DNS server addresses and save the file. {harvester-product-name} sets up new servers after rebooting.
-
-== NTP servers
-
-For more information about NTP settings, see the xref:../../hosts/hosts.adoc#_ntp_configuration[NTP servers].
-
-== Password of user `rancher`
-
-=== Runtime change
-
-. Log in to a node as user `rancher`. See xref:../../troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[how to log into a node] for more details.
-. To reset the password for the user `rancher`, run the command `passwd`.
-
-=== Configuration persistence
-
-. Backup the elemental `cloud-init` file `/oem/90_custom.yaml` as follows:
-+
-[,sh]
-----
- cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
-----
-
-. Edit `/oem/90_custom.yaml` and update the yaml path `stages.initramfs[0].users.rancher.passwd`. Refer to the configuration xref:./configuration-file.adoc#_os_password[`os.password`] for details on how to specify the password in an encrypted form.
-
 == Bonding slaves
 
 You can update the slave interfaces of the management bonding interface `mgmt-bo`.
 
-=== Runtime change
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the root account.
 
-. Log in to a node and become root. See xref:../../troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[how to log into a node] for more details.
-. Identify the interface names with the following command:
+. Identify the interface names using the following command:
 +
-[,sh]
+[shell]
 ----
- ip a
+$ nmcli device
+DEVICE           TYPE      STATE                   CONNECTION
+mgmt-br          bridge    connected               bridge-mgmt
+...
+mgmt-bo          bond      connected               bond-mgmt
+ens6             ethernet  connected               bond-slave-ens6
+ens7             ethernet  disconnected            --
+...
 ----
 
-. Edit `/etc/sysconfig/network/ifcfg-mgmt-bo` and update the lines associated with bonding slaves and bonding mode:
+. Use the `nmcli` tool to create a connection for the interface and attach it to the management bond.
 +
-----
- BONDING_SLAVE_0='ens5'
- BONDING_SLAVE_1='ens6'
- BONDING_MODULE_OPTS='miimon=100 mode=balance-tlb '
-----
-
-. Restart the network with the `wicked ifreload` command:
+Example:
 +
-[,sh]
+[shell]
 ----
- wicked ifreload mgmt-bo
-----
-+
-
-[CAUTION]
-====
-A mistake in the configuration may disrupt the SSH session.
-====
-
-=== Configuration persistence
-
-. Backup the elemental cloud-init file `/oem/90_custom.yaml` as follows:
-+
-[,sh]
-----
- cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
+$ nmcli con add type bond-slave ifname ens7 master mgmt-bo
+Connection 'bond-slave-ens7' (5a379328-178a-4167-b065-b5426facd659) successfully added.
 ----
 
-. Edit `/oem/90_custom.yaml` and update the yaml path `stages.initramfs[0].files`. More specifically, update the content of the `/etc/sysconfig/network/ifcfg-mgmt-bo` file and edit the `BONDING_SLAVE_X` and `BONDING_MODULE_OPTS` entries accordingly:
-+
-[,yaml]
+You should now be able to see that the device is connected.
+
+[shell]
 ----
- stages:
-   initramfs:
-   - ...
-     files:
-     - path: /etc/sysconfig/network/ifcfg-mgmt-bo
-       permissions: 384
-       owner: 0
-       group: 0
-       content: |+
-           STARTMODE='onboot'
-           BONDING_MASTER='yes'
-           BOOTPROTO='none'
-           POST_UP_SCRIPT="wicked:setup_bond.sh"
-
-
-           BONDING_SLAVE_0='ens5'
-           BONDING_SLAVE_1='ens6'
-
-           BONDING_MODULE_OPTS='miimon=100 mode=balance-tlb '
-
-           DHCLIENT_SET_DEFAULT_ROUTE='no'
-
-       encoding: ""
-       ownerstring: ""
-     - path: /etc/sysconfig/network/ifcfg-ens6
-       permissions: 384
-       owner: 0
-       group: 0
-       content: |
-         STARTMODE='hotplug'
-         BOOTPROTO='none'
-       encoding: ""
-       ownerstring: ""
+$ nmcli device
+DEVICE           TYPE      STATE                   CONNECTION
+mgmt-br          bridge    connected               bridge-mgmt
+...
+mgmt-bo          bond      connected               bond-mgmt
+ens6             ethernet  connected               bond-slave-ens6
+ens7             ethernet  connected               bond-slave-ens7
 ----
-+
-
-[NOTE]
-====
-If you didn't select an interface during installation, you must add an entry to initialize the interface. Please check the `/etc/sysconfig/network/ifcfg-ens6` file creation in the above example. The file name should be `/etc/sysconfig/network/ifcfg-<interface-name>`.
-====
-
