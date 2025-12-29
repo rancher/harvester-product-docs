@@ -104,6 +104,63 @@ $ sudo yq eval .token /etc/rancher/rancherd/config.yaml
 ----
 ====
 
+== Checking the status of components
+
+Before checking the status of {harvester-product-name} components, obtain a copy of the cluster's kubeconfig file using either of the following methods:
+
+* On the {harvester-product-name} UI, go to the *Support* screen and then click *Download KubeConfig*.
+
+* Run the following commands on any of the management nodes:
++
+[,shell]
+----
+$ sudo su
+$ cat /etc/rancher/rke2/rke2.yaml
+----
+
+After you obtain a copy of the kubeconfig file, run the following script against the cluster to check the readiness of each component.
+
+* {harvester-product-name} components
++
+[,shell]
+----
+  #!/bin/bash
+  cluster_ready() {
+    namespaces=("cattle-system" "kube-system" "harvester-system" "longhorn-system")
+    for ns in "${namespaces[@]}"; do
+      pod_statuses=($(kubectl -n "${ns}" get pods \
+        --field-selector=status.phase!=Succeeded \
+        -ojsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name},{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'))
+      for status in "${pod_statuses[@]}"; do
+        name=$(echo "${status}" | cut -d ',' -f1)
+        ready=$(echo "${status}" | cut -d ',' -f2)
+        if [ "${ready}" != "True" ]; then
+          echo "pod ${name} is not ready"
+          false
+          return
+        fi
+      done
+    done
+  }
+  if cluster_ready; then
+    echo "cluster is ready"
+  else
+    echo "cluster is not ready"
+  fi
+----
+
+* API
++
+[,shell]
+----
+$ curl -fk https://<VIP>/version
+----
++
+[NOTE]
+====
+You must replace `<VIP>` with the xref:installation-setup/management-address.adoc#_how_to_get_the_vip_mac_address[actual VIP], which is the value of `kube-vip.io/requestedIP`.
+====
+
 == Collecting troubleshooting information
 
 Please include the following information in a bug report when reporting a failed installation:
