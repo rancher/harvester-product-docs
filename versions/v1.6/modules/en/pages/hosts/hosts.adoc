@@ -1,5 +1,5 @@
 = Host Management
-:revdate: 2025-09-16
+:revdate: 2025-12-30
 :page-revdate: {revdate}
 
 Users can view and manage {harvester-product-name} nodes from the host page. The first node always defaults to be a management node of the cluster. When there are three or more nodes, the two other nodes that first joined are automatically promoted to management nodes to form a HA cluster.
@@ -603,3 +603,65 @@ image::host/remote_console_url.png[]
 . Click *Console* to access the remote server.
 +
 image::host/remote_console_button.png[]
+
+== Rotating expired certificates
+
+If the RKE2 certificates have expired, you cannot use the `auto-rotate-rke2-certificates` setting to rotate them. The setting only works when the cluster (`cluster.provisioning`) is marked `Ready`.
+
+[,shell]
+----
+> kubectl get cluster.provisioning -n fleet-local local -o yaml | yq -e '.status.conditions[] | select(.type=="Ready")'
+lastUpdateTime: "2025-10-22T06:41:33Z"
+status: "True"
+type: Ready
+----
+
+If the `status` field's value is `False`, you must manually rotate the certificates by following these steps on each node:
+
+. Log in to the node using the root account.
+
+. Stop the RKE2 service.
++
+** Management nodes
++
+[,shell]
+----
+systemctl stop rke2-server
+----
++
+** Worker nodes
++
+[,shell]
+----
+systemctl stop rke2-agent
+----
+
+. Rotate the RKE2 certificates.
++
+[,shell]
+----
+/opt/rke2/bin/rke2 certificate rotate
+----
+
+. Start the RKE2 service.
++
+** Management nodes
++
+[,shell]
+----
+systemctl start rke2-server
+----
++
+** Worker nodes
++
+[,shell]
+----
+systemctl start rke2-agent
+----
+
+. Restart the `rancher-system-agent` service.
++
+[,shell]
+----
+systemctl restart rancher-system-agent
+----
