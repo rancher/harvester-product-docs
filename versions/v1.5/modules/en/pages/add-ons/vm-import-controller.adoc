@@ -1,8 +1,8 @@
 = VM Import Controller
-:revdate: 2025-05-08
+:revdate: 2025-12-30
 :page-revdate: {revdate}
 
-You can import virtual machines from VMware and OpenStack into {harvester-product-name} using the vm-import-controller add-on. The add-on must be enabled before you start importing virtual machines.
+You can import virtual machines from VMware, OpenStack, and Open Virtual Appliance (OVA) packages into {harvester-product-name} using the vm-import-controller add-on. The add-on must be enabled before you start importing virtual machines.
 
 image::vm-import-controller/EnableAddon.png[]
 
@@ -20,6 +20,7 @@ Currently, the following source providers are supported:
 
 * VMware
 * OpenStack
+* Open Virtual Appliance (OVA)
 
 == API
 
@@ -67,7 +68,7 @@ Once this check is passed, the source is marked as ready and can be used for VM 
 [,shell]
 ----
 $ kubectl get vmwaresource.migration
-NAME      STATUS
+NAME    STATUS
 vcsim   clusterReady
 ----
 
@@ -105,13 +106,56 @@ stringData:
   "ca_cert": "pem-encoded-ca-cert"
 ----
 
-The OpenStack source reconciliation process attempts to list VMs in the project and marks the source as ready.
+As part of the reconciliation process, the controller attempts to list virtual machines in the project and marks the source as ready.
 
 [,shell]
 ----
-$ kubectl get opestacksource.migration
+$ kubectl get openstacksource.migration
 NAME       STATUS
 devstack   clusterReady
+----
+
+For OVA-based sources, an example definition is as follows:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OvaSource
+metadata:
+  name: example
+  namespace: default
+spec:
+  url: "http://192.168.0.1:8080/example.ova"
+  httpTimeoutSeconds: 300
+  credentials:
+    name: example-ova-credentials
+    namespace: default
+----
+
+The optional `httpTimeoutSeconds` field allows you to specify the maximum time (in seconds) {harvester-product-name} waits for an HTTP request to be completed. This period covers the entire transaction, including establishing the connection, handling redirects, and reading the response body. When the value is `0`, the timeout feature is disabled. The default value is `600` (10 minutes).
+
+When configuring the secret, you can include basic authentication credentials for the URL and a CA certificate if the endpoint uses HTTPS.
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata: 
+  name: example-ova-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "ca.crt": "pem-encoded-ca-cert"
+----
+
+As part of the reconciliation process, the controller issues a HEAD request to the specified URL to confirm its validity before marking the source as ready.
+
+[,shell]
+----
+$ kubectl get ovasource.migration
+NAME      STATUS
+example   clusterReady
 ----
 
 === VirtualMachineImport
@@ -143,17 +187,17 @@ spec:
     apiVersion: migration.harvesterhci.io/v1beta1
 ----
 
-The controller exports the virtual machine named `alpine-export-test` on the source VMware cluster to be exported, processed, and recreated in the {harvester-product-name} cluster.
+This prompts the controller to export the virtual machine named `alpine-export-test` on the source VMware cluster to be exported, processed, and recreated in the {harvester-product-name} cluster.
 
-This can take a while based on the size of the virtual machine, but users should see `VirtualMachineImages` created for each disk in the defined virtual machine.
+The duration of the import process depends on the size of the virtual machine. While the import process may take some time, you should see `VirtualMachineImages` created for each disk in the defined virtual machine.
 
 If the source virtual machine is placed in a folder, you can specify the folder name in the optional `folder` field.
 
-The list of items in `networkMapping` will define how the source network interfaces are mapped to the SUSE® Virtualization Networks.
+The list of items in `networkMapping` will define how the source network interfaces are mapped to the {harvester-product-name} Networks.
 
 If a match is not found, each unmatched network interface is attached to the default `managementNetwork`.
 
-The `storageClass` field specifies the xref:../storage/storageclass.adoc[StorageClass] to be used for images and provisioning of persistent volumes during the import process. If no value is specified, {harvester-product-name} uses the default StorageClass.
+The `storageClass` field specifies the xref:storage/storageclass.adoc[StorageClass] to be used for images and provisioning of persistent volumes during the import process. If no value is specified, {harvester-product-name} uses the default StorageClass.
 
 Once the virtual machine has been imported successfully, the object will reflect the status:
 
@@ -193,6 +237,8 @@ spec:
 OpenStack allows users to have multiple instances with the same name. In such a scenario, users are advised to use the Instance ID. The reconciliation logic tries to perform a name-to-ID lookup when a name is used.
 ====
 
-==== Known Issues
+==== Known issues
 
-* *Source virtual machine name is not RFC1123-compliant*: When creating a virtual machine object, the vm-import-controller add-on uses the name of the source virtual machine, which may not meet the Kubernetes object https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names[naming criteria]. You may need to rename the source virtual machine to allow successful completion of the import.
+===== Source virtual machine name is not RFC1123-compliant
+
+When creating a virtual machine object, the vm-import-controller add-on uses the name of the source virtual machine, which may not meet the Kubernetes object https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names[naming criteria]. You may need to rename the source virtual machine to allow successful completion of the import.
