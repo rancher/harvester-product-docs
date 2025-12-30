@@ -236,3 +236,17 @@ The typical expectation is that an additional VLAN sub-interface is created on t
 In actuality, after the upgrade to v1.6.0, the VLAN sub-interface is created but the secondary VLAN (VLAN ID: `2113`) is removed from the `mgmt-br` bridge and the `mgmt-bo` interface. After a reboot, only the primary VLAN ID is assigned to the `mgmt-br` bridge and the `mgmt-bo` interface (using the `/oem/90_custom.yaml` file).
 
 To mitigate the effects of this change, you must perform the workaround described in the <<Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network,previous section>>. This involves identifying secondary VLAN interfaces and then adding the necessary ones to the `mgmt-br` bridge and the `mgmt-bo` interface.
+
+=== Running virtual machines display `Restart action is required` message
+
+The {harvester-product-name} UI may display the message `Restart action is required for the virtual machine configuration change to take effect` for some running virtual machines  in the following situations:
+
+* {harvester-product-name} is upgraded from v1.5.x to v1.6.x.
+* The Harvester UI Extension is updated to v1.6.x. 
+* {harvester-product-name} clusters are imported into {rancher-short-name} v2.12.x.
+
+You must restart the virtual machine to apply the configuration changes and clear the message.
+
+The message appears because the UI in {harvester-product-name} v1.6.0 and later versions exposes the `RestartRequired` condition, which was previously only visible in the virtual machine's YAML configuration. This visibility is essential for features such as CPU and memory hotplugging, which involve configuration changes that take effect only after the virtual machine is restarted.
+
+The `RestartRequired` condition was introduced to handle a state mismatch caused by the legacy MAC address synchronization method. In versions earlier than v1.6.0, the KubeVirt controller automatically patched the MAC address the virtual machine instance back into the specification during the creation process. This ensured that the MAC address remained consistent across restarts. However, because the specification was modified while the virtual machine was active, the controller added the `RestartRequired` condition to signal that a manual restart was necessary to synchronize the state.
