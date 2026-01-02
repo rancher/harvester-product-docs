@@ -1,18 +1,23 @@
 = Upgrade from v1.6.x to v1.7.x
-:revdate: 2025-12-26
+:revdate: 2026-01-02
 :page-revdate: {revdate}
 
 == General information
 
 An *Upgrade* button appears on the *Dashboard* screen whenever a new {harvester-product-name} version that you can upgrade to becomes available. For more information, see xref:upgrades/upgrades.adoc#_start_an_upgrade[Start an upgrade].
 
-Clusters running v1.6.x can upgrade to v1.7.x directly because {harvester-product-name} allows a maximum of one minor version upgrade for underlying components. v1.6.0 and v1.6.1 use the same minor version of RKE2 (v1.33), while Harvester v1.7.0 and v1.7.1 use the next minor version (v1.34). For more information, see xref:upgrades/upgrades.adoc#_upgrade_paths)[Upgrade paths].
+Clusters running v1.6.x can upgrade to v1.7.x directly because {harvester-product-name} allows a maximum of one minor version upgrade for underlying components. v1.6.0 and v1.6.1 use the same minor version of RKE2 (v1.33), while {harvester-product-name} v1.7.0 and v1.7.1 use the next minor version (v1.34). For more information, see xref:upgrades/upgrades.adoc#_upgrade_paths)[Upgrade paths].
 
 For information about upgrading {harvester-product-name} in air-gapped environments, see xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[Prepare an air-gapped upgrade].
 
 [CAUTION]
 ====
-v1.7.x uses NetworkManager instead of wicked, which was used in earlier versions of Harvester. If you modified the management interface configuration after the initial installation, you must perform additional manual steps to avoid issues during the upgrade. For more information, see <<Migration from wicked to NetworkManager>>.
+v1.7.x uses NetworkManager instead of wicked, which was used in earlier versions of {harvester-product-name}. If you modified the management interface configuration after the initial installation, you must perform additional manual steps to avoid issues during the upgrade. For more information, see <<Migration from wicked to NetworkManager>>.
+====
+
+[IMPORTANT]
+====
+Host IP addresses configured via DHCP may change during upgrades. This prevents the cluster from starting correctly and requires manual recovery steps. For more information, see <<Host IP address may change during upgrade when using DHCP>>.
 ====
 
 === Update the Harvester UI Extension on {rancher-product-name} v2.13
@@ -49,11 +54,11 @@ During upgrades, {harvester-product-name} generates new NetworkManager connectio
 
 If action is required, choose one of the following methods:
 
-* Pre-upgrade (Recommended): Edit the `/oem/harvester.config` file on each node. Configure the relevant network settings, particularly `os.dns_nameservers` and `install.management_interface`. For more information, see xref:/installation-setup/config/configuration-file.adoc[Harvester Configuration].
+* Pre-upgrade (Recommended): Edit the `/oem/harvester.config` file on each node. Configure the relevant network settings, particularly `os.dns_nameservers` and `install.management_interface`. For more information, see xref:installation-setup/config/configuration-file.adoc[Configuration File].
 +
 [NOTE]
 ====
-If you initially installed v1.0, ensure that `install.management_interface` follows the updated schema required by later Harvester versions.
+If you initially installed v1.0, ensure that `install.management_interface` follows the updated schema required by later {harvester-product-name} versions.
 ====
 
 * Post-upgrade: Use the `nmcli` tool to manually re-apply your custom configuration to the new NetworkManager connection profiles.
@@ -71,3 +76,69 @@ If you encounter any issues during the upgrade, you can perform the following wo
 | If you want to revert to the automatically generated NetworkManager connection profiles, run the command `harvester-installer generate-network-config`.
 | The NetworkManager connection profiles in `/etc/NetworkManager/system-connections/` are recreated based on the configuration specified in `/oem/harvester.config`.
 |===
+
+== Known issues
+
+=== 1. Host IP address may change during upgrade when using DHCP
+
+v1.7.x uses NetworkManager instead of wicked, which was used in earlier versions of {harvester-product-name}. These two network stacks have different defaults for generating DHCP client IDs. 
+
+If the host IP addresses are configured using DHCP, a {harvester-product-name} upgrade and subsequent reboot may cause the DHCP server to assign IP addresses that are different from what hosts previously used. Consequently, the affected hosts are unable to join the cluster on startup because of the IP address change.
+
+This issue typically occurs when the DHCP server allocates IP addresses based solely on the DHCP client ID. You are unlikely to encounter this issue when the DHCP server is configured to allocate fixed IP addresses based on the MAC address (as demonstrated in the https://github.com/harvester/ipxe-examples[iPXE Examples]).
+
+The impact of this issue varies by cluster size:
+
+* Single-node clusters: {harvester-product-name} fails to start after rebooting because the IP address has changed.
+* Multi-node clusters: Management nodes become stuck in the "Waiting Reboot" state.
+
+To address the issue, perform the following steps:
+
+[IMPORTANT]
+====
+You must perform the steps for each affected node _after_ the upgrade is completed and the IP address has changed.
+====
+
+. Log in to the affected node. You can either access the node via SSH at its new IP address or use the console.
+
+. In the `/var/lib/wicked` directory, check for the lease XML file (named similar to `/var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml`).
++
+If you are using a VLAN, the file name includes the VLAN ID (for example, `/var/lib/wicked/lease-mgmt-br.2017-dhcp-ipv4.xml`).
+
+. View the file and identify the DHCP client ID.
++
+[,shell]
+----
+$ cat /var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml
+<lease>
+  ...
+  <ipv4:dhcp>
+    <client-id>ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05</client-id>
+    ...
+  </ipv4:dhcp>
+</lease>
+----
+
+. Use the `nmcli` command to set the DHCP client ID for the appropriate NetworkManager connection profile.
++
+The connection profile you need to modify depends on whether your node uses a VLAN.
++
+* VLAN used: Add the DHCP client ID to the `vlan-mgmt` connection profile.
+* No VLAN: Add the DHCP client ID to the `bridge-mgmt` connection profile.
++
+Example (no VLAN):
++
+[,shell]
+----
+$ nmcli con modify bridge-mgmt \
+    ipv4.dhcp-client-id \
+    ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05
+----
++
+You must replace the client ID in the example with the actual client ID from your wicked lease file.
+
+. Reboot the node.
+
+The DHCP server should return the original IP address and the affected node should be able to join the cluster.
+
+Related issues: https://github.com/harvester/harvester/issues/9260[#9260] and https://github.com/harvester/harvester/issues/3418[#3418]
