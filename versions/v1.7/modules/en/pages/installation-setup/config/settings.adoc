@@ -1,5 +1,5 @@
 = Settings
-:revdate: 2025-12-31
+:revdate: 2026-01-02
 :page-revdate: {revdate}
 
 The following is a list of advanced settings that you can use. You can modify the `settings.harvesterhci.io` custom resource using both the UI and the `kubectl` command.
@@ -50,7 +50,7 @@ The following example adds disks that match the glob pattern `/dev/sd*` or `/dev
 
 *Definition*: Setting that allows you to automatically rotate certificates for {rke2-product-name} services. This setting is disabled by default.
 
-Use the field `expiringInHours` to specify the validity period of each certificate (`1` to `8759` hours). If the certificate expires within the specified period, Harvester automatically replaces the certificate.
+Use the field `expiringInHours` to specify the validity period of each certificate (`1` to `8759` hours). If the certificate expires within the specified period, {harvester-product-name} automatically replaces the certificate.
 
 For more information, see the *Certificate Rotation* section of the https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/cluster-admin/manage-clusters/rotate-certificates.html[{rancher-product-name}] and https://documentation.suse.com/cloudnative/rke2/latest/en/advanced.html#_certificate_rotation[{rke2-product-name}] documentation.
 
@@ -661,7 +661,25 @@ https://your.upgrade.checker-url/v99/checkupgrade
 
 *Definition*: Upgrade-related configuration.
 
-*Default value*: `{"imagePreloadOption":{"strategy":{"type":"sequential"}}, "restoreVM": false}`
+*Default value*:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "sequential"
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "auto"
+    }
+  },
+  "restoreVM": false,
+  "logReadyTimeout": "5"
+}
+----
 
 *Supported options and fields*:
 
@@ -669,13 +687,13 @@ https://your.upgrade.checker-url/v99/checkupgrade
 +
 The full ISO contains the core operating system components and all required container images. {harvester-product-name} can preload these container images to each node during installation and upgrades. When workloads are scheduled to management and worker nodes, the container images are ready to use.
 +
-* `strategy`: Image preload strategy.
+** `strategy`: Image preload strategy.
 +
-* `type`: Type of image preload strategy.
+*** `type`: Type of image preload strategy.
 +
-** `sequential`: The container images from the target ISO are preloaded to each node. This is the default option.
+**** `sequential`: The container images from the target ISO are preloaded to each node. This is the default option.
 +
-** `skip`: The container images are not preloaded to each node. *Do not use this option in production environments.*
+**** `skip`: The container images are not preloaded to each node. *Do not use this option in production environments.*
 +
 [IMPORTANT]
 ====
@@ -687,9 +705,9 @@ If you decide to use `skip`, ensure that the following requirements are met:
 Note any potential internet service interruptions and how close you are to reaching your https://www.docker.com/increase-rate-limits/[Docker Hub rate limit]. Failure to download any of the required images may cause the upgrade to fail and may leave the cluster in a middle state.
 ====
 +
-** `parallel` (*experimental*): Nodes preload images in batches. You can adjust this using the `concurrency` option.
+**** `parallel` (*experimental*): Nodes preload images in batches. You can adjust this using the `concurrency` option.
 +
-* `concurrency`: Number of nodes that can simultaneously preload images. This option takes effect only when `type` is set to `parallel`.
+*** `concurrency`: Number of nodes that can simultaneously preload images. This option takes effect only when `type` is set to `parallel`.
 +
 The default value is `0`, which is equivalent to following the cluster's node counts. Using `0` allows the system to dynamically follow the scale of the cluster. Values higher than the cluster's node counts are treated as `0`, while lower values are considered invalid and are rejected.
 +
@@ -697,7 +715,36 @@ The default value is `0`, which is equivalent to following the cluster's node co
 ====
 {harvester-product-name} deploys an upgrade-repo service on the cluster that serves as an HTTP server for nodes that need to preload the container images. When a `concurrency` value is set, each batch of nodes downloads the container images from this upgrade-repo in parallel. Because of this, you must consider the speed of the {harvester-product-name} management network and the read speed of the default disk for {longhorn-product-name}.
 ====
+
+* `nodeUpgradeOption`: Definition of how {harvester-product-name} must perform node upgrades.
 +
+The node upgrade is an atomic operation, which includes upgrading of the node's RKE2 components and operating system. The upgrade is either fully completed or failed, with no half-finished state.
++
+To prepare a target node for upgrade, {harvester-product-name} first attempts to live-migrate all running virtual machines to other nodes. Virtual machines that cannot be live-migrated are automatically shut down to avoid potential disruption and issues during the subsequent upgrade steps.
++
+** `strategy`: Node upgrade strategy.
++
+*** `mode`: Mode of node upgrade strategy.
++
+**** `auto`: Node upgrades start automatically. This is the default value.
+**** `manual`: Node upgrades are paused until you take specific actions to resume the process.
++
+*** `pauseNodes`: List of nodes that must be excluded from automatic upgrades.
++
+If the `mode` field is set to `manual` and you do not specify any node names in this field, upgrades are paused for all nodes. If the `mode` field is set to `auto`, node names specified in this field are ignored and node upgrades start automatically.
++
+[IMPORTANT]
+====
+Upgrading of nodes listed in this field is _paused definitely_ until you take specific actions to xref:upgrades/upgrades.adoc#_resuming_a_paused_node_upgrade[resume the process]. Given that {harvester-product-name} upgrades nodes sequentially, this implies that the entire upgrade progress is paused as well. 
+====
++
+Example:
++
+[,json]
+----
+"pauseNodes": ["node-0", "node-2"]
+----
+
 * `restoreVM`: Option that enables {harvester-product-name} to automatically restore previously running xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable virtual machines] after the upgrade is *successfully* completed. You can specify either of the following values:
 +
 ** `true`: {harvester-product-name} forcibly shuts down *running* and *paused* non-migratable virtual machines on each node. After the upgrade is completed, the previously running virtual machines are automatically restarted, while the paused virtual machines remain shut down.
@@ -724,7 +771,15 @@ All virtual machines are considered non-migratable in single-node environments. 
       "concurrency": 2
     }
   },
-  "restoreVM": true
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "manual",
+      "pauseNodes": [
+        "node-3"
+      ]
+    }
+  }
+  "restoreVM": true,
   "logReadyTimeout": "5"
 }
 ----
