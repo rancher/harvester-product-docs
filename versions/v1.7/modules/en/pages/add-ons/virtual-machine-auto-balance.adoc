@@ -2,13 +2,13 @@
 :revdate: 2026-01-02
 :page-revdate: {revdate}
 
-The *virtual-machine-auto-balance* add-on allows Harvester to leverage the https://github.com/kubernetes-sigs/descheduler[Kubernetes Descheduler] for rebalancing of virtual machine workloads. The Kubernetes Descheduler optimizes workload scheduling by evicting pods that are not optimally placed according to administrator-defined policies. This crucial function enhances resource utilization, balances workloads across nodes, and improves overall cluster performance.
+The *virtual-machine-auto-balance* add-on allows {harvester-product-name} to use the https://github.com/kubernetes-sigs/descheduler[Kubernetes Descheduler] for rebalancing of virtual machine workloads. The Kubernetes Descheduler optimizes workload scheduling by evicting pods that are not optimally placed according to administrator-defined policies. This crucial function enhances resource utilization, balances workloads across nodes, and improves overall cluster performance.
 
 == Enabling the add-on
 
 When enabled, the add-on deploys the Descheduler in the `kube-system` namespace and a related configuration in the `kube-system/descheduler` ConfigMap. You can enable the add-on only when the cluster has more than one node.
 
-. On the Harvester UI, go to *Advanced -> Add-ons*.
+. On the {harvester-product-name} UI, go to *Advanced -> Add-ons*.
 
 . Select *descheduler (Experimental)*, and then select *⋮ -> Enable*.
 
@@ -25,7 +25,79 @@ With the default configuration, the Descheduler only evicts virtual machine pods
 
 Select *⋮ -> Edit YAML* to customize the Descheduler policies according to your requirements. The configuration is defined in YAML format.
 
-image::addons/descheduler-policy.png[Descheduler policy]
+[,yaml]
+----
+  - apiVersion: harvesterhci.io/v1beta1
+    kind: Addon
+    metadata:
+      name: descheduler
+      namespace: kube-system
+      labels:
+        addon.harvesterhci.io/displayName: "virtual-machine-auto-balance"
+        addon.harvesterhci.io/experimental: "true"
+    spec:
+      repo: http://harvester-cluster-repo.cattle-system.svc/charts
+      version: << .DESCHEDULER_CHART_VERSION >>
+      chart: descheduler
+      {{- if and .Addons .Addons.descheduler }}
+      enabled: {{ .Addons.descheduler.Enabled }}
+      {{- else }}
+      enabled: false
+      {{- end }}
+      valuesContent: |
+        kind: Deployment
+        image:
+          repository: registry.k8s.io/descheduler/descheduler
+          pullPolicy: IfNotPresent
+        deschedulingInterval: 5m
+        replicas: 1
+        cmdOptions:
+          v: 3
+          feature-gates: EvictionsInBackground=true
+        deschedulerPolicy:
+          maxNoOfPodsToEvictPerNode: 5
+          profiles:
+          - name: default
+            pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                ignorePvcPods: false
+                evictLocalStoragePods: true
+                labelSelector:
+                  matchExpressions:
+                    - key: "kubevirt.io"
+                      operator: "In"
+                      values:
+                        - "virt-launcher"
+            - name: LowNodeUtilization
+              args:
+                evictableNamespaces:
+                  exclude:
+                  - cattle-dashboards
+                  - cattle-fleet-clusters-system
+                  - cattle-fleet-local-system
+                  - cattle-fleet-system
+                  - cattle-logging-system
+                  - cattle-monitoring-system
+                  - cattle-provisioning-capi-system
+                  - cattle-system
+                  - fleet-local
+                  - harvester-system
+                  - kube-system
+                  - local
+                  - longhorn-system
+                thresholds:
+                  cpu: 30
+                  memory: 30
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+            plugins:
+              balance:
+                enabled:
+                - LowNodeUtilization
+----
 
 ** `deschedulingInterval`: How often the Descheduler runs. The default value is `5m` (5 minutes).
 ** `maxNoOfPodsToEvictPerNode`: Maximum number of pods that can be evicted during a single descheduling cycle. The default is value is `5`.
@@ -35,7 +107,7 @@ image::addons/descheduler-policy.png[Descheduler policy]
 
 == Disabling the add-on
 
-. On the Harvester UI, go to *Advanced -> Add-ons*.
+. On the {harvester-product-name} UI, go to *Advanced -> Add-ons*.
 
 . Select *descheduler (Experimental)*, and then select *⋮ -> Disable*.
 
