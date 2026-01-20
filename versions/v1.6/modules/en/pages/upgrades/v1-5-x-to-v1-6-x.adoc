@@ -1,5 +1,5 @@
 = Upgrade from v1.5.x to v1.6.x
-:revdate: 2025-12-30
+:revdate: 2026-01-20
 :page-revdate: {revdate}
 
 == General information
@@ -250,3 +250,13 @@ You must restart the virtual machine to apply the configuration changes and clea
 The message appears because the UI in {harvester-product-name} v1.6.0 and later versions exposes the `RestartRequired` condition, which was previously only visible in the virtual machine's YAML configuration. This visibility is essential for features such as CPU and memory hotplugging, which involve configuration changes that take effect only after the virtual machine is restarted.
 
 The `RestartRequired` condition was introduced to handle a state mismatch caused by the legacy MAC address synchronization method. In versions earlier than v1.6.0, the KubeVirt controller automatically patched the MAC address the virtual machine instance back into the specification during the creation process. This ensured that the MAC address remained consistent across restarts. However, because the specification was modified while the virtual machine was active, the controller added the `RestartRequired` condition to signal that a manual restart was necessary to synchronize the state.
+
+=== Change in default VLAN behavior for secondary pod interfaces
+
+In v1.6.0 and earlier versions, pods with secondary network interfaces (such as VM networks and storage networks) were automatically assigned to VLAN ID 1 and the VLAN ID configured in the VLAN network. This dual-VLAN ID configuration allowed the {harvester-product-name} network bridge to forward untagged traffic to the veth interfaces of these pods.
+
+This behavior changed in v1.6.1, which uses v1.8.0 of the CNI bridge plugin. Secondary pod interfaces are now associated only with the VLAN ID assigned to the VM network. Because VLAN ID 1 is no longer added, the bridge is unable to forward untagged traffic to these interfaces.
+
+The change affects clusters upgraded from v1.5.x to v1.6.1 if the external switch port is configured as an access port sending untagged frames. Updating the external switch configuration to use a trunk port resolves the issue. Pods with secondary interfaces that are attached to untagged networks or associated with VLAN ID 1 are not affected.
+
+Related issue: https://github.com/harvester/harvester/issues/8816[#8816]

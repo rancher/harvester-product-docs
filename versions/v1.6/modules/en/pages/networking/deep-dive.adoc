@@ -1,5 +1,5 @@
 = Networking Deep Dive
-:revdate: 2025-05-20
+:revdate: 2026-01-20
 :page-revdate: {revdate}
 
 == Network topology
@@ -31,8 +31,8 @@ Harvester networking is designed to build the network path between pods and the 
 
 We leverage https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI] and https://www.cni.dev/plugins/current/main/bridge/[bridge CNI] to implement the bridge network.
 
-. Multus CNI is a Container Network Interface (CNI) plugin for Kubernetes that can attach multiple network interfaces to a pod. Its capability allows a VM to have one NIC for the management network and multiple NICs for the bridge network.
-. Using the bridge CNI, the VM pod will be plugged into the L2 bridge specified in the Network Attachment Definition config.
+* Multus CNI is a Container Network Interface (CNI) plugin for Kubernetes that can attach multiple network interfaces to a pod. Its capability allows a VM to have one NIC for the management network and multiple NICs for the bridge network.
+* Using the bridge CNI, the VM pod will be plugged into the L2 bridge specified in the Network Attachment Definition config.
 +
 [,json]
 ----
@@ -62,7 +62,7 @@ We leverage https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI] and h
 +
 Example 1 is a typical VLAN configuration with VLAN ID 100, while Example 2 is an untagged network configuration with no VLAN ID. The VM pod configured using Example 1 will be plugged into the bridge `mgmt-br`, while the VM pod using Example 2 will be plugged into the bridge `oob-br`.
 
-. To achieve high availability and fault tolerance, a bond device where the real NICs are bound is created to serve as the uplink of the bridge. By default, this bond device will allow the target tagged traffic/packets to pass through.
+* To achieve high availability and fault tolerance, a bond device where the real NICs are bound is created to serve as the uplink of the bridge. By default, this bond device will allow the target tagged traffic/packets to pass through.
 +
 [,shell]
 ----
@@ -74,6 +74,27 @@ Example 1 is a typical VLAN configuration with VLAN ID 100, while Example 2 is a
 ----
 +
 The example above shows that the bond `oob-bo` allows packages with tag 1, 100 or 200.
+
+* When you create a virtual machine and connect it to a VM network (VLAN) or storage network, {harvester-product-name} automatically creates virtual Ethernet (veth) interfaces on the host that connect directly to the pods.
++
+In earlier versions, these veth interfaces were associated with both VLAN ID 1 and the VLAN ID assigned to the VM network. This allowed the {harvester-product-name} bridge to correctly forward untagged (VLAN 1) and tagged traffic from external switches to the veth interface.
++
+[,shell]
+----
+vethaf720855      1 Egress Untagged
+                  66 PVID Egress Untagged
+----
++
+This behavior changed in {harvester-product-name} v1.6.1, which uses v1.8.0 of the CNI bridge plugin. The default VLAN ID 1 is no longer added to veth interfaces. Only the VLAN ID assigned to the VM network is configured.
++
+[,shell]
+----
+vethaf720855      66 PVID Egress Untagged
+----
++
+Because untagged VLAN handling is no longer applied, physical switches connected to {harvester-product-name} hosts must now be configured strictly as trunk ports. These ports must accept tagged traffic and send traffic tagged with the VLAN ID used by the VM network.
++
+Any untagged traffic arriving at {harvester-product-name} network bridges for a VLAN-tagged veth interface is dropped. This occurs because the bridge cannot forward the traffic to the veth interface, which is configured to accept only the VLAN ID from the VM network.
 
 === Management Network
 
