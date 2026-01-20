@@ -1,8 +1,8 @@
 = IP Pool
-:revdate: 2025-05-09
+:revdate: 2026-01-20
 :page-revdate: {revdate}
 
-Harvester IP Pool is a built-in IP address management (IPAM) solution exclusively available to Harvester load balancers (LBs).
+IP Pool is a built-in IP address management (IPAM) solution exclusively available to {harvester-product-name} load balancers (LBs).
 
 == Features
 
@@ -18,18 +18,23 @@ status:
 
 * *Scope:* IP pools can be confined to a particular network, project, namespace, or guest cluster.
 
-== How to create
+== Creating an IP pool
 
-To create a new IP pool:
+. On the {harvester-product-name} UI, go to *Networks -> IP Pools*.
+. Select *Create*.
+. Specify a name for the IP pool.
+. On the *Range* tab, specify one or more IP ranges.
++
+image::networking/multiple-ranges.png[Multiple IP ranges in an IP pool]
+. On the *Selector* tab, specify the priority level and scope (namespace) of the IP pool.
++
+image::networking/ippool-scope.png[IP pool scope]
 
-. Go to the *Networks* > *IP Pools* page and select *Create*.
-. Specify the *Name* of the IP pool.
-. Go to the *Range* tab to specify the *IP ranges* for the IP pool. You can add multiple IP ranges.
-+
-image::networking/multiple-ranges.png[]
-. Go to the *Selector* tab to specify the *Scope* and *Priority* of the IP pool.
-+
-image::networking/ippool-scope.png[]
+=== Creating an IP pool using the Rancher UI
+
+If you imported the {harvester-product-name} cluster into {rancher-short-name}, you can create an IP pool using the {rancher-short-name} UI (*Virtualization Management* -> IP Pool: Create*). However, the *Scope* section on the *Selector* tab requires you to specify the project and guest Kubernetes cluster, in addition to the namespace. For more information, see xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[Multi-Tenancy Example] and https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[Projects and Kubernetes Namespaces with Rancher].
+
+An IP pool is designated as a global resource when the *Scope* section contains only one entry with the *Project*, *Namespace*, and *Guest Kubernetes Cluster* fields set to *All*.
 
 == Selection policy
 
@@ -109,6 +114,8 @@ apiVersion: networking.harvesterhci.io/v1beta1
 kind: IPPool
 metadata:
   name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
 spec:
   ranges:
   - subnet: 192.168.20.0/24
@@ -124,7 +131,16 @@ spec:
 * The IP pool prioritizes the allocation of previously assigned IP addresses based on their allocation history.
 * IP addresses are assigned in ascending order.
 
-[NOTE]
-====
-Starting with Harvester v1.2.0,  the `vip-pools` setting is deprecated. Following the upgrade, this setting will be automatically migrated to the Harvester IP pools.
-====
+== Best practices
+
+=== IP pool for VM type load balancer
+
+* Create an IP pool <<Creating an IP pool,using the {harvester-product-name} UI>>, which leaves the scope selector's *Project* and *Guest Kubernetes Cluster* fields blank.
+
+* If you must <<Creating an IP pool using the Rancher UI,use the {rancher-short-name} UI>>, set the *Project* and *Guest Kubernetes Cluster* fields to either *All* or *None*.
+
+=== IP pool for guest cluster type load balancer
+
+* Create an IP pool <<Creating an IP pool using the Rancher UI,using the {rancher-short-name} UI>>, which allows you to specify the target project and guest Kubernetes cluster for better resource management and isolation.
+
+* Exercise caution when creating global IP pools. A single guest cluster can exhaust the entire pool, leaving other clusters unable to provision services. Additionally, you cannot delete a pool if any of the addresses are still in use.
