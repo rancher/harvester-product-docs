@@ -1,0 +1,124 @@
+= Update the Configuration After Installation
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+The {harvester-product-name} operating system has an immutable design, which means most files in the operating system revert to their pre-configured state after a reboot. The operating system loads the pre-configured values of system components from configuration files during the boot time.
+
+To update a configuration, you must first update the runtime value in the system and then update configuration files to ensure that changes persist between reboots.
+
+However, starting with v1.7.0, network configuration changes made using the `nmcli` tool persist automatically because the `/etc/NetworkManager` directory is now included in the list of persistent paths.
+
+[NOTE]
+====
+If you upgrade from a version before `v1.1.2`, the `cloud-init` file in examples will be `/oem/99_custom.yaml`. Please substitute the value if needed.
+====
+
+== Password of `rancher` user
+
+=== Runtime change
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the `rancher` user account.
+
+. Reset the password for the `rancher` user account by running the command `passwd`.
+
+=== Configuration persistence
+
+. Back up the {elemental-product-name} `cloud-init` file `/oem/90_custom.yaml`.
++
+[,sh]
+----
+ cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
+----
+
+. Edit `/oem/90_custom.yaml` and update the yaml path `stages.initramfs[0].users.rancher.passwd`.
+
+For information about specifying the `rancher` user account password in an encrypted form, see [`os.password`](./harvester-configuration.md#ospassword).
+
+== NTP servers
+
+For information about NTP settings, see xref:hosts/hosts.adoc#_ntp_configuration[NTP servers].
+
+== DNS servers
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the root account.
+
+. Check the management interface configuration, and then run either of the following commands:
++
+** Not configured to use a VLAN:
++      
+[,shell]
+----
+nmcli con modify bridge-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br
+----
+** Configured to use a VLAN:
++
+[,shell]
+----
+nmcli con modify vlan-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br.VLAN_ID
+----
++
+You must replace `VLAN_ID` with the actual ID. To view a list of configured connections and devices, run the command `nmcli con`.
+
+. Verify that the file `/etc/resolv.conf` contains the correct DNS servers by running the `cat` command.
++
+[,shell]
+----
+cat /etc/resolv.conf
+----
+
+. Restart the `rke2-coredns` deployment.
++
+[,shell]
+----
+kubectl rollout restart deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+. Verify that the `rke2-coredns` deployment was rolled out successfully.
++
+[,shell]
+----
+kubectl rollout status deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+== Bonding slaves
+
+You can update the slave interfaces of the management bonding interface `mgmt-bo`.
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Log in to a Harvester node] using the root account.
+
+. Identify the interface names using the following command:
++
+[shell]
+----
+$ nmcli device
+DEVICE           TYPE      STATE                   CONNECTION
+mgmt-br          bridge    connected               bridge-mgmt
+...
+mgmt-bo          bond      connected               bond-mgmt
+ens6             ethernet  connected               bond-slave-ens6
+ens7             ethernet  disconnected            --
+...
+----
+
+. Use the `nmcli` tool to create a connection for the interface and attach it to the management bond.
++
+Example:
++
+[shell]
+----
+$ nmcli con add type bond-slave ifname ens7 master mgmt-bo
+Connection 'bond-slave-ens7' (5a379328-178a-4167-b065-b5426facd659) successfully added.
+----
+
+You should now be able to see that the device is connected.
+
+[shell]
+----
+$ nmcli device
+DEVICE           TYPE      STATE                   CONNECTION
+mgmt-br          bridge    connected               bridge-mgmt
+...
+mgmt-bo          bond      connected               bond-mgmt
+ens6             ethernet  connected               bond-slave-ens6
+ens7             ethernet  connected               bond-slave-ens7
+----

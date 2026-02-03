@@ -1,0 +1,325 @@
+= Troubleshooting
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+== Overview
+
+Here are certain tips to troubleshoot a failed upgrade:
+
+* Check xref:./upgrades.adoc#_upgrade_support_matrix[version-specific upgrade notes]. You can click the version in the support matrix table to see if there are any known issues.
+* Dive into the upgrade https://github.com/harvester/harvester/blob/master/enhancements/20220413-zero-downtime-upgrade.md[design proposal]. The following section briefly describes phases within an upgrade and possible diagnostic methods.
+
+== Upgrade flow
+
+The upgrade process includes several phases.
+
+image::upgrade/ts_upgrade_phases.png[]
+
+=== Phase 1: Provision upgrade repository virtual machine
+
+The {harvester-product-name} controller downloads a release ISO file and uses it to provision a repository virtual machine. The virtual machine name uses the format `upgrade-repo-hvst-xxxx`.
+
+image::upgrade/ts_status_phase1.png[]
+
+Network speed and cluster resource utilization influence the amount of time required to complete this phase. Upgrades typically fail because of network speed issues.
+
+If the upgrade fails at this point, check the status of the repository virtual machine and its corresponding pod before <<Restart the upgrade,restarting the upgrade>>. You can check the status using the command `kubectl get vm -n harvester-system`.
+
+Example:
+
+[,shell]
+----
+$ kubectl get vm -n harvester-system
+NAME                              AGE    STATUS     READY
+upgrade-repo-hvst-upgrade-9gmg2   101s   Starting   False
+
+$ kubectl get pods -n harvester-system | grep upgrade-repo-hvst
+virt-launcher-upgrade-repo-hvst-upgrade-9gmg2-4mnmq     1/1     Running     0          4m44s
+----
+
+=== Phase 2: Preload container images
+
+The {harvester-product-name} controller creates jobs that download and preload container images from the repository virtual machine. These images are required for the next release.
+
+Allow some time for the images to be downloaded and preloaded on all nodes.
+
+image::upgrade/ts_status_phase2.png[]
+
+If the upgrade fails at this point, check the job logs in the `cattle-system` namespace before <<Restart the upgrade,restarting the upgrade>>. You can check the logs using the command `kubectl get jobs -n cattle-system | grep prepare`.
+
+Example:
+
+[,shell]
+----
+$ kubectl get jobs -n cattle-system | grep prepare
+apply-hvst-upgrade-9gmg2-prepare-on-node1-with-2bbea1599a-f0e86   0/1           47s        47s
+apply-hvst-upgrade-9gmg2-prepare-on-node4-with-2bbea1599a-041e4   1/1           2m3s       2m50s
+
+$ kubectl logs jobs/apply-hvst-upgrade-9gmg2-prepare-on-node1-with-2bbea1599a-f0e86 -n cattle-system
+...
+----
+
+=== Phase 3: Upgrade system services
+
+The {harvester-product-name} controller creates a job that upgrades component Helm charts.
+
+image::upgrade/ts_status_phase3.png[]
+
+You can check the `apply-manifest` job using the command `$ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest`.
+
+Example:
+
+[,shell]
+----
+$ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+NAME                                 COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-apply-manifests   0/1           46s        46s
+
+$ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
+...
+----
+
+[CAUTION]
+====
+If the upgrade fails at this point, you must generate a xref:troubleshooting/operating-system.adoc#_generate_a_support_bundle[support bundle] before <<Restart the upgrade,restarting the upgrade>>. The support bundle contains logs and resource manifests that can help identify the cause of the failure.
+====
+
+=== Phase 4: Upgrade nodes
+
+The {harvester-product-name} controller creates the following jobs on each node:
+
+* Multi-node clusters:
++
+** `pre-drain` job: Live-migrates or shuts down virtual machines on the node. Once completed, the embedded {rancher-short-name} service upgrades the {rke2-short-name} runtime on the node.
+** `post-drain` job: Upgrades and reboots the operating system.
+
+* Single-node clusters:
++
+** `single-node-upgrade` job: Upgrades the operating system and {rke2-short-name} runtime. The job name uses the format `hvst-upgrade-xxx-single-node-upgrade-<hostname>`.
+
+image::upgrade/ts_status_phase4.png[]
+
+You can check the jobs running on each node by running the command `kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=node`.
+
+Example:
+
+[,shell]
+----
+$ kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=node
+NAME                                  COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-post-drain-node1   1/1           118s       6m34s
+hvst-upgrade-9gmg2-post-drain-node2   0/1           9s         9s
+hvst-upgrade-9gmg2-pre-drain-node1    1/1           3s         8m14s
+hvst-upgrade-9gmg2-pre-drain-node2    1/1           7s         85s
+
+$ kubectl logs -n harvester-system jobs/hvst-upgrade-9gmg2-post-drain-node2
+...
+----
+
+[WARNING]
+====
+If the upgrade fails at this point, *do not restart* the upgrade unless instructed by https://www.suse.com/support[SUSE Support].
+====
+
+=== Phase 5: Cleanup
+
+The {harvester-product-name} controller deletes the repository virtual machine and all files that are no longer necessary.
+
+== Common operations
+
+=== Restart the upgrade
+
+[WARNING]
+====
+If the ongoing upgrade fails or becomes stuck at <<Phase 4: Upgrade nodes>>, *do not restart* the upgrade unless instructed by https://www.suse.com/support[SUSE Support].
+====
+
+. Generate a xref:troubleshooting/operating-system.adoc#_generate_a_support_bundle[support bundle].
+
+. <<Stop the ongoing upgrade>>.
+
+. Click the *Upgrade* button on the *Dashboard* screen.
++
+If you xref:./upgrades.adoc#_customize_the_version[customized the version], you might need to xref:./upgrades.adoc#_prepare_the_version[create the version object] again.
+
+=== Stop the ongoing upgrade
+
+[CAUTION]
+====
+If an ongoing upgrade fails or becomes stuck at <<Phase 4: Upgrade nodes>>, identify the cause first.
+====
+
+You can stop the upgrade by performing the following steps:
+
+. Log in to a control plane node.
+
+. Retrieve a list of `Upgrade` CRs in the cluster.
++
+[,shell]
+----
+# become root
+$ sudo -i
+
+# list the on-going upgrade
+$ kubectl get upgrade.harvesterhci.io -n harvester-system -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-9gmg2   10m
+----
+
+. Delete the `Upgrade` CR.
++
+[,shell]
+----
+$ kubectl delete upgrade.harvesterhci.io/hvst-upgrade-9gmg2 -n harvester-system
+----
+
+. Resume the paused ManagedCharts.
++
+ManagedCharts are paused to avoid a data race between the upgrade and other processes. You must manually resume all paused ManagedCharts.
++
+[,console]
+----
+cat > resumeallcharts.sh << 'FOE'
+resume_all_charts() {
+
+  local patchfile="/tmp/charttmp.yaml"
+  
+  cat >"$patchfile" << 'EOF'
+spec:
+  paused: false
+EOF
+  echo "the to-be-patched file"
+  cat "$patchfile"
+
+  local charts="harvester harvester-crd rancher-monitoring-crd rancher-logging-crd"
+
+  for chart in $charts; do
+    echo "unapuse managedchart $chart"
+    kubectl patch managedcharts.management.cattle.io $chart -n fleet-local --patch-file "$patchfile" --type merge || echo "failed, check reason"
+  done
+
+  rm "$patchfile"
+}
+
+resume_all_charts
+
+FOE
+
+chmod +x ./resumeallcharts.sh
+
+./resumeallcharts.sh
+----
+
+=== Download upgrade logs
+
+{harvester-product-name} automatically collects all the upgrade-related logs and display the upgrade procedure. By default, this is enabled. You can also choose to opt out of such behavior.
+
+image::upgrade/enable_logging.png[The "Enable Logging" checkbox on the upgrade confirmation dialog]
+
+You can click the *Download Log* button to download the log archive during an upgrade.
+
+image::upgrade/download_upgradelog_dialog.png[Download the upgrade log archive by clicking the "Download Log" button on the upgrade dialog]
+
+Log entries will be collected as files for each upgrade-related Pod, even for intermediate Pods. The support bundle provides a snapshot of the current state of the cluster, including logs and resource manifests, while the upgrade log preserves any logs generated during an upgrade. By combining these two, you can further investigate the issues during upgrades.
+
+image::upgrade/upgradelog_archive.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
+
+After the upgrade ends, {harvester-product-name} stops collecting the upgrade logs to avoid occupying the disk space. In addition, you can click the *Dismiss it* button to purge the upgrade logs.
+
+image::upgrade/dismiss_upgrade_to_remove_upgradelog.png[The upgrade log archive contains all the logs generated by the upgrade-related Pods]
+
+[NOTE]
+====
+The `upgradelog-downloader` deployment and log archive volume are intentionally kept running in the cluster after an upgrade, regardless of the upgrade result. This guarantees you have persistent access to the logs.
+
+However, these components continue to consume cluster resources and may block certain operations, such as updating storage network settings (see https://github.com/harvester/harvester/issues/9599[issue #9599]). To free up resources and unblock operations, perform either of the following actions:
+
+* Click the *Dismiss it* button on the {harvester-product-name} UI.
+* Delete the associated `UpgradeLog` custom resource via kubectl.
+====
+
+For more details, please refer to the https://github.com/harvester/harvester/blob/master/enhancements/20221207-upgrade-observability.md[upgrade log HEP].
+
+[CAUTION]
+====
+The default size of the volume that stores upgrade-related logs is 1 GB. When errors occur, these logs may completely consume the volume's available space. To work around this issue, you can perform the following steps:
+
+. Detach the `log-archive` volume by scaling down the `fluentd` StatefulSet and `downloader` deployment.
++
+----
+# Locate the StatefulSet and Deployment
+$ kubectl -n harvester-system get statefulsets -l harvesterhci.io/upgradeLogComponent=aggregator
+NAME                                               READY   AGE
+hvst-upgrade-xxxxx-upgradelog-infra-fluentd   1/1     43s
+
+$ kubectl -n harvester-system get deployments -l harvesterhci.io/upgradeLogComponent=downloader
+NAME                                            READY   UP-TO-DATE   AVAILABLE   AGE
+hvst-upgrade-xxxxx-upgradelog-downloader   1/1     1            1           38s
+
+# Scale down the resources to terminate any Pods using the volume
+$ kubectl -n harvester-system scale statefulset hvst-upgrade-xxxxx-upgradelog-infra-fluentd --replicas=0
+statefulset.apps/hvst-upgrade-xxxxx-upgradelog-infra-fluentd scaled
+
+$ kubectl -n harvester-system scale deployment hvst-upgrade-xxxxx-upgradelog-downloader --replicas=0
+deployment.apps/hvst-upgrade-xxxxx-upgradelog-downloader scaled
+----
+
+. Expand the volume size using the {longhorn-product-name} UI. For more information, see https://documentation.suse.com/cloudnative/storage/1.8/en/volumes/volume-expansion.html[Volume Expansion] in the {longhorn-product-name} documentation.
++
+----
+# Here's how to find out the actual name of the target volume
+$ kubectl -n harvester-system get pvc -l harvesterhci.io/upgradeLogComponent=log-archive -o jsonpath='{.items[].spec.volumeName}'
+pvc-63355afb-ce61-46c4-8781-377cf962278a
+----
+
+. Recover the `fluentd` StatefulSet and `downloader` deployment.
++
+[,console]
+----
+$ kubectl -n harvester-system scale statefulset hvst-upgrade-xxxxx-upgradelog-infra-fluentd --replicas=1
+statefulset.apps/hvst-upgrade-xxxxx-upgradelog-infra-fluentd scaled
+
+$ kubectl -n harvester-system scale deployment hvst-upgrade-xxxxx-upgradelog-downloader --replicas=1
+deployment.apps/hvst-upgrade-xxxxx-upgradelog-downloader scaled
+----
+====
+
+=== Clean up unused images
+
+The default value of `imageGCHighThresholdPercent` in https://kubernetes.io/docs/reference/config-api/kubelet-config.v1beta1/#kubelet-config-k8s-io-v1beta1-KubeletConfiguration[KubeletConfiguration] is `85`. When disk usage exceeds 85%, the kubelet attempts to remove unused images.
+
+New images are loaded to each {harvester-product-name} node during upgrades. When disk usage exceeds 85%, these new images may be marked for cleanup because they are not used by any containers. In air-gapped environments, removal of new images from the cluster may break the upgrade process.
+
+If you encounter the error message `Node xxx will reach xx.xx% storage space after loading new images. It's higher than kubelet image garbage collection threshold 85%.`, run `crictl rmi --prune` to clean up unused images before starting a new upgrade.
+
+image::upgrade/disk-space-not-enough-error-message.png[Disk space not enough error message]
+
+=== Check the status of a stuck upgrade
+
+If the upgrade becomes stuck and the {harvester-product-name} UI does not display any error messages, perform the following steps:
+
+. Check the pods that were created during the upgrade process using the command `kubectl get pods -n harvester-system | grep upgrade`.
++
+The main script is in the `hvst-upgrade-xxxxx-apply-manifests-xxxxx` pod. If the log records include the following messages, the `managedChart` CR might be causing issues.
++
+[,console]
+----
+Current version: x.x.x, Current state: WaitApplied, Current generation: x
+Sleep for 5 seconds to retry
+----
+
+. Retrieve information about the `bundle` CR using the command `kubectl get bundles -A`.
++
+Example:
++
+[,console]
+----
+NAMESPACE     NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
+fleet-local   fleet-agent-local                             1/1
+fleet-local   local-managed-system-agent                    1/1
+fleet-local   mcc-harvester                                 0/1                       Modified(1) [Cluster fleet-local/local]; kubevirt.kubevirt.io harvester-system/kubevirt modified {"spec":{"configuration":{"vmStateStorageClass":"vmstate-persistence"}}}
+fleet-local   mcc-harvester-crd                             1/1
+fleet-local   mcc-local-managed-system-upgrade-controller   1/1
+fleet-local   mcc-rancher-logging-crd                       1/1
+fleet-local   mcc-rancher-monitoring-crd                    1/1
+----
