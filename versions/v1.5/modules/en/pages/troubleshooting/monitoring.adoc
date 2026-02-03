@@ -1,5 +1,5 @@
 = Monitoring Issues
-:revdate: 2025-07-16
+:revdate: 2026-02-02
 :page-revdate: {revdate}
 
 == Monitoring is unusable
@@ -314,6 +314,8 @@ In certain situations, the state of the `rancher-monitoring-crd` ManagedChart ob
 
 Example:
 
+[,console]
+----
  $ kubectl get managedchart rancher-monitoring-crd -n fleet-local -o yaml
  apiVersion: management.cattle.io/v3
  kind: ManagedChart
@@ -352,11 +354,14 @@ Example:
      readyClusters: 0/1
      state: Modified
  ...
+----
 
 The `ManagedChart` object has a downstream object named `Bundle`, which has similar information.
 
 Example:
 
+[,console]
+----
  $ kubectl get bundles -A
  NAMESPACE     NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
  fleet-local   fleet-agent-local                             1/1
@@ -366,6 +371,7 @@ Example:
  fleet-local   mcc-local-managed-system-upgrade-controller   1/1
  fleet-local   mcc-rancher-logging-crd                       1/1
  fleet-local   mcc-rancher-monitoring-crd                    0/1                       Modified(1) [Cluster fleet-local/local]; clusterrole.rbac.authorization.k8s.io rancher-monitoring-crd-manager missing; clusterrolebinding.rbac.authorization.k8s.io rancher-monitoring-crd-manager missing; configmap.v1 cattle-monitoring-system/rancher-monitoring-crd-manifest missing; serviceaccount.v1 cattle-monitoring-system/rancher-monitoring-crd-manager missing
+----
 
 When the issue exists and you xref:../upgrades/upgrades.adoc#_start_an_upgrade[start an upgrade], {harvester-product-name} may return the following error message: `admission webhook "validator.harvesterhci.io" denied the request: managed chart rancher-monitoring-crd is not ready, please wait for it to be ready`.
 
@@ -459,9 +465,8 @@ The objects that are marked as `missing` do not have the related annotations and
 
 Example:
 
+[,yaml]
 ----
-One of the manually recreated object:
-
 apiVersion: rbac.authorization.k8s.io/v1
 kind: ClusterRole
 metadata:
@@ -493,6 +498,7 @@ rules:
 
 . Patch the ClusterRole object `rancher-monitoring-crd-manager` to add the `update` operation.
 +
+[,console]
 ----
  $ cat > patchrules.yaml << EOF
  rules:
@@ -515,6 +521,7 @@ rules:
 
 . Patch the marked as `missing` objects to add the required annotations and labels.
 +
+[,console]
 ----
  $ cat > patchhash.yaml << EOF
  metadata:
@@ -539,6 +546,7 @@ rules:
 +
 After a few seconds, the status of the `rancher-monitoring-crd` ManagedChart object changes to `Ready`.
 +
+[,console]
 ----
  $ kubectl get managedchart -n fleet-local rancher-monitoring-crd -oyaml
  apiVersion: management.cattle.io/v3
@@ -558,6 +566,7 @@ After a few seconds, the status of the `rancher-monitoring-crd` ManagedChart obj
 +
 Also, error indicators are no longer displayed for the downstream objects.
 +
+[,console]
 ----
  $ kubectl bundle -A
  NAMESPACE     NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
@@ -574,7 +583,7 @@ Also, error indicators are no longer displayed for the downstream objects.
 
 === Related Issue
 
-https://github.com/harvester/harvester/issues/5505
+https://github.com/harvester/harvester/issues/5505[#5505]
 
 == Some `rancher-monitoring` add-on pods are abruptly terminated
 
@@ -584,7 +593,7 @@ When the `rancher-monitoring` add-on is enabled, pods related to Prometheus, Ale
 
 Example:
 
-[,shell]
+[,console]
 ----
 $ kubectl -n cattle-monitoring-system get pods,svc,ep,deploy,pvc,sts,prometheus,alertmanager | grep -E 'stateful|deploy'
 
@@ -598,7 +607,7 @@ statefulset.apps/prometheus-rancher-monitoring-prometheus       0/0     7h52m
 
 The `prometheus` pod logs contain the message `level=warn msg="Received SIGTERM, exiting gracefully..."`.
 
-[,shell]
+[,console]
 ----
 ...
 ts=2025-05-20T05:41:02.847Z caller=kubernetes.go:327 level=info component="discovery manager notify" discovery=kubernetes config=config-0 msg="Using pod service account via in-cluster config"
@@ -625,7 +634,7 @@ The `prometheus` CRD object includes the `storage-network.settings.harvesterhci.
 
 The Harvester pod logs ('harvester-system/harvester' deployment) indicate that the attempt to change the `storage-network` setting was blocked.
 
-[,shell]
+[,console]
 ----
 ...
 2025-05-20T08:13:49.842448311Z time="2025-05-20T08:13:49Z" level=info msg="storage network change: {\"vlan\":955,\"clusterNetwork\":\"k8s-storage\",\"range\":\"198.18.2.0/24\"}"
@@ -658,4 +667,128 @@ This process usually takes a short time to complete, but can be disrupted when t
 
 === Related issue
 
-https://github.com/harvester/harvester/issues/8565[Issue #8565]
+https://github.com/harvester/harvester/issues/8565[#8565]
+
+== {harvester-product-name} UI stops reporting virtual machine metrics after upgrade
+
+=== Issue description
+
+After an upgrade, the {harvester-product-name} UI stops reporting virtual machine metrics while the cluster metrics remain available. Disabling and re-enabling the `rancher-monitoring` add-on does not resolve the issue.
+
+The `prometheus-kubevirt-rules` ServiceMonitor object is missing in the `cattle-monitoring-system` namespace. You cannot add this object manually because the KubeVirt operator automatically deletes it.
+
+[,console]
+----
+$ kubectl get servicemonitor -A
+NAMESPACE                  NAME                                 AGE
+...
+cattle-monitoring-system   prometheus-kubevirt-rules            24s  // is missing
+...
+----
+
+=== Root cause
+
+When KubeVirt is newly installed or upgraded, it generates a new ConfigMap object to store the configuration. A race condition occurs within the KubeVirt operator if the `rancher-monitoring-operator` ServiceAccount object is missing/not synced from the `cattle-monitoring-system` namespace during this process. Consequently, the ServiceMonitor configuration may be excluded from the resulting ConfigMap object. 
+
+During the upgrade process, KubeVirt may incorrectly determine the monitoring state. Once the ConfigMap object is generated, KubeVirt does not reconcile or regenerate it until the next upgrade, unless a manual trigger is performed.
+
+=== Workaround
+
+The workaround involves ensuring that the `rancher-monitoring-operator` ServiceAccount object exists, removing orphaned ConfigMap objects, and restarting the KubeVirt operator.
+
+. Retrieve the list of ConfigMap objects.
++
+[,console]
+----
+$ kubectl get configmap -n harvester-system  -l kubevirt.io/install-strategy
+NAME                              DATA   AGE
+kubevirt-install-strategy-zq86d   1      10m
+----
++
+The list includes the ConfigMap from the latest version and any surviving legacy objects.
+
+. Check if the latest ConfigMap object contains the ServiceMonitor configuration.
++
+[,console]
+----
+$ kubectl get configmap -n harvester-system  kubevirt-install-strategy-zq86d -ojsonpath="{.data.manifests}" | base64 -d | gunzip  | grep ServiceMoni -i
+----
++
+When the output is empty, the issue exists in your environment.
+
+. Verify that the `monitorAccount` and `monitorNamespace` fields exist.
++
+[,console]
+----
+$ kubectl get kubevirt kubevirt -n harvester-system -oyaml | grep monitoring
+monitorAccount: rancher-monitoring-operator
+monitorNamespace: cattle-monitoring-system
+----
+
+. Verify that the ServiceAccount object exists.
++
+This object is created during installation and must not be removed.
++
+[,console]
+----
+$ kubectl get serviceaccount -n cattle-monitoring-system rancher-monitoring-operator
+Error from server (NotFound): serviceaccounts "rancher-monitoring-operator" not found
+----
+
+. If the ServiceAccount object does not exist, create it manually. Otherwise, move to the next step.
++
+[,console]
+----
+$ cat > rmo.yaml << 'EOF'
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  annotations:
+    meta.helm.sh/release-name: rancher-monitoring
+    meta.helm.sh/release-namespace: cattle-monitoring-system
+  labels:
+    app: rancher-monitoring-operator
+    app.kubernetes.io/component: prometheus-operator
+    app.kubernetes.io/instance: rancher-monitoring
+    app.kubernetes.io/managed-by: Helm
+    app.kubernetes.io/name: rancher-monitoring-prometheus-operator
+    heritage: Helm
+    release: rancher-monitoring
+  name: rancher-monitoring-operator
+  namespace: cattle-monitoring-system
+EOF
+
+$ kubectl create -f rmo.yaml
+
+$ kubectl get serviceaccount -n cattle-monitoring-system rancher-monitoring-operator
+NAME                          SECRETS   AGE
+rancher-monitoring-operator   0         35s
+----
+
+. Delete all ConfigMap objects (`kubevirt-install-strategy-*`).
+
+. Roll out the `virt-operator` deployment.
++
+Kubevirt recreates the ConfigMap.
++
+[,console]
+----
+$ kubectl rollout restart deployment -n harvester-system virt-operator
+deployment.apps/virt-operator restarted
+
+$ kubectl get pods -n harvester-system
+NAME                                                              READY   STATUS      RESTARTS   AGE
+...
+kubevirt-c2053a4889fe65e8d368b5c232901c84fda8debe-jobgddh65r7ws   0/1     Completed   0          6s  // the pod exists for a short time
+...
+virt-operator-796bf5fd9b-h56z9                                    1/1     Running     0          33s
+
+$ kubectl get servicemonitor -A
+NAMESPACE                  NAME                                 AGE
+cattle-monitoring-system   prometheus-kubevirt-rules            24s  // newly created
+...
+----
+
+=== Related issue
+
+https://github.com/harvester/harvester/issues/9674[#9674]
