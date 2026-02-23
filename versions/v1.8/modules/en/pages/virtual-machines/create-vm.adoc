@@ -1,0 +1,513 @@
+= Create a Virtual Machine
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+== How to Create a Virtual Machine
+
+[tabs]
+======
+UI::
++
+--
+You can create one or more virtual machines from the *Virtual Machines* page. 
+
+[NOTE]
+====
+Please refer to xref:./create-windows-vm.adoc[this page] for creating Windows virtual machines.
+====
+
+. Choose the option to create either one or multiple virtual machine instances.
+
+. Select the namespace of your virtual machines, only the `harvester-public` namespace is visible to all users.
+
+. The VM Name is a required field.
+
+. (Optional) VM template is optional, you can choose `iso-image`, `raw-image` or `windows-iso-image` template to speed up your virtual machine instance creation.
+
+. On the *Basics* tab, configure the following settings:
++
+* *CPU* and *Memory*: You can allocate a maximum of *254* vCPUs. As a best practice, ensure that the number of vCPUs allocated to each virtual machine does not exceed the number of available physical processor threads on the host. If virtual machines are not expected to fully consume the allocated resources most of the time, you can use the xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] setting to optimize physical resource allocation.
+* *SSHKey*: Select SSH keys or upload new keys.
+
+. Select a custom VM image on the *Volumes* tab. The default disk will be the root disk. You can add more disks to the virtual machine.
+
+. To configure networks, go to the *Networks* tab.
+
+. The *Management Network* is added by default, you can remove it if the VLAN network is configured.
+
+. You can also add additional networks to the virtual machines using VLAN networks. You may configure the VLAN networks on *Advanced -> Networks* first.
++
+[NOTE]
+====
+If the virtual machine has one interface connected to the `mgmt` network and another connected to a VLAN network, the node may be unable to reach the virtual machine's `mgmt` IP address. This connection issue occurs when the other network's gateway overrides the virtual machine's default route, resulting in routing that prefers the VLAN network for all inbound and outbound traffic, even traffic destined for the `mgmt` network.
+====
+
+. (Optional) Set node affinity rules on the *Node Scheduling* tab.
+
+. (Optional) Set workload affinity rules on the *VM Scheduling* tab.
+
+. Advanced options such as run strategy, os type and cloud-init data are optional. You may configure these in the *Advanced Options* section when applicable. 
+
+image::vm/create-vm.png[]
+--
+
+API::
++
+--
+To create virtual machines using the Kubernetes API, create a `VirtualMachine` object. 
++
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: new-vm
+  namespace: default
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        memory: "3996Mi"
+        devices:
+          disks: []
+          interfaces:
+            - name: default
+              model: virtio
+              masquerade: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            cpu: "125m"
+            memory: "2730Mi"
+          limits:
+            cpu: 2
+            memory: "4Gi"
+        networks:
+          - name: default
+            pod: {}
+----
+
+For more information, see the API reference. 
+--
+
+Terraform::
+
+To create a virtual machine using the [Harvester Terraform Provider](https://registry.terraform.io/providers/harvester/harvester/latest), define a `harvester_virtualmachine` resource block: 
++
+[,hcl]
+----
+resource "harvester_virtualmachine" "opensuse154" {
+  name                 = "opensuse154"
+  namespace            = "default"
+  restart_after_update = true
+
+  cpu    = 2
+  memory = "2Gi"
+
+  run_strategy = "RerunOnFailure"
+  hostname     = "opensuse154"
+  machine_type = "q35"
+
+  ssh_keys = [
+    harvester_ssh_key.mysshkey.id
+  ]
+
+  network_interface {
+    name           = "nic-1"
+    network_name   = harvester_network.cluster-vlan1.id
+    wait_for_lease = true
+  }
+
+  disk {
+    name       = "rootdisk"
+    type       = "disk"
+    size       = "10Gi"
+    bus        = "virtio"
+    boot_order = 1
+
+    image       = harvester_image.opensuse154.id
+    auto_delete = true
+  }
+
+  cloudinit {
+    user_data_secret_name    = harvester_cloudinit_secret.cloud-config-opensuse154.name
+    network_data_secret_name = harvester_cloudinit_secret.cloud-config-opensuse154.name
+  }
+}
+----
+======
+
+== Volumes
+
+You can add one or more additional volumes via the `Volumes` tab, by default the first disk will be the root disk, you can change the boot order by dragging and dropping volumes, or using the arrow buttons.
+
+A disk can be made accessible via the following types:
+
+|===
+| type | description
+
+| disk
+| This type exposes the volume as an ordinary disk to the virtual machine.
+
+| cd-rom
+| This type exposes the volume as a cd-rom drive to the virtual machine. It is read-only by default.
+|===
+
+A volume's xref:../storage/storageclass.adoc[StorageClass] can be specified when adding a new empty volume; for other volumes (such as virtual machine images), the StorageClass is defined during image creation.
+
+If you are using external storage, ensure that the correct *StorageClass* and *Volume Mode* are selected. For example, a volume with the *nfs-csi* StorageClass must use the *Filesystem* volume mode.
+
+[IMPORTANT]
+.important
+====
+When creating volumes from a virtual machine image, ensure that the volume size is greater than or equal to the image size. The volume may become corrupted if the configured volume size is less than the size of the underlying image. This is particularly important for qcow2 images because the virtual size is typically greater than the physical size.
+
+By default, {harvester-product-name} sets the volume size to either 10 GiB or the virtual size of the virtual machine image, whichever is greater.
+====
+
+image::vm/create-vm-volumes.png[create-vm]
+
+=== Adding a container disk
+
+A container disk is an ephemeral storage volume that can be assigned to any number of virtual machines and provides the ability to store and distribute virtual machine disks in the container image registry. A container disk is:
+
+* An ideal tool to replicate a large number of virtual machine workloads or inject machine drivers that do not require persistent data. Ephemeral volumes are designed for virtual machines that need more storage but do not care whether that data is stored persistently across virtual machine restarts or only expect some read-only input data to be present in files, like configuration data or secret keys.
+* Not a good solution for any workload that requires persistent root disks across virtual machine restarts.
+
+A container disk is added when creating a virtual machine by providing a Docker image. When creating a virtual machine, follow these steps:
+
+. Go to the *Volumes* tab.
+. Select *Add Container*.
++
+image::vm/add-container-volume-1.png[add-container-volume]
++
+. Enter a *Name* for the container disk.
+. Choose a disk *Type*.
+. Add a *Docker Image*.
+ ** A disk image, with the format qcow2 or raw, must be placed into the `/disk` directory.
+ ** Raw and qcow2 formats are supported, but qcow2 is recommended in order to reduce the container image's size. If you use an unsupported image format, the virtual machine will get stuck in a `Running` state.
+ ** A container disk also allows you to store disk images in the `/disk` directory. An example of creating such a container image can be found https://kubevirt.io/user-guide/virtual_machines/disks_and_volumes/#containerdisk-workflow-example[here].
+. Choose a *Bus* type.
++
+image:vm/add-container-volume-2.png[add-container-volume]
+
+== Networks
+
+You can choose to add both the `management network` or `VLAN network` to your virtual machine instances via the `Networks` tab, the `management network` is optional if you have the VLAN network configured.
+
+Network interfaces are configured through the `Type` field. They describe the properties of the virtual interfaces seen inside the guest OS:
+
+|===
+| type | description
+
+| bridge
+| Connect using a Linux bridge
+
+| masquerade
+| Connect using iptables rules to NAT the traffic
+|===
+
+=== Management Network
+
+A management network represents the default virtual machine eth0 interface configured by the cluster network solution that is present in each virtual machine.
+
+By default, virtual machines are accessible through the management network within the cluster nodes.
+
+=== Secondary Network
+
+It is also possible to connect virtual machines using additional networks with {harvester-product-name}'s built-in xref:../networking/vm-network.adoc[VLAN networks].
+
+In bridge VLAN, virtual machines are connected to the host network through a linux `bridge`. The network IPv4 address is delegated to the virtual machine via DHCPv4. The virtual machine should be configured to use DHCP to acquire IPv4 addresses.
+
+== Node Scheduling
+
+`Node Scheduling` allows you to constrain which nodes your virtual machines can be scheduled on based on node labels.
+
+image::vm/vm-node-scheduling.png[]
+
+You can choose to run virtual machines on the following:
+
+* Any available node
+
+* A specific node
+
+In the following example, the target node has the hostname `harv21`.
+
+----
+nodeSelector:
+  kubernetes.io/hostname: harv21
+----
+
+[NOTE]
+====
+The virtual machine may be xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] if you limit scheduling to a specific node.
+====
+
+* Nodes that match scheduling rules
+
+You gain greater flexibility by scheduling a virtual machine on a group of nodes. In the following example, the virtual machine can be scheduled on nodes with a specific label. The key is `harvesterhci.io/group` and the value can be either `engineering` or `qa`.
+
+----
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: harvesterhci.io/group
+                operator: In
+                values:
+                  - engineering
+                  - qa
+----
+
+For more information, see https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity[Kubernetes Node Affinity Documentation].
+
+== Virtual machine scheduling
+
+Virtual machine scheduling allows you to constrain which nodes your virtual machines can be scheduled on based on the labels of workloads (virtual machines and pods) already running on these nodes, instead of the node labels.
+
+For instance, you can combine `Required` with `Affinity` to instruct the scheduler to place virtual machines from two services in the same zone, enhancing communication efficiency. Likewise, the use of `Preferred` with `Anti-Affinity` can help distribute virtual machines of a particular service across multiple zones for increased availability.
+
+See the https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod Affinity and Anti-Affinity Documentation] for more details.
+
+[IMPORTANT]
+====
+During the upgrade pre-drain phase, {harvester-product-name} may be unable to live-migrate virtual machines because of unsatisfiable strict anti-affinity rules. When this happens, {harvester-product-name} automatically shuts down these virtual machines to unblock the upgrade and prevent the process from restarting unsafely.
+====
+
+=== Automatically applied affinity rules
+
+{harvester-product-name} may automatically apply certain affinity rules depending on how a virtual machine is configured. These rules dictate which nodes are eligible as scheduling or migration targets. If no other nodes meet the criteria, the virtual machine cannot be scheduled or migrated.
+
+For more information, see xref:troubleshooting/virtual-machines.adoc#_unschedulable_virtual_machines[Unschedulable virtual machines].
+
+[IMPORTANT]
+====
+The {harvester-product-name} webhook reverts manual changes to automatically applied rules.
+====
+
+==== Related networking concepts
+
+The general process for setting up networks for virtual machines involves the following:
+
+* A xref:networking/cluster-network.adoc#_cluster_network[cluster network] and a corresponding xref:networking/cluster-network.adoc#_network_configuration[network configuration] are created. Only nodes that are covered by the network configuration set up the network devices.
+
+* A xref:networking/vm-network.adoc#_create_a_vm_network[VM network] is created with a specific VLAN ID.
+
+In the following example, steps are taken to set up a cluster network and define a virtual machine that connects to this cluster network.
+
+* A cluster network named `cn2` is created.
+
+* A network configuration named `cn2-vc1` is created. `cn2-vc1` covers `node1` and `node2`.
+
+* A VM network named `cn2-nad-100` is created with the VLAN ID `vlan id 100`.
+
+* A virtual machine named `VM vm1` attaches to a secondary network named `cn2-nad-100`.
+
+{harvester-product-name} ensures the following:
+
+* The {harvester-product-name} controller automatically labels Kubernetes `node` objects.
++
+[,shell]
+----
+kubectl get node node1 -oyaml
+...
+metadata:
+  labels:
+    network.harvesterhci.io/cn2: "true"
+    network.harvesterhci.io/mgmt: "true"
+    network.harvesterhci.io/vlanconfig: cn2-vc1
+...
+----
+
+* The {harvester-product-name} webhook automatically updates the `virtualmachine` object.
++
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: network.harvesterhci.io/cn2
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+* The virtual machine is scheduled only on `node1` or `node2`.
+
+[IMPORTANT]
+====
+{harvester-product-name} applies multiple affinity rules when a virtual machine connects to multiple VM networks that are backed by multiple cluster networks. The applied rules collectively determine the nodes that are eligible as scheduling or migration targets.
+
+No affinity rules are applied when a virtual machine connects to VM networks that are backed by xref:networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] (the built-in cluster network). `mgmt` covers all nodes by default, so all nodes are eligible as scheduling or migration targets.
+====
+
+NOTE: The virtual machine is xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] when there is only one node in the cluster network.
+
+==== Related CPU pinning concepts
+
+When you enable the xref:virtual-machines/cpu-pinning.adoc#_enable_and_disable_cpu_manager[CPU Manager] on nodes, {harvester-product-name} applies the following label to related `node` objects.
+
+[,yaml]
+----
+...
+metadata:
+  labels:
+    cpumanager: "true"
+...
+----
+
+When you enable xref:virtual-machines/cpu-pinning.adoc#_enable_cpu_pinning_on_a_new_vm[CPU pinning] during virtual machine creation, {harvester-product-name} applies an affinity rule that ensures the virtual machine is scheduled only on nodes where CPU Manager is enabled.
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cpumanager
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+NOTE: The virtual machine is xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] if CPU Manager is enabled on only one node.
+
+== Annotations
+
+{harvester-product-name} allows you to attach custom metadata to virtual machines using annotations. These key-value pairs enable extended features or behaviors without requiring changes to the core virtual machine configuration.
+
+You can use the `harvesterhci.io/custom-ip` annotation to set an IP address on the {harvester-product-name} UI *for display purposes*. This is useful when the virtual machine is unable to report its IP address because of a missing `qemu-guest-agent` or other reasons.
+
+== Advanced Options
+
+=== Run Strategy
+
+{harvester-product-name} previously used the `Running` (a boolean) field to determine if the virtual machine instance should be running. However, a simple boolean value is not always sufficient to fully describe the user's desired behavior. For example, in some cases the user wants to be able to shut down the instance from inside the virtual machine. If the `running` field is used, the virtual machine will be restarted immediately.
+
+In order to meet the scenario requirements of more users, the `RunStrategy` field is introduced. This is mutually exclusive with `Running` because their conditions overlap somewhat. There are currently four `RunStrategies` defined:
+
+* Always: The virtual machine instance will always exist. If the virtual machine instance crashes, a new one will be spawned. This is the same behavior as `Running: true`.
+* RerunOnFailure (default): If the previous instance failed in an error state, a virtual machine instance will be respawned. If the guest is successfully stopped (e.g. shut down from inside the guest), it will not be recreated.
+* Manual: The presence or absence of a virtual machine instance is controlled only by the `start/stop/restart` VirtualMachine actions.
+* Stop: There will be no virtual machine instance. If the guest is already running, it will be stopped. This is the same behavior as `Running: false`.
+
+=== Cloud Configuration
+
+{harvester-product-name} supports the ability to assign a startup script to a virtual machine instance which is executed automatically when the virtual machine initializes.
+
+These scripts are commonly used to automate injection of users and SSH keys into virtual machines in order to provide remote access to the machine. For example, a startup script can be used to inject credentials into a virtual machine that allows an Ansible job running on a remote host to access and provision the virtual machine.
+
+==== Cloud-init
+
+https://cloudinit.readthedocs.io/en/latest/[Cloud-init] is a widely adopted project and the industry standard multi-distribution method for cross-platform cloud instance initialization. It is supported across all major cloud image provider like SUSE, Redhat, Ubuntu and etc., cloud-init has established itself as the defacto method of providing startup scripts to virtual machines.
+
+{harvester-product-name} supports injecting your custom cloud-init startup scripts into a virtual machine instance through the use of an ephemeral disk. Virtual machines with the cloud-init package installed will detect the ephemeral disk and execute custom user-data and network-data scripts at boot.
+
+Example of password configuration for the default user:
+
+[,YAML]
+----
+#cloud-config
+password: password
+chpasswd: { expire: False }
+ssh_pwauth: True
+----
+
+Example of network-data configuration using DHCP:
+
+[,YAML]
+----
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      subnets:
+        - type: dhcp
+    - type: physical
+      name: eth1
+      subnets:
+        - type: dhcp
+----
+
+You can also use the `Advanced > Cloud Config Templates` feature to create a pre-defined cloud-init configuration template for the virtual machine.
+
+[NOTE]
+====
+The network configuration of a virtual machine running an Ubuntu release later than 16.04 is likely managed by `netplan` by default. Before creating backups, you must stop the virtual machine, edit the configuration (*Edit Config -> Advanced Options*), and then restart the virtual machine. Use the following `network` settings as reference for DHCP configuration.
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
+====
+
+==== Installing the QEMU guest agent
+
+The QEMU guest agent is a daemon that runs on the virtual machine instance and passes information to the host about the virtual machine, users, file systems, and secondary networks.
+
+`Install guest agent` checkbox is enabled by default when a new virtual machine is created.
+
+image::vm/qga.png[]
+
+[NOTE]
+====
+If your OS is openSUSE and the version is less than 15.3, please replace `qemu-guest-agent.service` with `qemu-ga.service`.
+====
+
+=== TPM Device
+
+https://en.wikipedia.org/wiki/Trusted_Platform_Module[Trusted Platform Module (TPM)] is a cryptoprocessor that secures hardware using cryptographic keys.
+
+According to https://learn.microsoft.com/en-us/windows/whats-new/windows-11-requirements[Windows 11 Requirements], the TPM 2.0 device is a hard requirement of Windows 11.
+
+In the {harvester-product-name} UI, you can add an emulated TPM 2.0 device to a virtual machine by checking the `Enable TPM` box in the *Advanced Options* tab.
+
+[NOTE]
+====
+Currently, only non-persistent vTPMs are supported, and their state is erased after each virtual machine shutdown. Therefore, https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker] should not be enabled.
+====
+
+== One-time Boot For ISO Installation
+
+When creating a virtual machine to boot from cd-rom, you can use the *bootOrder* option so that the OS can boot from cd-rom during image installation, and boot from the disk when the installation is complete without unmounting the cd-rom.
+
+The following example describes how to install an ISO image using https://get.opensuse.org/leap/15.4/[openSUSE Leap 15.4]:
+
+. Click *Images* in the left sidebar and download the openSUSE Leap 15.4 ISO image.
+. Click *Virtual Machines* in the left sidebar, then create a virtual machine. You need to fill up those virtual machine basic configurations.
+. Click the *Volumes* tab, In the *Image* field, select the image downloaded in step 1 and ensure *Type* is `cd-rom`
+. Click *Add Volume* and select an existing *StorageClass*.
+. Drag *Volume* to the top of *Image Volume* as follows. In this way, the *bootOrder* of *Volume* will become `1`.
+
+image::vm/one-time-boot-create-vm-bootorder.png[one-time-boot-create-vm-bootorder]
+
+. Click *Create*.
+. Open the virtual machine web-vnc you just created and follow the instructions given by the installer.
+. After the installation is complete, reboot the virtual machine as instructed by the operating system (you can remove the installation media after booting the system).
+. After the virtual machine reboots, it will automatically boot from the disk volume and start the operating system.
