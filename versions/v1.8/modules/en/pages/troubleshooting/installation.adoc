@@ -1,5 +1,5 @@
 = Installation Issues
-:revdate: 2025-12-30
+:revdate: 2026-05-05
 :page-revdate: {revdate}
 
 The following sections contain tips to troubleshoot or get assistance with failed installations.
@@ -104,62 +104,33 @@ $ sudo yq eval .token /etc/rancher/rancherd/config.yaml
 ----
 ====
 
-== Checking the status of components
+== Checking the cluster's status
 
-Before checking the status of {harvester-product-name} components, obtain a copy of the cluster's kubeconfig file using either of the following methods:
+{harvester-product-name} exposes a `readyz` endpoint that can be used to assess the health and readiness of the control plane.
 
-* On the {harvester-product-name} UI, go to the *Support* screen and then click *Download KubeConfig*.
+You can probe the endpoint using a client network tool such as `curl`.
 
-* Run the following commands on any of the management nodes:
-+
 [,shell]
 ----
-$ sudo su
-$ cat /etc/rancher/rke2/rke2.yaml
+$ curl -H "Authorization: Bearer $TOKEN" https://$VIP/v1/harvester/readyz
 ----
 
-After you obtain a copy of the kubeconfig file, run the following script against the cluster to check the readiness of each component.
+Replace the `$TOKEN` and `$VIP` variables with the actual values.
 
-* {harvester-product-name} components
-+
-[,shell]
-----
-  #!/bin/bash
-  cluster_ready() {
-    namespaces=("cattle-system" "kube-system" "harvester-system" "longhorn-system")
-    for ns in "${namespaces[@]}"; do
-      pod_statuses=($(kubectl -n "${ns}" get pods \
-        --field-selector=status.phase!=Succeeded \
-        -ojsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name},{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'))
-      for status in "${pod_statuses[@]}"; do
-        name=$(echo "${status}" | cut -d ',' -f1)
-        ready=$(echo "${status}" | cut -d ',' -f2)
-        if [ "${ready}" != "True" ]; then
-          echo "pod ${name} is not ready"
-          false
-          return
-        fi
-      done
-    done
-  }
-  if cluster_ready; then
-    echo "cluster is ready"
-  else
-    echo "cluster is not ready"
-  fi
-----
+* `$TOKEN`: Cluster token that you configured during xref:installation-setup/methods/iso-install.adoc#_installation_steps[installation]
+* `$VIP`: Real cluster VIP (Use the value of `kube-vip.io/requestedIP` in the output of xref:installation-setup/management-address.adoc#_how_to_get_the_vip_mac_address[this command].)
 
-* API
-+
-[,shell]
-----
-$ curl -fk https://<VIP>/version
-----
-+
 [NOTE]
 ====
-You must replace `<VIP>` with the xref:installation-setup/management-address.adoc#_how_to_get_the_vip_mac_address[actual VIP], which is the value of `kube-vip.io/requestedIP`.
+For clusters using self-signed TLS certificates, run `curl` with the `-k` flag.
 ====
+
+The endpoint returns a response with the following format:
+
+[,json]
+----
+{"ready":true,"timestamp":"2026-02-12T11:17:40Z"}
+----
 
 == Collecting troubleshooting information
 
