@@ -1,0 +1,138 @@
+= Disk Filtering and Automatic Provisioning
+:revdate: 2026-05-07
+:page-revdate: {revdate}
+
+Starting from v1.8.0, you can manage disk filtering and automatic provisioning using the `harvester-node-disk-manager` ConfigMap, which is located in the `harvester-system` namespace.
+
+[TIP]
+====
+This ConfigMap provides more flexibility and granular control than the legacy xref:installation-setup/config/settings.adoc#_auto_disk_provision_paths_experimental[`auto-disk-provision-paths`] setting. Migration to the ConfigMap approach is recommended.
+====
+
+== ConfigMap structure
+
+The `harvester-node-disk-manager` ConfigMap contains two main configuration sections:
+
+* `filters.yaml`: Defines rules for excluding specific disks from {harvester-product-name} management
+* `autoprovision.yaml`: Defines rules for automatic provisioning of disks for virtual machine storage
+
+Example:
+
+[,yaml]
+----
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: harvester-node-disk-manager
+  namespace: harvester-system
+data:
+  autoprovision.yaml: |
+    - hostname: "*"
+      devices:
+        - "/dev/sdc"
+        - "/dev/sdd"
+  filters.yaml: |
+    - hostname: "*"
+      excludeLabels: ["COS_*", "HARV_*"]
+      excludeVendors: ["longhorn", "thisisaexample"]
+      excludeDevices: ["/dev/sdd"]
+      excludePaths: ["/", "/home"]
+    - hostname: "harvester1"
+      excludeVendors: ["harvester1"]
+    - hostname: "harvester2"
+      excludeVendors: ["harvester2"]
+----
+
+== Hostname field
+
+The `hostname` field, which is _required_ for each rule, supports regular expression patterns for flexible node matching.
+
+|===
+| Rule target | `hostname` value | Example
+
+| _All nodes_ in the cluster
+| `"*"`
+| `hostname: "*"`
+
+| Individual nodes
+| Specific hostnames
+| `hostname: "harvester1"`
+
+| Multiple nodes
+| Regular expression patterns
+| `hostname: "harvester.*"`
+|===
+
+== Filtering rule configuration
+
+The `filters.yaml` section allows you to exclude disks based on various criteria.
+
+This section supports the following options:
+
+|===
+| Option | Description | Details
+
+| `excludeLabels`
+| Excludes disks with specific filesystem labels
+| Supports wildcards patterns (for example, `COS_*`)
+
+| `excludeVendors`
+| Excludes disks from specific vendors
+| -
+
+| `excludeDevices`
+| Excludes disks by device path (for example, `/dev/sda` and `/dev/nvme0n1`)
+| Supports wildcard patterns for flexible matching (for example, `/dev/sd*` excludes all SCSI disks)
+
+| `excludePaths`
+| Excludes disks by mount point path (for example, `/`, `/home`, and `/mnt/data`)
+| Uses case-insensitive exact matching to exclude disks mounted at specific locations (for example, the system disk mounted at `/`)
+|===
+
+Example:
+
+[,yaml]
+----
+filters.yaml: |
+  - hostname: "*"
+    excludeLabels: ["COS_*", "HARV_*"]
+    excludeVendors: ["longhorn", "thisisaexample"]
+    excludeDevices: ["/dev/sdd", "/dev/sd*"]
+    excludePaths: ["/home"]
+  - hostname: "harvester1"
+    excludeVendors: ["harvester1"]
+    excludeDevices: ["/dev/vd*"]
+----
+
+== Auto-provisioning rule configuration
+
+The `autoprovision.yaml` section allows you to automatically provision disks for virtual machine storage.
+
+[NOTE]
+====
+Currently, auto-provisioning only supports the *Longhorn V1 Data Engine*. LVM and the Longhorn V2 Data Engine are not yet supported.
+====
+
+This section supports the following options:
+
+|===
+| Option | Description | Details
+
+| `devices`
+| Target device paths for automatic provisioning
+| *Caution*: All existing data in the specified devices will be _permanently deleted_.
+|===
+
+Example:
+
+[,yaml]
+----
+autoprovision.yaml: |
+  - hostname: "*"
+    devices:
+      - "/dev/sdc"
+      - "/dev/sdd"
+  - hostname: "harvester1"
+    devices:
+      - "/dev/sde"
+----
