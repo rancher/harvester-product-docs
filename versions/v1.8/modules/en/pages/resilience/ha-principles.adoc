@@ -1,0 +1,27 @@
+= High Availability Principles
+:revdate: 2026-05-14
+:page-revdate: {revdate}
+
+== Minimum of three nodes for etcd quorum
+
+You must create a cluster with three or more nodes to fully leverage {harvester-product-name}'s multi-node features, including high availability (HA). The first node that is added to the cluster is by default a management node. To form an HA cluster, the two nodes added after the first are automatically promoted to management nodes.
+
+A basic HA cluster has three management nodes that each contain the complete set of control plane components for node and pod management. One key component is etcd, which Kubernetes uses to store its data configuration, state, and metadata. The etcd node count must always be an odd number to ensure that a member quorum can be established, which occurs when a majority of nodes agrees on updates to the cluster state.
+
+== Homogeneous CPU specifications across all nodes
+
+In {harvester-product-name} v1.7.x and earlier versions, Live Migration functions correctly only if the CPUs of all physical servers in the {harvester-product-name} cluster have the same specifications. Newer CPUs (even those from the same vendor, generation, and family) can have varying capabilities that may be exposed to guest operating systems. To ensure virtual machine stability, {harvester-product-name} checks if the CPU capabilities are consistent, and blocks migration attempts when the source and destination are incompatible. Because of these strict feature-matching checks, you must always use CPUs with the same specifications when creating clusters, adding nodes to a cluster, and replacing nodes.
++
+In {harvester-product-name} v1.8.x and later versions, you can manually select a CPU model when configuring virtual machines. If your cluster uses multiple CPU generations, do not use the `host-model` or `host-passthrough` options. Instead, select a specific CPU model to ensure that Live Migration functions correctly. As a best practice, select the most modern CPU model supported by _every node_ in the cluster.
+
+== Minimum of two NICs per node for management bond
+
+When a {harvester-product-name} cluster is deployed, a cluster network named `mgmt` is automatically created for intra-cluster communications. This built-in cluster network consists of the same bridge, bond, and NICs as the external infrastructure network to which each {harvester-product-name} node attaches with management NICs. `mgmt` also allows virtual machines to be accessed from the external infrastructure network for cluster management purposes.
+
+To achieve high availability in production environments, ensure that each node has multiple NICs and that you select at least two when configuring the management network interfaces during installation. By default, {harvester-product-name} combines the selected interfaces into a single logical bonded interface named `mgmt-bo`, which usually serves as the uplink for the bridge interface named `mgmt-br`. If a physical cable or switch port fails, `mgmt-bo` ensures that the node remains reachable via the secondary interface.
+
+== Static IPs or DHCP reservations
+
+Each {harvester-product-name} node must have a stable, fixed IP address to ensure reliable communication with cluster services. You can assign these addresses statically during ISO installation or by using DHCP reservations (IP-MAC binding), which ensures that the DHCP server always assigns the same IP address to a given node. 
+
+{harvester-product-name} does not support changing a node's IP address after installation because this may cause node failure or total cluster instability. You must finalize your IP plan before creating the cluster. Specifically, if you want to select DHCP during the ISO installation, you must first locate the MAC addresses of the network interfaces intended for the management bond (`mgmt-bo`). Ensure that these MAC addresses are mapped to static IP addresses on your DHCP server before proceeding.
