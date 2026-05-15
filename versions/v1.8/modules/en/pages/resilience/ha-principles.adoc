@@ -2,9 +2,11 @@
 :revdate: 2026-05-15
 :page-revdate: {revdate}
 
+High availability (HA) in {harvester-product-name} is not a single feature but a coordinated effort between Kubernetes (control plane), KubeVirt (virtualization), and {longhorn-product-name} (distributed storage).
+
 == Minimum of three nodes for etcd quorum
 
-You must create a cluster with three or more nodes to fully leverage {harvester-product-name}'s multi-node features, including high availability (HA). The first node that is added to the cluster is by default a management node. To form an HA cluster, the two nodes added after the first are automatically promoted to management nodes.
+You must create a cluster with three or more nodes to fully leverage {harvester-product-name}'s multi-node features, including HA. The first node that is added to the cluster is by default a management node. To form an HA cluster, the two nodes added after the first are automatically promoted to management nodes.
 
 A basic HA cluster has three management nodes that each contain the complete set of control plane components for node and pod management. One key component is etcd, which Kubernetes uses to store its data configuration, state, and metadata. The etcd node count must always be an odd number to ensure that a member quorum can be established, which occurs when a majority of nodes agrees on updates to the cluster's state.
 
@@ -30,4 +32,12 @@ Each {harvester-product-name} node must have a stable, fixed IP address to ensur
 
 Because etcd stores data about the cluster's state, accurate time synchronization is required across all nodes. Clock drift exceeding 500 ms will likely result in cluster instability or failure.
 
-To ensure high availability, configure multiple NTP servers during installation or via the Harvester UI. This prevents synchronization failure if a single server becomes unreachable or inaccurate. Do not manually modify NTP configuration files on individual nodes, as Harvester automatically synchronizes these settings cluster-wide.
+To ensure high availability, configure multiple NTP servers during installation or via the {harvester-product-name} UI. This prevents synchronization failure if a single server becomes unreachable or inaccurate. Do not manually modify NTP configuration files on individual nodes, as {harvester-product-name} automatically synchronizes these settings cluster-wide.
+
+== SSD or NVMe disks with high IOPS
+
+The choice of storage media is critical because it directly affects both management node stability and virtual machine performance. SSDs or NVMes with more than 5,000 random input/output operations per second (IOPS) per disk are considered the standard requirement for the following reasons:
+
+* etcd is extremely sensitive to disk write latency. Slow log commits can trigger leader election timeouts. High latency on slower disks can cause the cluster to flap or lose quorum, leading to instability.
+
+* {longhorn-product-name} replicates data across nodes synchronously, requiring high-performance storage to manage the resulting overhead. Since system components and virtual machines typically share a storage pool, high IOPS are critical to ensuring heavy virtual machine workloads do not compromise management interface performance.
