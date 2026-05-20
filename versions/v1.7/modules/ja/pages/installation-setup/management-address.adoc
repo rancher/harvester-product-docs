@@ -1,0 +1,88 @@
+= 管理アドレス
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} は管理アドレスとして固定の仮想IP（VIP）を提供します。VIPは任意のノードIPとは異なる必要があります。インストール後、コンソールダッシュボードで管理アドレスを見つけることができます。
+
+[NOTE]
+====
+
+DHCPを介して構成するIPアドレスを選択した場合、持続的な仮想IPを持つために、DHCPサーバーで静的なMACからIPアドレスへのマッピングを構成する必要があります。
+====
+
+image::install/iso-installed.png[]
+
+== 要件
+
+* VIPとノード管理インターフェースは同じサブネットに属している必要があります。
+* すべての{harvester-product-name}ノード管理インターフェースは同じレイヤー2ネットワークセグメントに存在しなければなりません。
+
+VIPはアドレス解決プロトコル（ARP）に依存しているため、両方が必要です。ARPはレイヤー2プロトコルです。
+
+VIPは任意の{harvester-product-name}ノード管理インターフェースに割り当てることができ、いつでも変更可能です（ノード障害が発生したときだけではありません）。VIPがホストを変更すると、_グラチュイタスARP_が送信され、ネットワーク上の他のホストが{harvester-product-name}クラスターの管理IPアドレス（VIP）に向けてトラフィックをどこに送るべきかを知ることができます。
+
+[CAUTION]
+====
+
+ベアメタルデータセンターで{harvester-product-name}クラスターをホストする予定がある場合、サービスプロバイダーは「フローティング」または「予約済み」IPアドレスをVIPとして指定し、それをサーバーの1つに割り当てることができるでしょう。この割り当てを更新すると、トラフィックが即座に新しいノードに流れ始めます。これらの状況では、VIPがホストを変更するときに、{harvester-product-name}はプロバイダーのシステムでフローティング/予約IPの割り当てを更新できません。
+
+さらに、VIPの「グラチュイタスARP」は、{harvester-product-name}ノード間のプロバイダーのネットワーク設定によっては効果がない場合があります（例えば、{harvester-product-name}ホストが同じレイヤー2ネットワークにない場合など）。VIPがホストを変更するときに、クラスターが正常に機能するようにフローティング/予約IPの割り当てを手動で更新する必要があります。詳細については、<<Identifying the node the VIP is assigned to,VIPが割り当てられているノードの特定>>を参照してください。
+====
+
+== VIP MACアドレスを取得する方法
+
+VIP MACアドレスを取得するには、管理ノードで次のコマンドを実行できます：
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+出力の例：
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== VIPが割り当てられているノードの特定
+
+kubectlを使用できます（{harvester-product-name} kubeconfigファイルを使用してローカルマシンで、またはSSHを使用して任意の{harvester-product-name}管理ノードにルートユーザとして接続する場合）。
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+出力の例：
+
+[,console]
+----
+harvester-xzj76
+----
+
+また、SSHを使用して各{harvester-product-name}管理ノードに接続し、コマンド`ip address show mgmt-br`を実行します。
+
+例:
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+出力にVIPとノードアドレスの両方が含まれている場合、VIPは接続しているノードに割り当てられます。
+
+== 使用法
+
+管理アドレス：
+
+* {harvester-product-name} API/UIへのアクセスを`HTTPS`プロトコルを介して許可します。
+* 他のノードがクラスターに参加することを許可します。
++
+image:install/configure-management-address.png[]

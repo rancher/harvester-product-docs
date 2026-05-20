@@ -1,0 +1,160 @@
+= 画像をアップロード
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+現在、画像を作成するためにサポートされている方法は3つあります：URL経由での画像のアップロード、ローカルファイル経由での画像のアップロード、およびボリューム経由での画像の作成です。
+
+== URL経由で画像をアップロード
+
+[tabs]
+======
+UI::
++
+*画像*ページで仮想マシン画像をインポートするには、クラスターからアクセスできるURLを入力してください。説明とラベルは任意です。
++
+[NOTE]
+====
+* 画像名はURLアドレスのファイル名を使用して自動的に入力されます。画像名はいつでもカスタマイズできます。
+* 日次ビルドのURL（例えば、 https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[Ubuntu Jammy daily build]）の使用は避けてください。Longhornバックイメージのすべてのレプリカが失われた場合、Longhornは自己修復の目的でファイルを再度ダウンロードしようとします。日次ビルドのURLを使用することは問題があります。なぜなら、URL自体が変更され、チェックサムの不一致やレプリカの喪失を引き起こす競合が発生するからです。
+====
++
+[CAUTION]
+====
+大きな画像ファイルは、HTTP範囲リクエストをサポートしていないサーバーにホストされているダウンロードURLを持つサードパーティのStorageClassesを使用する場合、{harvester-product-name}でメモリの問題を引き起こす可能性があります（例えば、Pythonの`http.server`）。信頼性の高いダウンロードのためには、代わりにNGINXまたはApacheを使用してください。（この問題はv1.6.1で修正されました。）
+====
++
+image::upload-image.png[]
+
+API::
++
+APIを使用してリポジトリから仮想マシン画像をインポートするには、`VirtualMachineImage`オブジェクトを作成してください。クラスターからアクセスできるURLを指定する必要があります。
++
+例:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap
+  namespace: default
+spec:
+  description: A human-readable description for the VM image
+  displayName: openSUSE-Leap
+  sourceType: download
+  url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+  checksum: 80c27afb7cd791ac86ee1b0b0c572a242f6142579db5beac841e71151d370cd6
+----
++
+詳細については、xref:api.adoc[APIリファレンス]を参照してください。
+
+Terraform::
++
+[,json]
+----
+resource "harvester_image" "opensuse154" {
+  name      = "opensuse154"
+  namespace = "harvester-public"
+
+  display_name = "openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+  source_type  = "download"
+  url          = "https://downloadcontent-us1.opensuse.org/repositories/Cloud:/Images:/Leap_15.4/images/openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+}
+----
+======
+
+== ローカルファイル経由で画像をアップロード
+
+現在、qcow2、raw、およびISOイメージがサポートされています。
+
+[NOTE]
+====
+* ファイルのアップロードが完了するまで、ページを更新しないでください。
+====
+
+image::upload-image-local.png[]
+
+=== {rancher-product-name}マルチクラスター管理におけるHTTP 413エラー
+
+xref:/integrations/rancher/virtualization-management.adoc#_importing_harvester_cluster[*マルチクラスター管理*]画面から*{rancher-product-name} UI*に画像をアップロードできます。画像のステータスが_アップロード中_で、進行状況インジケーターが_0%_を長時間表示している場合は、HTTPレスポンスステータスコードを確認してください。_413_は、リクエストボディのサイズが制限を超えていることを示します。
+
+image::img-413-code.png[]
+
+最大リクエストボディサイズは、{rancher-product-name}をホストしているクラスターに特有である必要があります（例えば、RKE2クラスターはデフォルトで1MBの制限がありますが、K3sクラスターにはそのような制限はありません）。
+
+現在の回避策は、*{harvester-product-name} UI*から画像をアップロードすることです。{rancher-product-name} UIから画像をアップロードすることを選択した場合、イングレスサーバーで関連設定を構成する必要があるかもしれません（例えば、 https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size[`proxy-body-size`]をNGINXで設定します）。
+
+{rancher-product-name}がRKE2クラスターにデプロイされている場合、次の手順を実行してください：
+
+. {rancher-product-name}イングレスを編集します。
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. `nginx.ingress.kubernetes.io/proxy-body-size`の値を指定します。
++
+例:
++
+image:img-ingress-client-body.png[]
+
+. スタックした画像を削除し、アップロードプロセスを再起動します。
+
+=== {rancher-product-name}マルチクラスター管理における大きな画像の長時間アップロード
+
+*マルチクラスター管理*画面から{rancher-product-name} UIに10GBを超える大きな画像をアップロードすると、操作が通常よりも長くかかる場合があり、画像のステータス（アップロード中）が変わらないことがあります。
+
+この動作は、_プロキシリクエストバッファリング_に関連しており、{rancher-product-name}をホストしているクラスターに特有です。
+
+現在の回避策は、*{harvester-product-name} UI*から画像をアップロードすることです。{rancher-product-name} UIから画像をアップロードすることを選択した場合、イングレスサーバーで関連設定を構成する必要があるかもしれません（例えば、 https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering[`proxy-request-buffering`]をNGINXで設定します）。
+
+{rancher-product-name}がRKE2クラスターにデプロイされている場合、次の手順を実行してください：
+
+. {rancher-product-name}イングレスを編集します。
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. `nginx.ingress.kubernetes.io/proxy-request-buffering`をオフにします。
++
+例:
++
+image:img-ingress-request-proxy-buffering.png[]
+
+. スタックした画像を削除し、アップロードプロセスを再起動します。
+
+=== {harvester-product-name}から以前にダウンロードした画像をアップロードする
+
+*v1.5.5*以降、Longhornは https://github.com/longhorn/backing-image-manager/pull/153[ダウンロード用のバックイメージを圧縮します]。圧縮されたバックイメージをアップロードしようとすると、{harvester-product-name}はその試みを拒否し、メッセージ*アップロードに失敗しました：アップロードされたファイルサイズxxxxは512バイトの倍数である必要があります。LonghornはデフォルトでdirectIOを使用するためです*を表示します。
+
+アップロードする前に、コマンド`gzip -d <file name>`を使用してバックイメージを解凍してください。
+
+== ボリュームを介して画像を作成します。
+
+*ボリューム*ページで、*イメージのエクスポート*をクリックしてください。画像名を入力し、画像を作成するためのStorageClassを選択してください。
+
+image::volume/export-volume-to-image-1.png[]
+
+== 画像のStorageClass
+
+画像を作成する際には、xref:/storage/storageclass.adoc[StorageClass]を選択し、レプリカ、ノードセレクター、ディスクセレクターなどの事前定義されたパラメーターを使用できます。
+
+[NOTE]
+====
+ここで選択した`StorageClass`は、画像には直接使用されません。これは単なる`StorageClass`テンプレートです。
+
+代わりに、`longhorn-`というプレフィックス名を持つ特別なStorageClassが内部で作成されます。これは{harvester-product-name}バックエンドによって自動的に行われますが、選択したStorageClassからパラメーターを継承します。
+====
+
+image::image-storageclass.png[]
+
+== 画像ラベル
+
+画像にラベルを追加することができ、これによりOSタイプをより正確に特定できます。また、必要に応じてフィルター用のカスタムラベルを追加することもできます。
+
+画像名やURLに有効な情報が含まれている場合、UIは自動的にOSタイプと画像カテゴリを認識します。そうでない場合は、UI上で対応するラベルを手動で指定することもできます。
+
+image::image-labels.png[]

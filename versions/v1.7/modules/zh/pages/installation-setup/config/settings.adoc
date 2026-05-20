@@ -1,0 +1,935 @@
+= 设置
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+以下是您可以使用的高级设置列表。您可以使用 UI 和 `kubectl` 命令修改 `settings.harvesterhci.io` 自定义资源。
+
+== 一般设置
+
+=== `additional-ca`
+
+*定义*：额外的受信任 CA 证书，使 {harvester-product-name} 能够访问外部服务。
+
+[CAUTION]
+====
+更改此设置可能会导致单节点集群暂时不可用或无法访问。
+====
+
+*默认值*：无
+
+*示例*：
+
+----
+-----BEGIN CERTIFICATE-----
+SOME-CA-CERTIFICATES
+-----END CERTIFICATE-----
+----
+
+=== `auto-disk-provision-paths` [实验性]
+
+*定义*：允许 {harvester-product-name} 自动添加与指定的 glob 模式匹配的磁盘作为 VM 存储的设置。
+
+此设置仅添加已挂载到系统的格式化磁盘。在指定多个模式时，使用逗号分隔值。
+
+[CAUTION]
+==== 
+此设置适用于集群中的 *所有节点*。存储设备中的所有数据 *将被销毁*。
+====
+
+*默认值*：无
+
+*示例*：
+
+以下示例添加与 glob 模式 `/dev/sd*` 或 `/dev/hd*` 匹配的磁盘：
+
+----
+/dev/sd*,/dev/hd*
+----
+
+=== `auto-rotate-rke2-certs`
+
+*定义*：允许您自动轮换 {rke2-product-name} 服务证书的设置。在默认情况下会禁用该设置。
+
+使用字段 `expiringInHours` 指定每个证书的有效期（`1` 到 `8759` 小时）。如果证书在指定期限内过期，{harvester-product-name} 将自动替换证书。
+
+有关更多信息，请参见 *证书轮换* 部分的 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/cluster-admin/manage-clusters/rotate-certificates.html[{rancher-product-name}] 和 https://documentation.suse.com/cloudnative/rke2/latest/en/advanced.html#_certificate_rotation[{rke2-product-name}] 文档。
+
+如果您的证书已过期，您可以 xref:hosts/hosts.adoc#_rotating_expired_certificates[手动轮换它们]。
+
+*默认值*：`{"enable":false,"expiringInHours":240}`
+
+*示例*：
+
+----
+{"enable":true,"expiringInHours":48}
+----
+
+=== `backup-target`
+
+*定义*：用于存储 VM 备份的自定义备份目标。
+
+有关详细信息，请参见 https://documentation.suse.com/cloudnative/storage/1.8/en/snapshots-backups/volume-snapshots-backups/configure-backup-target.html#_set_up_aws_s3_backupstore[{longhorn-product-name} 文档]。
+
+*默认值*：无
+
+*示例*：
+
+[,json]
+----
+{
+  "type": "s3",
+  "endpoint": "https://s3.endpoint.svc",
+  "accessKeyId": "test-access-key-id",
+  "secretAccessKey": "test-access-key",
+  "bucketName": "test-bup",
+  "bucketRegion": "us‑east‑2",
+  "cert": "",
+  "virtualHostedStyle": false
+}
+----
+
+=== `cluster-registration-url`
+
+*定义*：用于将 {harvester-product-name} 集群导入 {rancher-product-name} 以进行多集群管理的 URL。
+
+当您配置此设置时，将在名称空间 `cattle-system` 中创建一个名为 `cattle-cluster-agent-*` 的新 pod 以进行注册。此 pod 使用的容器镜像是 `rancher/rancher-agent:related-version`，该镜像未打包到 {harvester-product-name} .iso 映像中，而是由 {rancher-product-name} 确定。`related-version` 通常与 {rancher-product-name} 版本相同。例如，当您将 {harvester-product-name} 注册到 {rancher-product-name} v2.7.9 时，镜像为 `rancher/rancher-agent:v2.7.9`。有关详细信息，请参见 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/other-installation-methods/air-gapped/publish-images.html#_1_find_the_required_assets_for_your_rancher_version[查找您 Rancher 版本所需的资产]。
+
+根据您的设置，镜像将从以下位置之一下载：
+
+* {harvester-product-name} containerd-registry：您可以为集群配置一个 <<_containerd_registry, 私有注册表>>。
+* Docker Hub (docker.io)：当您未在 {rancher-product-name} 中配置私有注册表时，这是默认选项。
+
+或者，您可以获取镜像的副本并手动将其上传到所有节点。
+
+*默认值*：无
+
+*示例*：
+
+----
+https://172.16.0.1/v3/import/w6tp7dgwjj549l88pr7xmxb4x6m54v5kcplvhbp9vv2wzqrrjhrc7c_c-m-zxbbbck9.yaml
+----
+
+=== `containerd-registry`
+
+*定义*：为 {harvester-product-name} 集群创建的私有注册表的配置。
+
+该值存储在每个节点的 `registries.yaml` 文件中（路径：`/etc/rancher/rke2/registries.yaml`）。有关详细信息，请参见 https://documentation.suse.com/cloudnative/rke2/latest/en/install/containerd_registry_configuration.html[Containerd 注册表配置] 中的 {rke2-product-name} 文档。
+
+出于安全考虑，{harvester-product-name} 会在将用户名和密码存储在 `registries.yaml` 文件后自动删除为私有注册表配置的凭据。
+
+*示例*：
+
+image::advanced/containerd-registry.png[containerd-registry]
+
+[,json]
+----
+{
+  "Mirrors": {
+    "docker.io": {
+      "Endpoints": ["https://myregistry.local:5000"],
+      "Rewrites": null
+    }
+  },
+  "Configs": {
+    "myregistry.local:5000": {
+      "Auth": {
+        "Username": "testuser",
+        "Password": "testpassword"
+      },
+      "TLS": {
+        "InsecureSkipVerify": false
+      }
+    }
+  }
+}
+----
+
+=== `csi-driver-config`
+
+*定义*：使用安装在集群中的第三方 CSI 驱动程序所需的配置。
+
+在使用与备份和快照相关的功能之前，您必须配置以下信息：
+
+* 已安装的第三方 CSI 驱动程序的供应商
+* `volumeSnapshotClassName`：用于创建卷快照或虚拟机快照的 `VolumeSnapshotClass` 的名称。
+* `backupVolumeSnapshotClassName`：用于创建虚拟机备份的 `VolumeSnapshotClass` 的名称。
+
+*默认值*：
+
+----
+{
+  "driver.longhorn.io": {
+    "volumeSnapshotClassName": "longhorn-snapshot",
+    "backupVolumeSnapshotClassName": "longhorn"
+  }
+}
+----
+
+=== `csi-online-expand-validation`
+
+*定义*：允许您将确认支持在线卷扩展的存储提供商标记为已验证的设置。
+
+根据底层存储提供商，您可能需要采取额外步骤来使用在线卷扩展功能。
+
+* *{longhorn-product-name}*: {harvester-product-name} 认为 {longhorn-product-name} 支持在线卷扩展，即使 Longhorn 数据引擎的版本之间存在差异。目前，V1 数据引擎完全支持在线卷扩展，而 V2 数据引擎根本不支持卷扩展（无论卷的附加状态如何）。{harvester-product-name} 网络钩子管理这些版本之间的差异。
+
+* *第三方存储*: {harvester-product-name} 默认拒绝第三方存储的在线卷扩展请求。如果您已确认您的存储提供商支持在线卷扩展，您可以使用此设置将该存储提供商标记为已验证，并强制 {harvester-product-name} 允许相关的在线扩展请求。
+
+*默认值*：`{"driver.longhorn.io":true}`
+
+=== `default-vm-termination-grace-period-seconds`
+
+*定义*：{harvester-product-name} 在使用 UI 停止虚拟机后，强制关闭虚拟机之前等待的秒数。
+
+{harvester-product-name} 向任何使用 UI 停止的虚拟机发送优雅关闭信号。如果在指定的秒数内未完成优雅关闭过程，{harvester-product-name} 将强制关闭虚拟机。
+
+*默认值*：`120`
+
+=== `http-proxy`
+
+*定义*：用于访问外部服务的 HTTP 代理，包括下载镜像和备份到 S3 服务。
+
+[CAUTION]
+====
+更改此设置可能会导致单节点集群暂时不可用或无法访问。
+====
+
+*默认值*：`{}`
+
+*支持的选项和值*：
+
+* HTTP 请求的代理 URL：`"httpProxy": "http://<username>:<pswd>@<ip>:<port>"`
+* HTTPS 请求的代理 URL：`"httpsProxy": "https://<username>:<pswd>@<ip>:<port>"`
+* 以逗号分隔的主机名和/或 CIDR 列表：`"noProxy": "<hostname | CIDR>"`
+
+如果您配置了以下选项或设置，必须在 `noProxy` 字段中指定关键信息:
+
+|===
+| 已配置的选项/设置 | 在`noProxy`中所需的值| 原因
+
+| `httpProxy`和`httpsProxy`
+| 节点的CIDR
+| 不指定节点的CIDR可能会导致集群故障。
+
+| `cluster-registration-url`
+| `cluster-registration-url`的主机
+| 主机信息允许您从{rancher-product-name}访问集群。
+|===
+
+{harvester-product-name}将必要的地址附加到用户指定的`noProxy`值（例如，`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`）。这确保内部流量按预期流动。
+
+*示例*：
+
+[,json]
+----
+{
+  "httpProxy": "http://my.proxy",
+  "httpsProxy": "https://my.proxy",
+  "noProxy": "some.internal.svc,172.16.0.0/16"
+}
+----
+
+=== `log-level`
+
+*定义*：主机的日志级别。
+
+*默认值*：`info`
+
+*支持的选项和值*:
+
+* `panic`：最少冗长的日志级别
+* `fatal`
+* `error`
+* `warn`、`warning`
+* `info`
+* `debug`
+* `trace`：最冗长的日志级别
+
+*示例*：
+
+----
+debug
+----
+
+=== `longhorn-v2-data-engine-enabled` [实验性]
+
+*定义*：启用和禁用Longhorn V2数据引擎的设置。
+
+当设置为`true`时，{harvester-product-name}会自动加载Longhorn V2数据引擎所需的内核模块，并尝试在所有节点上分配1024 × 2 MiB大小的大页（例如，2 GiB RAM）。
+
+更改此设置会自动在所有节点上重启{rke2-product-name}，但不会影响正在运行的虚拟机工作负载。
+
+[TIP]
+====
+如果您遇到包含短语"没有足够的hugepages-2Mi容量"的错误消息，请等待一段时间以解决该错误。如果错误仍然存在，请重启受影响的节点。
+
+要在特定节点（例如，处理器和内存资源较少的节点）上禁用Longhorn V2数据引擎，请转到*主机*屏幕，并将以下标签添加到目标节点：
+
+* 标签：`node.longhorn.io/disable-v2-data-engine`
+* 值：`true`
+====
+
+*默认值*：`false`
+
+*示例*：
+
+```
+true
+```
+
+=== `max-hotplug-ratio`
+
+*定义*：确定正在运行的虚拟机可用的默认最大处理器和内存资源量的设置。该比例乘以您在创建虚拟机时分配的CPU和内存资源量。
+
+[sidebar]
+运行时可用的最大资源 = （在虚拟机创建期间分配的资源）x （`max-hotplug-ratio` 值）
+
+*默认值*：`4`
+
+*支持的值*：`1` 到 `20`
+
+*示例*：
+
+`max-hotplug-ratio` 被设置为 `4`。
+
+|===
+| 资源 | 分配的数量 | 最大可用数量
+
+| 处理器核心数
+| `1`
+| `4`
+
+| 内存（Gi）
+| `2`
+| `8`
+|===
+
+=== `ntp-servers`
+
+*定义*：用于节点时间同步的NTP服务器。
+
+您可以在 xref:installation-setup/config/configuration-file.adoc#_os_ntp_servers[安装] 期间定义 NTP 服务器，并在安装后更新地址。
+
+[CAUTION]
+====
+对服务器地址列表的更改将应用于所有节点。
+====
+
+*默认值*：""
+
+*示例*：
+
+----
+{
+  "ntpServers": [
+    "0.suse.pool.ntp.org",
+    "1.suse.pool.ntp.org"
+  ]
+}
+----
+
+=== `overcommit-config`
+
+*定义*：可以分配给虚拟机使用的物理计算、内存和存储资源的百分比。
+
+超额分配用于优化物理资源分配，特别是在虚拟机大部分时间不预期完全消耗分配的资源时。设置大于 100% 的值允许调度多个虚拟机，即使物理资源在名义上完全分配。
+
+*默认值*：`{ "cpu":1600, "memory":150, "storage":200 }`
+
+使用默认值，可以调度以下内容：
+
+* 主机上物理 CPU 数量的 16 倍
+* 主机上物理 RAM 数量的 1.5 倍
+* 在 {longhorn-product-name} 中物理存储量的 2 倍
+
+配置为使用 2 个 CPU（相当于 2000 毫CPU）的虚拟机可以在资源可用的情况下消耗全部分配。然而，如果主机正在运行重负载并且设置了超分配值（例如，1600%），{harvester-product-name} 仅从 Kubernetes 调度器请求 125 毫CPU（2000/16 = 125 毫CPU）。
+
+*示例*：
+
+[,json]
+----
+{
+  "cpu": 1000,
+  "memory": 200,
+  "storage": 300
+}
+----
+
+=== `release-download-url`
+
+*定义*：用于下载所需软件以进行升级的 URL。
+
+{harvester-product-name} 从可通过配置的 URL 访问的 `${URL}/${VERSION}/version.yaml` 文件中检索 ISO URL 和校验和。
+
+*默认值*：`https://releases.rancher.com/harvester`
+
+*示例 (version.yaml)*：
+
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Version
+metadata:
+  name: ${VERSION}
+  namespace: harvester-system
+spec:
+  isoChecksum: ${ISO_CHECKSUM}
+  isoURL: ${ISO_URL}
+----
+
+=== `server-version`
+
+*定义*：安装在节点上的 {harvester-product-name} 版本。
+
+*示例*：
+
+----
+v1.0.0-abcdef-head
+----
+
+=== `ssl-certificates`
+
+*定义*：用于 UI 和 API 的 SSL 证书。
+
+[CAUTION]
+====
+更改此设置可能会导致单节点集群暂时不可用或无法访问。
+====
+
+*默认值*：`{}`
+
+*示例*：
+
+[,json]
+----
+{
+  "ca": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "publicCertificate": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nSOME-PRIVATE-KEY-ENCODED-IN-PEM-FORMAT\n-----END RSA PRIVATE KEY-----"
+}
+----
+
+=== `ssl-parameters`
+
+*定义*：UI 和 API 的启用的 SSL/TLS 协议和密码。
+
+[IMPORTANT]
+.重要的
+====
+如果您错误配置此设置并无法访问 UI 和 API，请参见 xref:troubleshooting/cluster.adoc#_i_cant_access_suse_virtualization_after_i_changed_ssltls_enabled_protocols_and_ciphers[故障排除]。
+====
+
+*默认值*：无
+
+*支持的选项和值*:
+
+* `protocols`：启用的协议。
+* `ciphers`：启用的密码。
+
+有关支持的选项的更多信息，请参见 https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-protocols[`ssl-protocols`] 和 https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-ciphers[`ssl-ciphers`] 在 Ingress-Nginx 控制器文档中。
+
+如果您未指定任何值，{harvester-product-name} 将使用 `TLSv1.2` 和 `ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305`。
+
+*示例*：
+
+----
+{
+  "protocols": "TLSv1.2 TLSv1.3",
+  "ciphers": "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305"
+}
+----
+
+=== `storage-network`
+
+*定义*：用于 {longhorn-product-name} 流量的隔离存储网络。
+
+默认情况下，{longhorn-product-name} 使用管理网络，该网络仅限于单个接口，并与集群范围的工作负载共享。如果您的实现需要网络隔离，您可以使用 xref:networking/storage-network.adoc[存储网络] 来隔离 {longhorn-product-name} 集群内数据流量。
+
+[IMPORTANT]
+.重要的
+====
+在配置此设置之前，请关闭所有虚拟机。
+
+以 IPv4 CIDR 格式指定 IP 范围。IP 的数量必须是集群节点数量的四倍。
+====
+
+*默认值*：""
+
+*示例*：
+
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "storage",
+  "range": "192.168.0.0/24"
+}
+----
+
+=== `support-bundle-image`
+
+*定义*：支持包镜像， https://hub.docker.com/r/rancher/support-bundle-kit/tags[`rancher/support-bundle-kit`] 中提供各种版本。
+
+*默认值*：`support-bundle-kit` 镜像被打包到 {harvester-product-name} .iso 映像中，并且特定于每个 {harvester-product-name} 版本。
+
+*支持的选项和值*:
+
+该值是一个 JSON 对象字面量，包含以下键值对：
+
+* `repository`：存储支持包镜像的储存库名称。
++
+* `tag`： 分配给支持包镜像的标签。
++
+* `imagePullPolicy`：支持包图像的拉取策略。受支持的值为 `IfNotPresent`、`Always` 和 `Never`。有关更多信息，请参见 Kubernetes 文档中的 https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy[图像拉取策略]。
+
+*示例*：
+
+----
+{
+  "repository": "rancher/support-bundle-kit",
+  "tag": "v0.0.25",
+  "imagePullPolicy": "IfNotPresent"
+}
+----
+
+在此示例中，集群的默认图像标签为 `v0.0.25`。
+
+CLI 显示以下 `support-bundle-image` 设置对象：
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'  // default value, automatically set
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+过了一段时间，使用 UI 在 `value` 字段中指定了一个较新的图像标签 (`v0.0.36`)。
+
+image::advanced/support-bundle-image-set-customized-value.png[]
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value
+```
+
+最终，该集群被升级，对象再次发生变化。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default value, automatically updated after upgrade
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value is kept unchanged
+```
+
+在 `value` 字段中，`tag` 的值为 `v0.0.36`，而在 `default` 字段中，`tag` 的值为 `v0.0.38`。
+
+要清除过时的设置并使用默认图像标签，请运行以下命令，删除 `value` 字段，并保存更改。
+
+```
+$ kubectl edit settings.harvesterhci.io support-bundle-image
+```
+
+在删除 `value` 字段后，对象如下所示。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+UI 上的 *使用默认值* 按钮可用于将 `default` 字段的内容复制到 `value` 字段。
+
+image::advanced/support-bundle-image-set-use-default-value.png[]
+
+在保存更改后，对象如下所示。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // copied from default
+```
+
+当集群在未来升级时，`value` 字段的内容可能会再次过时，因为默认图像标签可能会发生变化。
+
+[NOTE]
+====
+* 在 `default` 字段中，`tag` 的值始终基于打包到 {harvester-product-name} ISO 中的图像。每当集群升级时，此字段会自动更新。
++
+* 当 `value` 字段未设置或留空时，将使用 `default` 字段。{harvester-product-name} 检查默认图像是否存储在集群中并且是最新的。
++
+* 配置此设置不是必需的。如果您决定在 `value` 字段中指定不同的镜像标签，请记住，当集群升级时，此标签可能会过时。
++
+* 使用命令 `$ kubectl edit settings.harvesterhci.io support-bundle-image` 清除 `value` 字段。
++
+* UI 上的 *使用默认值* 按钮仅将 `default` 字段的内容复制到 `value` 字段。您可以使用此方法替换过时的镜像标签，但复制的标签最终也会过时（当集群升级并且 `default` 字段更新时）。
++
+* 如果您的集群处于隔离环境中，并且您在 `value` 字段中指定了非默认镜像标签，请确保该镜像在本地 containerd 注册表中可用。如果镜像不可用，{harvester-product-name} 将不会 xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[生成支持包]。
+====
+
+=== `support-bundle-namespaces`
+
+*定义*：您在 xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[生成支持包] 时可以使用的其他名称空间。
+
+默认情况下，支持包仅收集以下预定义命名空间中的资源：
+
+* cattle-dashboards
+* cattle-fleet-local-system
+* cattle-fleet-system
+* cattle-fleet-clusters-system
+* cattle-monitoring-system
+* fleet-local
+* harvester-system
+* 本地
+* longhorn-system
+* cattle-logging-system
+
+您选择的名称空间将附加到预定义名称空间列表中。
+
+*默认值*：无
+
+=== `support-bundle-timeout`
+
+*定义*：{harvester-product-name} 允许完成支持包生成过程的分钟数。
+
+当数据收集和文件打包任务未在配置的分钟数内完成时，过程被视为失败。{harvester-product-name} 不会继续或重试超时的支持包生成过程。当值为 `0` 时，超时功能被禁用。
+
+*默认值*：`10`
+
+=== `support-bundle-expiration`
+
+*定义*：{harvester-product-name} 等待的分钟数，在此期间删除已打包但未下载（无论是故意还是未成功）或保留的支持包。
+
+您可以指定大于或等于 0 的值。当值为 0 时，{harvester-product-name} 使用默认值。
+
+*默认值*：`30`
+
+=== `support-bundle-node-collection-timeout`
+
+*定义*：{harvester-product-name} 允许在节点上收集日志和配置以生成支持包的分钟数。
+
+如果收集过程未在规定时间内完成，{harvester-product-name} 仍然允许您下载支持包（不包含未收集的数据）。您可以指定大于或等于 0 的值。当值为 0 时，{harvester-product-name} 使用默认值。
+
+*默认值*：`30`
+
+=== `upgrade-checker-enabled`
+
+*定义*：设置自动检查可用升级。
+
+*默认值*：`true`
+
+*示例*：
+
+----
+false
+----
+
+=== `upgrade-checker-url`
+
+*定义*：用于检查可用升级的 URL。
+
+此设置仅在 `upgrade-checker-enabled` 设置为 `true` 时可用。
+
+*默认值*：`https://harvester-upgrade-responder.rancher.io/v1/checkupgrade`
+
+*示例*：
+
+----
+https://your.upgrade.checker-url/v99/checkupgrade
+----
+
+=== `upgrade-config`
+
+*定义*：与升级相关的配置。
+
+*默认值*：
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "sequential"
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "auto"
+    }
+  },
+  "restoreVM": false,
+  "logReadyTimeout": "5"
+}
+----
+
+*支持的选项和字段*：
+
+* `imagePreloadOption`：图像预加载阶段的选项。
++
+完整的 ISO 包含核心操作系统组件和所有所需的容器镜像。{harvester-product-name} 可以在安装和升级期间将这些容器镜像预加载到每个节点。当工作负载被调度到管理节点和工作节点时，容器镜像已准备好使用。
++
+** `strategy`：图像预加载策略。
++
+*** `type`：图像预加载策略的类型。
++
+**** `sequential`：来自目标 ISO 的容器镜像被预加载到每个节点。这是默认选项。
++
+**** `skip`：容器镜像未被预加载到每个节点。*在生产环境中请勿使用此选项。*
++
+[IMPORTANT]
+====
+如果您决定使用 `skip`，请确保满足以下要求：
+
+* 您有一个包含所有所需镜像的私有容器注册表。
+* 您的集群具有高速互联网访问，并能够在必要时从 Docker Hub 拉取所有镜像。
+
+注意任何潜在的互联网服务中断，以及您距离达到 https://www.docker.com/increase-rate-limits/[Docker Hub 速率限制] 的距离。未能下载任何所需镜像可能导致升级失败，并可能使集群处于中间状态。
+====
++
+**** `parallel` (*实验性*)：节点批量预加载图像。您可以使用 `concurrency` 选项进行调整。
++
+*** `concurrency`：可以同时预加载图像的节点数量。此选项仅在`type`设置为`parallel`时生效。
++
+默认值为`0`，相当于遵循集群的节点数量。使用`0`可以让系统动态跟随集群的规模。高于集群节点数量的值被视为`0`，而低于该值的则被视为无效并被拒绝。
++
+[NOTE]
+====
+{harvester-product-name}在集群上部署一个升级仓库服务，作为需要预加载容器图像的节点的HTTP服务器。当设置`concurrency`值时，每批节点会并行从此升级仓库下载容器图像。因此，您必须考虑{harvester-product-name}管理网络的速度以及{longhorn-product-name}默认磁盘的读取速度。
+====
+
+* `nodeUpgradeOption`：定义{harvester-product-name}如何执行节点升级。
++
+节点升级是一个原子操作，包括升级节点的RKE2组件和操作系统。升级要么完全完成，要么失败，没有半完成的状态。
++
+为了准备目标节点进行升级，{harvester-product-name}首先尝试将所有正在运行的虚拟机实时迁移到其他节点。无法实时迁移的虚拟机会被自动关闭，以避免在后续升级步骤中出现潜在的中断和问题。
++
+** `strategy`：节点升级策略。
++
+*** `mode`：节点升级策略的模式。
++
+**** `auto`：节点升级自动开始。此值是默认值。
+**** `manual`：节点升级被暂停，直到您采取特定措施以恢复该过程。
++
+*** `pauseNodes`：必须排除在自动升级之外的节点列表。
++
+如果 `mode` 字段设置为 `manual`，并且您未在此字段中指定任何节点名称，则所有节点的升级将被暂停。如果 `mode` 字段设置为 `auto`，则此字段中指定的节点名称将被忽略，节点升级将自动开始。
++
+[IMPORTANT]
+====
+在此字段中列出的节点的升级将 _暂停_，直到您采取具体措施 xref:upgrades/upgrades.adoc#_resuming_a_paused_node_upgrade[恢复该过程]。鉴于 {harvester-product-name} 按顺序升级节点，这意味着整个升级进度也被暂停。
+====
++
+示例：
++
+[,json]
+----
+"pauseNodes": ["node-0", "node-2"]
+----
+
+* `restoreVM`：启用此选项后，{harvester-product-name} 会在升级 *成功* 完成后，自动恢复之前运行的 xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[不可迁移虚拟机]。您可以指定以下任一值：
++
+** `true`：{harvester-product-name} 强制关闭每个节点上 *正在运行* 和 *暂停* 的不可迁移虚拟机。升级完成后，之前运行的虚拟机将自动重启，而暂停的虚拟机将保持关闭状态。
+** `false`：此值是默认值。在多节点环境中，您必须停止所有不可迁移虚拟机，以允许升级进行。{harvester-product-name} 在升级完成后不会重启这些虚拟机。
++
+[NOTE]
+====
+在单节点环境中，所有虚拟机都被视为不可迁移的。{harvester-product-name} 在开始升级过程之前强制关闭所有虚拟机。
+====
+
+* `logReadyTimeout`：{harvester-product-name} 允许创建升级日志基础设施的分钟数。
++
+** 默认值：`"5"`
+** 有效值：`""`, `"1"` 到 `"20"`（用双引号括起来）
+
+*示例*：
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "parallel",
+      "concurrency": 2
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "manual",
+      "pauseNodes": [
+        "node-3"
+      ]
+    }
+  }
+  "restoreVM": true,
+  "logReadyTimeout": "5"
+}
+----
+
+=== `vip-pools`
+
+*版本*：自 v1.2.0 起已弃用（请改用 xref:networking/ip-pool.adoc[IP 池]）。
+
+*定义*：通过 CIDR 或 IP 范围的 VIP 的全局或命名空间特定 IP 地址池。
+
+*默认值*：`{}`
+
+*示例*：
+
+[,json]
+----
+{
+  "default": "172.16.0.0/24,172.16.1.0/24",
+  "demo": "172.16.2.50-172.16.2.100,172.16.2.150-172.16.3.200"
+}
+----
+
+=== `vm-force-reset-policy`
+
+*定义*：允许您在运行的节点变得不可用时强制重新调度虚拟机的设置。
+
+当节点状态变为 `Not Ready` 时，虚拟机将被强制删除，并在配置的秒数后重新调度到可用节点。
+
+当节点变得不可用或关闭时，虚拟机仅重启而不迁移。
+
+*支持的选项*：
+
+* `period`：{harvester-product-name} 表示在为失败节点添加 `kubevirt.io/drain` 污点之前等待的秒数。此选项触发虚拟机的迁移。
+* `vmMigrationTimeout`：{harvester-product-name} 表示在为失败节点添加 `node.kubernetes.io/out-of-service` 污点之前等待的秒数。此选项强制清理孤立资源。
+
+*默认值*：`{"enable":true, "period":15, "vmMigrationTimeout": 180}`
+
+*示例*：
+
+[,json]
+----
+{
+  "enable": "true",
+  "period": 15,
+  "vmMigrationTimeout": 180
+}
+----
+
+=== `vm-migration-network`
+
+*定义*：用于虚拟机迁移流量的隔离网络。
+
+默认情况下，{harvester-product-name} 使用内置集群网络 `mgmt` 进行虚拟机迁移。`mgmt` 限制为单个接口，并与集群范围的工作负载共享。如果您的实现需要网络隔离，您可以使用 xref:networking/vm-migration-network.adoc[虚拟机迁移网络] 来隔离迁移流量。
+
+[IMPORTANT]
+====
+以 IPv4 CIDR 格式指定 IP 范围。IP 地址的数量必须大于或等于您的集群节点数量。
+====
+
+*默认值*：""
+
+*示例*：
+
+[,json]
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "vm-migration",
+  "range": "192.168.1.0/24"
+}
+----
+
+=== `volume-snapshot-class`
+
+*定义*：在将虚拟机恢复到不包含源虚拟机的名称空间时，VolumeSnapshot 和 VolumeSnapshotContent 的 VolumeSnapshotClassName。
+
+*默认值*：`longhorn`
+
+*示例*：
+
+`longhorn`
+
+== 用户界面设置
+
+=== `branding`
+
+*定义*：该设置允许您通过自定义产品名称、徽标和配色方案，对用户界面进行全局品牌重塑。
+
+*默认值*：*Harvester*
+
+[CAUTION]
+====
+因为此设置是 `settings.management.cattle.io` 自定义资源的一部分，您无法使用 xref:installation-setup/config/configuration-file.adoc#_system_settings[配置文件] 配置任何受支持的选项（例如，`Logo` 和 `Primary Color`）。
+====
+
+image::advanced/branding.png[containerd-registry]
+
+*支持的选项和值*:
+
+* *私有标签*：产品名称或其他文本，用于替换用户界面中大多数位置的 "Harvester"。
+* *徽标*：顶级导航头中的徽标图像。您必须为明亮和黑暗模式上传徽标。
+* *网站图标*：在浏览器标签中显示在页面标题旁的小图像。
+* *主色*：在整个用户界面中使用的主要颜色。
+* *链接颜色*：在整个用户界面中用于链接文本的颜色。
+
+=== `ui-index`
+
+*定义*：用户界面的 HTML 索引位置。
+
+*默认值*：`https://releases.rancher.com/harvester-ui/dashboard/latest/index.html`
+
+*示例*：
+
+----
+https://your.static.dashboard-ui/index.html
+----
+
+=== `ui-path`
+
+*定义*：描述 `index.html` 位置的路径，用于访问用户界面。
+
+`ui-path` 作为用户界面的入口点，仅在以下情况下有效：
+
+* `ui-source` 的值为 `bundled`。
+* `ui-source` 的值为 `auto`，但 `ui-index` 无法检索 HTML 文件。
+
+*默认值*：`/usr/share/harvester/harvester`
+
+*示例*：
+
+`index.html` 存储在容器 `/home/samplefolder` 中。`ui-source` 的值为 `bundled`。
+
+方案 1:`ui-path` 的值为 `/home/samplefolder`。每当您访问用户界面时，`/home/samplefolder/index.html` 的内容会显示。
+
+方案 2:`ui-index` 的值指向一个不可用或不存在的页面（例如，`notexist-example.com/index.html`）。当您第一次访问用户界面时，`/home/samplefolder/index.html` 的内容会显示。但是，如果您将 `ui-index` 设置修改为使用默认值并再次访问用户界面，`/home/samplefolder/index.html` 的内容仍然会显示（即使新的 `ui-index` 值指向一个可用页面）。有关更多信息，请参见 https://github.com/harvester/harvester/issues/6066[问题 #6066]。
+
+=== `ui-source`
+
+*定义*：允许您配置如何加载用户界面源的设置。
+
+*默认值*：`auto`
+
+*支持的值*：
+
+* `auto`：自动检测是否使用捆绑的用户界面。
+* `external`：使用来自 ui-index URL 的外部用户界面源。
+* `bundled`：使用来自本地 {harvester-product-name} 服务器的捆绑用户界面源。
+
+*示例*：
+
+----
+external
+----

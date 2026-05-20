@@ -1,0 +1,101 @@
+= Ressourcenkontingente
+:revdate: 2025-06-18
+:page-revdate: {revdate}
+
+https://kubernetes.io/docs/concepts/policy/resource-quotas/[ResourceQuota] wird verwendet, um die Nutzung von Ressourcen innerhalb eines Namespace zu begrenzen. Es hilft Administratoren, die Zuteilung von Clusterressourcen zu steuern und einzuschränken, um Fairness und kontrollierte Ressourcendistribution zwischen Namensräumen sicherzustellen.
+
+In {harvester-product-name} kann das Ressourcenkontingent Nutzungslimits für die folgenden Ressourcen definieren:
+
+* *CPU*: Begrenzt die Nutzung von Rechenressourcen, einschließlich CPU-Kernen und CPU-Zeit.
+* *Arbeitsspeicher*: Begrenzt die Nutzung von Arbeitsspeicherressourcen in Bytes oder anderen erkennbaren Speichereinheiten.
+* *Speicher*: Begrenzt die Nutzung von Speicherressourcen.
+
+== Ressourcenkontingent über Rancher festlegen
+
+Administratoren können Ressourcenkontingente für Namespaces konfigurieren, indem sie die folgenden Schritte ausführen:
+
+. Gehen Sie in der {rancher-short-name} UI zu *≡ -> Virtualisierung*.
+
+. Wählen Sie einen Cluster aus, gehen Sie zu *Projects/Namespaces* und klicken Sie dann auf *Projekt erstellen*.
+
+. Geben Sie im Abschnitt allgemeine Informationen einen Namen und eine Beschreibung für das Projekt an.
+
+. Klicken Sie im Tab *Ressourcenkontingente* auf *Ressource hinzufügen*, wählen Sie einen Ressourcentyp aus und geben Sie die entsprechenden Grenzwerte an.
++
+image::rancher/create-project.png[]
+
+. Klicken Sie auf *Erstellen*.
+
+[NOTE]
+====
+Der Tab *Standardressourcengrenze für VMs* enthält Einstellungen zur Ressourcenvorbehaltung und -grenze, die nur auf Pod-Arbeitslasten angewendet werden, die innerhalb des Namensraums ausgeführt werden. Die auf diesem Tab konfigurierten Werte entsprechen den `defaultRequest` und `default` Werten der https://kubernetes.io/docs/concepts/policy/limit-range/[`LimitRange`] Richtlinie des Namespace. Diese Einstellungen können in einer zukünftigen Version entfernt werden.
+====
+
+Sie können die *Namespace*-Grenzen wie folgt konfigurieren:
+
+. Suchen Sie das neu erstellte Projekt und wählen Sie *Create Namespace* aus.
+. Geben Sie den gewünschten Namespace *Name* an und passen Sie die Grenzen an.
+. Schließen Sie den Prozess ab, indem Sie *Create* auswählen.
++
+image::rancher/create-namespace.png[]
+
+[NOTE]
+====
+Versuche, virtuelle Maschinen für Gastcluster bereitzustellen, werden blockiert, wenn die Ressourcenquoten erreicht sind. {rancher-short-name} reagiert, indem es in einer Schleife eine neue virtuelle Maschine erstellt, wobei jeder fehlgeschlagene Erstellungsversuch sofort von einem weiteren Versuch gefolgt wird. Dies führt zu einem vorübergehenden Fehlerzustand im Cluster, der nicht aufgezeichnet wird, da die virtuelle Maschine neu erstellt wird.
+====
+
+== Overhead-Speicher der virtuellen Maschine
+
+Bei der Erstellung einer virtuellen Maschine (VM) integriert der VM-Controller nahtlos Overhead-Ressourcen in die Konfiguration der VM. Diese zusätzlichen Ressourcen sollen die konsistente und unterbrechungsfreie Funktion der VM gewährleisten. Es ist wichtig zu beachten, dass die Konfiguration von Speichergrenzen eine höhere Speicherreservierung erfordert, da diese Overhead-Ressourcen einbezogen werden.
+
+Zum Beispiel betrachten Sie die Erstellung einer neuen VM mit der folgenden Konfiguration:
+
+* CPU (Central Processing Unit, Prozessor): 8 Kerne
+* Arbeitsspeicher: 16Gi
+
+[NOTE]
+====
+Das Betriebssystem, entweder Linux oder Windows, hat keinen Einfluss auf die Overhead-Berechnungen.
+====
+
+Der Speicher-Overhead wird in den folgenden Abschnitten berechnet:
+
+* *Speicher-Seiten-Tabellen-Overhead:* Dies entspricht einem Bit für jede 512b RAM-Größe. Zum Beispiel erfordert ein Speicher von 16Gi einen Overhead von 32Mi.
+* *VM-fester Overhead:* Dies besteht aus mehreren Komponenten:
+ ** `VirtLauncherMonitorOverhead`: 25Mi  (der `ps` RSS für virt-launcher-monitor)
+ ** `VirtLauncherOverhead`: 75Mi  (der `ps` RSS für den virt-launcher-Prozess)
+ ** `VirtlogdOverhead`: 17Mi  (der `ps` RSS für virtlogd)
+ ** `LibvirtdOverhead`: 33Mi (der `ps` RSS für libvirtd)
+ ** `QemuOverhead` : 30Mi (der `ps` RSS für qemu, abzüglich des RAMs seines (belasteten) Gasts, abzüglich der virtuellen Seitentabelle)
+* *8Mi per CPU (vCPU) Overhead:* Zusätzlich wird ein Overhead von 8Mi pro vCPU hinzugefügt, zusammen mit einem festen Overhead von 8Mi für IOThread.
+* *Zusätzlich hinzugefügter Overhead:* Dies umfasst verschiedene Faktoren wie den Overhead des Videospeichers und den Architektur-Overhead. Siehe https://github.com/kubevirt/kubevirt/blob/2bb88c3d35d33177ea16c0f1e9fffdef1fd350c6/pkg/virt-controller/services/template.go#L1853-L1890[Zusätzlicher Overhead] für weitere Details.
+
+Diese Berechnung zeigt, dass die VM-Instanz einen zusätzlichen Speicher-Overhead von etwa 276Mi benötigt.
+
+Für weitere Informationen siehe https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#memory-overhead[Speicher-Overhead].
+
+Für weitere Informationen darüber, wie der Speicher-Overhead in Kubevirt berechnet wird, siehe https://github.com/kubevirt/kubevirt/blob/v0.54.0/pkg/virt-controller/services/template.go#L1804[kubevirt/pkg/virt-controller/services/template.go].
+
+== Automatische Anpassung des ResourceQuota während der Migration
+
+Wenn das zugewiesene Ressourcenquota, das durch das `ResourceQuota`-Objekt kontrolliert wird, sein Limit erreicht, wird die Migration einer VM unpraktisch. Der Migrationsprozess erstellt automatisch ein neues Pod, das die Ressourcenanforderungen der Quell-VM spiegelt. Wenn diese Voraussetzungen für die Pod-Erstellung das definierte Quota überschreiten, kann der Migrationsvorgang nicht fortgesetzt werden.
+
+In {harvester-product-name} werden die `ResourceQuota`-Werte vor der Migration dynamisch erweitert, um den Ressourcenbedarf der Ziel-VM zu berücksichtigen. Nach der Migration werden die ResourceQuotas auf ihre vorherigen Konfigurationen zurückgesetzt.
+
+Bitte beachten Sie die folgenden Einschränkungen der automatischen Größenanpassung von `ResourceQuota`:
+
+* `ResourceQuota` kann während der VM-Migration nicht geändert werden.
+* Wenn Sie den Wert von `ResourceQuota` erhöhen, wird {harvester-product-name} überprüfen, ob die Ressourcen ausreichend sind, basierend auf dem ursprünglichen `ResourceQuota`, wenn Sie andere VMs erstellen, starten oder wiederherstellen. Wenn die Bedingungen nicht erfüllt sind, wird das System darauf hinweisen, dass der Migrationsprozess nicht durchführbar ist.
+* Nach der Erweiterung von `ResourceQuota` kann es zu potenziellen Ressourcenkonflikten zwischen Nicht-VM-Pods und VM-Pods kommen, was zu Migrationsfehlern führen kann. Daher wird nicht empfohlen, benutzerdefinierte Container-Workloads und VMs im selben Namespace bereitzustellen.
+* Aufgrund der gleichzeitigen Einschränkung des Webhook-Validators wird der VM-Controller eine sekundäre Validierung durchführen, um die ausreichende Ressourcenverfügbarkeit zu bestätigen. Wenn die Ressource unzureichend ist, wird `RunStrategy` der VM automatisch auf `Halted` konfiguriert, und eine neue Annotation `harvesterhci.io/insufficient-resource-quota` wird dem VM-Objekt hinzugefügt, die Sie darüber informiert, dass die VM aufgrund unzureichender Ressourcen heruntergefahren wurde.
++
+image::rancher/vm-annotation-insufficient-resource-quota.png[]
+
+=== Automatische Anpassung des ResourceQuota während der Migration deaktivieren.
+
+Wenn ein `ResourceQuota`-Objekt die Annotation `harvesterhci.io/skipResourceQuotaAutoScaling: "true"` hat, passt {harvester-product-name} die Werte dieses Objekts nicht automatisch an. Dieses Feature ist nützlich für das Debuggen, die Fehlersuche und andere Aufgaben.
+
+[IMPORTANT]
+====
+Sie müssen die Annotation setzen, bevor die Migration beginnt. Wenn die Annotation gesetzt wird, während die Werte bereits angepasst werden, ist {harvester-product-name} nicht in der Lage, die vorherige Konfiguration automatisch wiederherzustellen.
+====

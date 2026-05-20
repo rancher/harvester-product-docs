@@ -1,0 +1,92 @@
+= CPU-Pinning
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} unterstützt das CPU-Pinning für virtuelle Maschinen. Um diese Funktion zu nutzen, müssen Sie zunächst den CPU-Manager auf den Knoten aktivieren und dann das CPU-Pinning aktivieren, wenn Sie die virtuelle Maschine erstellen.
+
+== Kubernetes CPU Manager
+
+Die https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[CPU-Manager] Funktion verbessert die Zuweisung von CPU-Ressourcen in Kubernetes-Clustern und stellt sicher, dass Arbeitslasten mit strengen Leistungsanforderungen stabile und vorhersehbare CPU-Ressourcen erhalten. Dies ist besonders wichtig für leistungsstarke und latenzempfindliche Anwendungen.
+
+{harvester-product-name} verwendet die `static` CPU-Manager-Richtlinie, wenn der CPU-Manager aktiviert ist. Diese Richtlinie verwaltet einen gemeinsamen Pool von CPUs, der zunächst alle CPUs auf Knoten mit der folgenden Konfiguration umfasst:
+
+* Pods in der https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`] Qualitätsklasse (QoS), die ganze CPU-Kerne anfordern (zum Beispiel CPU: "2") erhalten dedizierte CPUs. Diese CPUs sind "angeheftet" und werden aus dem gemeinsamen CPU-Pool entfernt.
++
+* Pods in der https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`] und https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] QoS-Klasse teilen sich die verbleibenden CPUs im gemeinsamen Pool.
+
+=== Berechnung des gemeinsamen CPU-Pools
+
+{harvester-product-name} reserviert CPU-Ressourcen für systemweite Operationen basierend auf der https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[GKE-Formel], wobei die https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`] und https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`] Werte im Verhältnis 2:3 zugewiesen werden.
+
+Beispiel (Knoten mit 16 CPU-Kernen):
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+In diesem Beispiel stehen ungefähr 15 Kerne (14980 Millikernen) für Arbeitslasten zur Verfügung.
+
+Wenn eine virtuelle Maschine (Pod) in der garantierten QoS-Klasse 4 CPUs anfordert, werden 4 Kerne dieser virtuellen Maschine zugewiesen. Pods in den anderen QoS-Klassen teilen sich die verbleibenden 11 Kerne im gemeinsamen Pool.
+
+== CPU-Manager aktivieren und deaktivieren
+
+Wenn Sie den CPU-Manager aktivieren, setzt {harvester-product-name} die Richtlinie des CPU-Managers auf `static`. Wenn Sie die Funktion deaktivieren, wechselt {harvester-product-name} die Richtlinie des CPU-Managers zurück zu `none`. 
+
+Sie müssen den CPU-Manager auf jedem Knoten separat aktivieren oder deaktivieren.
+
+. Gehen Sie im {harvester-product-name} UI zu *Hosts*.
++
+. Suchen Sie den Knoten in der Liste und wählen Sie dann *⋮ -> CPU-Manager aktivieren* oder *CPU-Manager deaktivieren* aus.
++
+Lassen Sie etwas Zeit, damit {harvester-product-name} die entsprechende Richtlinie des CPU-Managers anwenden kann.
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== Nutzungsbeschränkungen
+
+* Der CPU-Manager kann auf dem Zeugen-Knoten nicht aktiviert werden.
++
+* Der CPU-Manager muss auf jedem Verwaltungsknoten separat aktiviert oder deaktiviert werden. Sie müssen warten, bis der Vorgang abgeschlossen ist, bevor Sie einen weiteren starten.
++
+* Virtuelle Maschinen mit aktiviertem CPU-Pinning müssen beendet werden, bevor der CPU-Manager auf dem entsprechenden Knoten deaktiviert wird.
+
+== CPU-Pinning auf einer neuen virtuellen Maschine aktivieren
+
+. Überprüfen Sie, ob der CPU-Manager auf einem oder mehreren Knoten aktiviert ist.
++
+[IMPORTANT]
+====
+Wenn der CPU-Manager auf mindestens einem Knoten nicht aktiviert ist, bleibt die virtuelle Maschine nach dem Start im `Unschedulable` Zustand hängen. Für weitere Informationen siehe xref:virtual-machines/create-vm.adoc#_related_cpu_pinning_concepts[Verwandte Konzepte zum CPU-Pinning].
+====
++
+. Gehen Sie zu *Virtuelle Maschinen*.
++
+. Klicken Sie auf *Erstellen*.
++
+image::vm/cpu-pinning-create-vm.png[vm-erstellen]
++
+. Wählen Sie im Tab *Erweiterte Optionen* *CPU-Pinning aktivieren* aus.
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-erweiterte-optionen]
++
+. Klicken Sie auf *Speichern*.
+
+Die Aktivierung von CPU-Pinning fügt `dedicatedCpuPlacement: true` zu `.spec.template.spec.domain.cpu` in der Konfiguration der virtuellen Maschine (YAML) hinzu. Wenn `dedicatedCpuPlacement` auf `true` gesetzt ist, werden die Anforderungen an CPU- und Arbeitsspeicherressourcen automatisch so eingestellt, dass sie den Grenzen entsprechen, um sicherzustellen, dass die Kriterien für garantierte QoS erfüllt sind.
+
+Da die Anforderungen und Grenzen identisch sind, gelten die Einstellungen für CPU- und Arbeitsspeicher xref:./resource-overcommit.adoc[Ressourcenüberbuchung] nicht für virtuelle Maschinen mit aktiviertem CPU-Pinning.
+
+[NOTE]
+====
+Um CPU-Pinning auf einer bestehenden virtuellen Maschine zu verwenden, müssen Sie die virtuelle Maschine neu starten, nachdem Sie die Funktion aktiviert und die Änderung gespeichert haben.
+====
+
+== Live-Migration virtueller Maschinen
+
+Virtuelle Maschinen mit aktiviertem CPU-Pinning können nur migriert werden, wenn der CPU-Manager auf dem Zielknoten aktiviert ist.
+
+== Aufrüstungen
+
+Beim Upgrade eines Knotens entleert {harvester-product-name} alle Pods und migriert virtuelle Maschinen live auf einen anderen Knoten. Um Unterbrechungen des Upgrade-Prozesses zu vermeiden, stellen Sie sicher, dass der CPU-Manager auf anderen Knoten aktiviert ist und ausreichend Ressourcen verfügbar sind, wann immer Sie virtuelle Maschinen mit aktiviertem CPU-Pinning verwenden.

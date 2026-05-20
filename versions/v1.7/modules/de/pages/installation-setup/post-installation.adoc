@@ -1,0 +1,49 @@
+= Aufgaben nach Abschluss der Installation
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Sie können die Sicherheit und Leistung Ihres {harvester-product-name} Clusters verbessern, indem Sie die folgenden Verfahren nach Abschluss der Installation durchführen.
+
+== Deaktivieren Sie die SSH-Passwortauthentifizierung
+
+Standardmäßig ist die SSH-Passwortauthentifizierung während der Installation auf {harvester-product-name} Knoten aktiviert. Dies ermöglicht dem Administrator den Zugriff auf die Knoten zur Diagnose nach der Installation.
+
+Nach Abschluss der Installation wird jedoch empfohlen, die SSH-Passwortauthentifizierung zu deaktivieren. Sie können den folgenden Befehl ausführen, der `kubectl` verwendet, um eine https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`] Konfiguration anzuwenden, um die SSH-Passwortauthentifizierung auf allen {harvester-product-name} Knoten zu deaktivieren:
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* Das `matchSelector` Feld wird verwendet, um {harvester-product-name} Knoten mit bestimmten Labels auszuwählen.
+* Alle betroffenen Knoten müssen neu gestartet werden, damit die `CloudInit` Konfiguration wirksam wird.
+====
+
+Sobald die Konfiguration angewendet wurde, werden alle Versuche, auf die {harvester-product-name} Knoten mit dem SSH-Passwort zuzugreifen, verweigert.
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----

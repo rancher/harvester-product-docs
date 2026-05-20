@@ -1,0 +1,513 @@
+= 仮想マシンを作成します。
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+== 仮想マシンの作成方法
+
+[tabs]
+======
+UI::
++
+--
+*仮想マシン*ページから1つ以上の仮想マシンを作成できます。
+
+[NOTE]
+====
+Windows仮想マシンの作成については、xref:./create-windows-vm.adoc[こちらのページ]をご参照ください。
+====
+
+. 1つまたは複数の仮想マシンインスタンスを作成するオプションを選択してください。
+
+. 仮想マシンのネームスペースを選択してください。`harvester-public`ネームスペースのみがすべてのユーザーに表示されます。
+
+. VM名は必須項目です。
+
+. （オプション）VMテンプレートは任意です。`iso-image`、`raw-image`、または`windows-iso-image`テンプレートを選択して、仮想マシンインスタンスの作成を迅速化できます。
+
+. *基本設定*タブで、次の設定を行います：
++
+* *CPU*と*メモリ*：最大で*254* vCPUを割り当てることができます。ベストプラクティスとして、各仮想マシンに割り当てられたvCPUの数がホスト上の利用可能な物理プロセッサスレッドの数を超えないようにしてください。仮想マシンがほとんどの時間で割り当てられたリソースを完全に消費しない場合、物理リソースの割り当てを最適化するためにxref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]設定を使用できます。
+* *SSHキー*：SSHキーを選択するか、新しいキーをアップロードしてください。
+
+. *ボリューム*タブでカスタムVMイメージを選択してください。デフォルトのディスクはルートディスクになります。仮想マシンにさらにディスクを追加できます。
+
+. ネットワークを構成するには、*ネットワーク*タブに移動してください。
+
+. *管理ネットワーク*はデフォルトで追加されます。VLANネットワークが構成されている場合は、これを削除することができます。
+
+. VLANネットワークを使用して、仮想マシンに追加のネットワークを追加することもできます。最初に、*高度な->ネットワーク*でVLANネットワークを構成することができます。
++
+[NOTE]
+====
+仮想マシンが`mgmt`ネットワークに接続されたインターフェースとVLANネットワークに接続された別のインターフェースを持っている場合、ノードは仮想マシンの`mgmt`IPアドレスに到達できない可能性があります。この接続の問題は、他のネットワークのゲートウェイが仮想マシンのデフォルトルートを上書きし、すべてのインバウンドおよびアウトバウンドトラフィックに対してVLANネットワークを優先するルーティングが発生する場合に発生します。`mgmt`ネットワークへのトラフィックも含まれます。
+====
+
+. （オプション）*ノードスケジューリング*タブでノードアフィニティルールを設定します。
+
+. （オプション）*VMスケジューリング*タブでワークロードアフィニティルールを設定します。
+
+. 実行戦略、OSタイプ、cloud-initデータなどの高度なオプションはオプションです。該当する場合は、*高度なオプション*セクションでこれらを構成できます。
+
+image::vm/create-vm.png[]
+--
+
+API::
++
+--
+Kubernetes APIを使用して仮想マシンを作成するには、`VirtualMachine`オブジェクトを作成します。
++
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: new-vm
+  namespace: default
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        memory: "3996Mi"
+        devices:
+          disks: []
+          interfaces:
+            - name: default
+              model: virtio
+              masquerade: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            cpu: "125m"
+            memory: "2730Mi"
+          limits:
+            cpu: 2
+            memory: "4Gi"
+        networks:
+          - name: default
+            pod: {}
+----
+
+詳細については、APIリファレンスを参照してください。
+--
+
+Terraform::
+
+[Harvester Terraform Provider](https://registry.terraform.io/providers/harvester/harvester/latest)を使用して仮想マシンを作成するには、`harvester_virtualmachine`リソースブロックを定義します：
++
+[,hcl]
+----
+resource "harvester_virtualmachine" "opensuse154" {
+  name                 = "opensuse154"
+  namespace            = "default"
+  restart_after_update = true
+
+  cpu    = 2
+  memory = "2Gi"
+
+  run_strategy = "RerunOnFailure"
+  hostname     = "opensuse154"
+  machine_type = "q35"
+
+  ssh_keys = [
+    harvester_ssh_key.mysshkey.id
+  ]
+
+  network_interface {
+    name           = "nic-1"
+    network_name   = harvester_network.cluster-vlan1.id
+    wait_for_lease = true
+  }
+
+  disk {
+    name       = "rootdisk"
+    type       = "disk"
+    size       = "10Gi"
+    bus        = "virtio"
+    boot_order = 1
+
+    image       = harvester_image.opensuse154.id
+    auto_delete = true
+  }
+
+  cloudinit {
+    user_data_secret_name    = harvester_cloudinit_secret.cloud-config-opensuse154.name
+    network_data_secret_name = harvester_cloudinit_secret.cloud-config-opensuse154.name
+  }
+}
+----
+======
+
+== ボリューム
+
+`Volumes`タブを介して1つ以上の追加ボリュームを追加できます。デフォルトでは、最初のディスクがルートディスクになります。ボリュームをドラッグ＆ドロップするか、矢印ボタンを使用して、ブート順序を変更できます。
+
+ディスクは以下のタイプを介してアクセス可能にできます：
+
+|===
+| type | description
+
+| disk
+| このタイプは、ボリュームを仮想マシンに対して通常のディスクとして公開します。
+
+| cd-rom
+| このタイプは、ボリュームを仮想マシンに対してcd-romドライブとして公開します。デフォルトでは読み取り専用です。
+|===
+
+新しい空のボリュームを追加する際にボリュームのxref:../storage/storageclass.adoc[ストレージクラス]を指定できます。他のボリューム（仮想マシンイメージなど）については、イメージ作成時にストレージクラスが定義されます。
+
+外部ストレージを使用している場合は、正しい*ストレージクラス*と*ボリュームモード*が選択されていることを確認してください。たとえば、*nfs-csi*ストレージクラスを持つボリュームは、*ファイルシステム*ボリュームモードを使用する必要があります。
+
+[IMPORTANT]
+.重要
+====
+仮想マシンイメージからボリュームを作成する際は、ボリュームサイズがイメージサイズ以上であることを確認してください。設定されたボリュームサイズが基になるイメージのサイズよりも小さい場合、ボリュームが破損する可能性があります。これは特にqcow2イメージにとって重要です。なぜなら、仮想サイズは通常物理サイズよりも大きいためです。
+
+デフォルトでは、{harvester-product-name}はボリュームサイズを10 GiBまたは仮想マシンイメージの仮想サイズのいずれか大きい方に設定します。
+====
+
+image::vm/create-vm-volumes.png[create-vm]
+
+=== コンテナディスクの追加
+
+コンテナディスクは、一時的なストレージボリュームであり、任意の数の仮想マシンに割り当てることができ、コンテナイメージレジストリに仮想マシンディスクを保存および配布する機能を提供します。コンテナディスクは：
+
+* 多くの仮想マシンワークロードを複製したり、永続的なデータを必要としないマシンドライバを注入するための理想的なツールです。一時的なボリュームは、より多くのストレージが必要な仮想マシン向けに設計されており、そのデータが仮想マシンの再起動を通じて永続的に保存されるかどうかは気にしないか、設定データや秘密鍵のようにファイルに存在することが期待される読み取り専用の入力データのみを必要とします。
+* 仮想マシンの再起動を通じて永続的なルートディスクを必要とするワークロードには適していません。
+
+仮想マシンを作成する際に、Dockerイメージを提供することでコンテナディスクが追加されます。仮想マシンを作成する際は、次の手順に従ってください：
+
+. *ボリューム*タブに移動します。
+. *コンテナの追加*を選択します。
++
+image::vm/add-container-volume-1.png[add-container-volume]
++
+. コンテナディスクの*名前*を入力します。
+. ディスクの*タイプ*を選択します。
+. *Dockerイメージ*を追加します。
+ ** qcow2またはraw形式のディスクイメージは、`/disk`ディレクトリに配置する必要があります。
+ ** Rawおよびqcow2フォーマットはサポートされていますが、コンテナイメージのサイズを削減するためにqcow2が推奨されます。サポートされていないイメージフォーマットを使用すると、仮想マシンは`Running`状態で停止します。
+ ** コンテナディスクは、`/disk`ディレクトリにディスクイメージを保存することも可能です。そのようなコンテナイメージを作成する例は https://kubevirt.io/user-guide/virtual_machines/disks_and_volumes/#containerdisk-workflow-example[こちら]にあります。
+. *バス*タイプを選択してください。
++
+image:vm/add-container-volume-2.png[add-container-volume]
+
+== ネットワーク
+
+`Networks`タブを介して、仮想マシンインスタンスに`management network`または`VLAN network`の両方を追加することができます。VLANネットワークが構成されている場合、`management network`はオプションです。
+
+ネットワークインタフェースは`Type`フィールドを通じて構成されます。それらはゲストOS内で見られる仮想インターフェースのプロパティを説明します：
+
+|===
+| type | description
+
+| bridge
+| Linuxブリッジを使用して接続します。
+
+| masquerade
+| iptablesルールを使用してトラフィックをNATするために接続します。
+|===
+
+=== 管理ネットワーク
+
+管理ネットワークは、各仮想マシンに存在するクラスタネットワークソリューションによって構成されたデフォルトの仮想マシンeth0インターフェースを表します。
+
+デフォルトでは、仮想マシンはクラスタノード内の管理ネットワークを介してアクセス可能です。
+
+=== セカンダリネットワーク
+
+追加のネットワークを使用して仮想マシンを接続することも可能で、{harvester-product-name}のビルトインxref:../networking/vm-network.adoc[VLANネットワーク]を利用します。
+
+ブリッジVLANでは、仮想マシンはLinuxの`bridge`を介してホストネットワークに接続されます。ネットワークのIPv4アドレスは、DHCPv4を介して仮想マシンに割り当てられます。仮想マシンは、IPv4アドレスを取得するためにDHCPを使用するように構成されるべきです。
+
+== ノードスケジューリング
+
+`Node Scheduling`を使用すると、ノードラベルに基づいて仮想マシンがスケジュールされるノードを制約することができます。
+
+image::vm/vm-node-scheduling.png[]
+
+次の仮想マシンを実行することを選択できます：
+
+* 利用可能なノード
+
+* 特定のノード
+
+次の例では、ターゲットノードのホスト名は`harv21`です。
+
+----
+nodeSelector:
+  kubernetes.io/hostname: harv21
+----
+
+[NOTE]
+====
+特定のノードにスケジューリングを制限すると、仮想マシンはxref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可]になる可能性があります。
+====
+
+* スケジューリングルールに一致するノード
+
+仮想マシンをノードのグループにスケジューリングすることで、より大きな柔軟性を得ることができます。次の例では、仮想マシンは特定のラベルを持つノードにスケジューリングできます。キーは`harvesterhci.io/group`で、値は`engineering`または`qa`のいずれかです。
+
+----
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: harvesterhci.io/group
+                operator: In
+                values:
+                  - engineering
+                  - qa
+----
+
+詳細については、 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity[Kubernetesノードアフィニティのドキュメント]を参照してください。
+
+== 仮想マシンのスケジューリング
+
+仮想マシンのスケジューリングにより、これらのノードで既に実行されているワークロード（仮想マシンとポッド）のラベルに基づいて、仮想マシンをスケジューリングできるノードを制約できます。
+
+たとえば、`Required`と`Affinity`を組み合わせて、スケジューラに2つのサービスの仮想マシンを同じゾーンに配置するよう指示し、通信効率を向上させることができます。同様に、`Preferred`と`Anti-Affinity`を使用することで、特定のサービスの仮想マシンを複数のゾーンに分散させ、可用性を高めることができます。
+
+詳細については、 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetesポッドアフィニティおよびアンチアフィニティのドキュメント]を参照してください。
+
+[IMPORTANT]
+====
+アップグレードのプレドレインフェーズ中に、{harvester-product-name}は満たされない厳格なアンチアフィニティルールのために仮想マシンをライブマイグレーションできない場合があります。この場合、{harvester-product-name}は自動的にこれらの仮想マシンをシャットダウンし、アップグレードの進行を妨げていた状態を解除し、処理が安全でない方法で再起動するのを防ぎます。
+====
+
+=== 自動的に適用されるアフィニティルール
+
+{harvester-product-name}は、仮想マシンの設定に応じて特定のアフィニティルールを自動的に適用する場合があります。これらのルールは、スケジューリングまたはマイグレーションの対象となるノードを決定します。他のノードが基準を満たさない場合、仮想マシンはスケジューリングまたはマイグレーションできません。
+
+詳細については、xref:troubleshooting/virtual-machines.adoc#_unschedulable_virtual_machines[スケジュールできない仮想マシン]を参照してください。
+
+[IMPORTANT]
+====
+{harvester-product-name} ウェブフックは、手動で行った変更を自動的に適用されるルールに戻します。
+====
+
+==== 関連するネットワーキングの概念
+
+仮想マシンのネットワークを設定する一般的なプロセスは、以下の手順を含みます：
+
+* xref:networking/cluster-network.adoc#_cluster_network[クラスターネットワーク]とそれに対応するxref:networking/cluster-network.adoc#_network_configuration[ネットワーク設定]が作成されます。ネットワーク構成に含まれるノードのみがネットワークデバイスを設定します。
+
+* 特定のVLAN IDを持つxref:networking/vm-network.adoc#_create_a_vm_network[VMネットワーク]が作成されます。
+
+以下の例では、クラスターネットワークを設定し、このクラスターネットワークに接続する仮想マシンを定義する手順が示されています。
+
+* `cn2`という名前のクラスターネットワークが作成されます。
+
+* `cn2-vc1`という名前のネットワーク設定が作成されます。`cn2-vc1`は`node1`と`node2`をカバーします。
+
+* `cn2-nad-100`という名前のVMネットワークが、VLAN ID `vlan id 100`で作成されます。
+
+* `VM vm1`という名前の仮想マシンが、`cn2-nad-100`という名前のセカンダリネットワークに接続します。
+
+{harvester-product-name}は以下を保証します：
+
+* {harvester-product-name}コントローラーは、Kubernetesの`node`オブジェクトに自動的にラベルを付けます。
++
+[,shell]
+----
+kubectl get node node1 -oyaml
+...
+metadata:
+  labels:
+    network.harvesterhci.io/cn2: "true"
+    network.harvesterhci.io/mgmt: "true"
+    network.harvesterhci.io/vlanconfig: cn2-vc1
+...
+----
+
+* {harvester-product-name}ウェブフックは、`virtualmachine`オブジェクトを自動的に更新します。
++
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: network.harvesterhci.io/cn2
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+* 仮想マシンは、`node1`または`node2`のみにスケジュールされます。
+
+[IMPORTANT]
+====
+{harvester-product-name}は、仮想マシンが複数のクラスターネットワークに支えられた複数のVMネットワークに接続する際に、複数のアフィニティルールを適用します。適用されたルールは、スケジューリングまたは移行の対象となるノードを総合的に決定します。
+
+仮想マシンがxref:networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`]（ビルトインのクラスターネットワーク）に支えられたVMネットワークに接続する際には、アフィニティルールは適用されません。`mgmt`はデフォルトで全ノードをカバーするため、すべてのノードがスケジューリングまたは移行の対象となります。
+====
+
+NOTE: クラスターネットワークにノードが1つしかない場合、仮想マシンはxref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可]です。
+
+==== 関連するCPUピンニングの概念
+
+ノードでxref:virtual-machines/cpu-pinning.adoc#_enable_and_disable_cpu_manager[CPUマネージャー]を有効にすると、{harvester-product-name}は関連する`node`オブジェクトに次のラベルを適用します。
+
+[,yaml]
+----
+...
+metadata:
+  labels:
+    cpumanager: "true"
+...
+----
+
+仮想マシンの作成中にxref:virtual-machines/cpu-pinning.adoc#_enable_cpu_pinning_on_a_new_vm[CPUピンニング]を有効にすると、{harvester-product-name}は仮想マシンがCPUマネージャーが有効なノードのみにスケジュールされることを保証するアフィニティルールを適用します。
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cpumanager
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+NOTE: CPUマネージャーが1つのノードでのみ有効な場合、仮想マシンはxref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可]です。
+
+== 注釈
+
+{harvester-product-name}を使用すると、アノテーションを使って仮想マシンにカスタムメタデータを添付できます。これらのキーと値のペアは、コアの仮想マシン設定を変更することなく、拡張機能や動作を可能にします。
+
+`harvesterhci.io/custom-ip`アノテーションを使用して、{harvester-product-name} UIの*表示用*にIPアドレスを設定できます。これは、仮想マシンが`qemu-guest-agent`の欠如やその他の理由によりIPアドレスを報告できない場合に便利です。
+
+== 詳細オプション
+
+=== 実行戦略
+
+{harvester-product-name}は以前、`Running`（ブール値）フィールドを使って仮想マシンインスタンスを実行するかどうかを判断していました。しかし、単純なブール値だけでは、ユーザーの望む動作を完全に説明するには不十分な場合があります。例えば、ユーザーは仮想マシン内部からインスタンスをシャットダウンできるようにしたい場合があります。`running`フィールドが使用されると、仮想マシンはすぐに再起動されます。
+
+より多くのユーザーのシナリオ要件を満たすために、`RunStrategy`フィールドが導入されました。これは`Running`と相互排他的であり、条件が多少重複しています。現在、4つの`RunStrategies`が定義されています：
+
+* 常時:仮想マシンインスタンスは常に存在します。仮想マシンインスタンスがクラッシュした場合、新しいインスタンスが生成されます。これは`Running: true`と同じ動作です。
+* RerunOnFailure（デフォルト）：前のインスタンスがエラー状態で失敗した場合、仮想マシンインスタンスが再生成されます。ゲストが正常に停止された場合（例えば、ゲスト内部からシャットダウンされた場合）、再生成されることはありません。
+* 手動:仮想マシンインスタンスの存在または不在は、`start/stop/restart` VirtualMachine アクションによってのみ制御されます。
+* 停止:仮想マシンインスタンスは存在しません。ゲストがすでに実行中の場合、停止されます。これは`Running: false`と同じ動作です。
+
+=== クラウド設定
+
+{harvester-product-name} は、仮想マシンが初期化されるときに自動的に実行されるスタートアップスクリプトを仮想マシンインスタンスに割り当てる機能をサポートしています。
+
+これらのスクリプトは、リモートアクセスを提供するために、ユーザーとSSHキーを仮想マシンに自動的に注入するために一般的に使用されます。例えば、スタートアップスクリプトを使用して、リモートホストで実行されているAnsibleジョブが仮想マシンにアクセスし、プロビジョニングできるようにするための資格情報を仮想マシンに注入することができます。
+
+==== クラウド-init
+
+https://cloudinit.readthedocs.io/en/latest/[Cloud-init] は、広く採用されているプロジェクトであり、クロスプラットフォームのクラウドインスタンス初期化のための業界標準の複数ディストリビューション対応の方法です。SUSE、Redhat、Ubuntuなどの主要なクラウドイメージプロバイダー全てでサポートされており、cloud-initは仮想マシンにスタートアップスクリプトを提供するための事実上の方法として確立されています。
+
+{harvester-product-name} は、一時ディスクを使用して仮想マシンインスタンスにカスタムcloud-initスタートアップスクリプトを注入することをサポートしています。cloud-initパッケージがインストールされた仮想マシンは、一時ディスクを検出し、起動時にカスタムユーザーデータおよびネットワークデータスクリプトを実行します。
+
+デフォルトユーザーのパスワード設定の例：
+
+[,YAML]
+----
+#cloud-config
+password: password
+chpasswd: { expire: False }
+ssh_pwauth: True
+----
+
+DHCPを使用したネットワークデータ設定の例：
+
+[,YAML]
+----
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      subnets:
+        - type: dhcp
+    - type: physical
+      name: eth1
+      subnets:
+        - type: dhcp
+----
+
+`Advanced > Cloud Config Templates` 機能を使用して、仮想マシンのための事前定義されたcloud-init設定テンプレートを作成することもできます。
+
+[NOTE]
+====
+Ubuntuリリース16.04以降を実行している仮想マシンのネットワーク設定は、デフォルトで`netplan`によって管理されている可能性があります。バックアップを作成する前に、仮想マシンを停止し、設定（*Edit Config -> Advanced Options*）を編集し、その後仮想マシンを再起動する必要があります。DHCP設定の参考として、以下の`network`設定を使用してください。
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+復元された仮想マシンは、元の仮想マシンのマシンIDを保持します。`dhcp-identifier: mac`が指定されていない場合、復元された仮想マシンはDHCPサーバーから同じIPアドレスを受け取ります。なぜなら、`netplan`はデフォルトでマシンIDをDHCPクライアント識別子として使用するからです。これが、Ubuntuを実行している仮想マシンのバックアップを作成する前に`network`設定を構成する必要がある理由です。これを行わないと、予期しない動作や潜在的なネットワークの競合が発生する可能性があります。
+====
+
+==== QEMUゲストエージェントのインストール
+
+QEMUゲストエージェントは、仮想マシンインスタンス上で実行され、仮想マシン、ユーザー、ファイルシステム、およびセカンダリネットワークに関する情報をホストに渡すデーモンです。
+
+新しい仮想マシンが作成されると、`Install guest agent`チェックボックスはデフォルトで有効になります。
+
+image::vm/qga.png[]
+
+[NOTE]
+====
+OSがopenSUSEで、バージョンが15.3未満の場合は、`qemu-guest-agent.service`を`qemu-ga.service`に置き換えてください。
+====
+
+=== TPMデバイス
+
+https://en.wikipedia.org/wiki/Trusted_Platform_Module[トラステッドプラットフォームモジュール (TPM)]は、暗号鍵を使用してハードウェアを保護する暗号プロセッサです。
+
+https://learn.microsoft.com/en-us/windows/whats-new/windows-11-requirements[Windows 11の要件]によると、TPM 2.0デバイスはWindows 11の必須要件です。
+
+{harvester-product-name} UIでは、*詳細オプション*タブの`Enable TPM`ボックスをチェックすることで、仮想マシンにエミュレートされたTPM 2.0デバイスを追加できます。
+
+[NOTE]
+====
+現在、非永続的vTPMのみがサポートされており、その状態は各仮想マシンのシャットダウン後に消去されます。したがって、 https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker]は有効にしないでください。
+====
+
+== ISOイメージインストールのためのワンタイムブート
+
+cd-romからブートする仮想マシンを作成する際、*ブート順序*オプションを使用して、OSがイメージインストール中にcd-romからブートし、インストールが完了したらcd-romをアンマウントせずにディスクからブートできるようにします。
+
+以下の例は、 https://get.opensuse.org/leap/15.4/[openSUSE Leap 15.4]を使用してISOイメージをインストールする方法を説明しています。
+
+. 左のサイドバーで*イメージ*をクリックし、openSUSE Leap 15.4のISOイメージをダウンロードします。
+. 左のサイドバーで*仮想マシン*をクリックし、次に仮想マシンを作成します。これらの仮想マシンの基本設定を入力する必要があります。
+. *ボリューム* タブをクリックし、*画像* フィールドで、ステップ 1 でダウンロードした画像を選択し、*タイプ* が `cd-rom` であることを確認してください。
+. *ボリュームを追加* をクリックし、既存の *ストレージクラス* を選択してください。
+. 次のように、*ボリューム* を *イメージボリューム* の上にドラッグします。このようにして、*ブートオーダー* が *ボリューム* の `1` になります。
+
+image::vm/one-time-boot-create-vm-bootorder.png[one-time-boot-create-vm-bootorder]
+
+. ［*作成*］をクリックします。
+. 作成した仮想マシンの web-vnc を開き、インストーラーからの指示に従ってください。
+. インストールが完了したら、オペレーティングシステムの指示に従って仮想マシンを再起動してください（システムを起動した後、インストールメディアを削除することができます）。
+. 仮想マシンが再起動した後、自動的にディスクボリュームから起動し、オペレーティングシステムが開始されます。

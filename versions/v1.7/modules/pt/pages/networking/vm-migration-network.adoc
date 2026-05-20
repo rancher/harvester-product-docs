@@ -1,0 +1,209 @@
+= Rede de Migração de VM
+:revdate: 2025-09-16
+:page-revdate: {revdate}
+
+Uma rede de migração de VM é útil para isolar o tráfego de migração do tráfego do cluster em `mgmt` e outras cargas de trabalho em todo o cluster. Usar uma rede de migração de VM resulta em melhor largura de banda e desempenho de rede.
+
+[NOTE]
+====
+Evite configurar as configurações do KubeVirt diretamente, pois isso pode resultar em comportamento inesperado ou indesejado do sistema.
+====
+
+== Pré-requisitos
+
+Antes de começar a configurar a rede de migração de VM, certifique-se de que os seguintes requisitos sejam atendidos:
+
+* Os switches de rede estão configurados corretamente e um ID de VLAN dedicado é atribuído à rede de migração de VM.
+
+* A xref:networking/cluster-network.adoc[rede do cluster] e a xref:networking/vm-network.adoc[rede VLAN] estão configuradas corretamente. Certifique-se de que ambas as redes cobrem todos os nós e são acessíveis.
+
+* Nenhuma máquina virtual está sendo migrada.
+
+* O intervalo de IP da rede de migração de VM está no formato CIDR IPv4 e não deve conflitar nem sobrepor-se às redes do cluster Kubernetes. Os seguintes endereços estão reservados: `10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16` e `10.53.0.0/16`.
+
+=== `vm-migration-network` configuração
+
+A configuração xref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`] permite que você configure a rede usada para isolar o tráfego de migração de VM dentro do cluster quando a segregação é necessária.
+
+Você pode habilitar e desabilitar a rede de migração de VM usando a UI ou o CLI. Quando a configuração está habilitada, você deve construir um CRD Multus `NetworkAttachmentDefinition` configurando certos campos.
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+Usar a UI {harvester-product-name} para configurar a configuração `vm-migration-network` é fortemente recomendado.
+====
+
+==== Habilitando a rede de migração de VM
+
+. Vá para *Configurações Avançadas -> -> rede-de-migração-de-vm*.
+
+. Selecione *Habilitado*.
+
+. Configure os campos *ID da VLAN*, *Rede do Cluster*, *Intervalo de IP* e *Excluir* para construir um CRD Multus `NetworkAttachmentDefinition`.
+
+. Clique em *Salvar*.
+
+image::networking/vm-migration-network-enabled.png[Rede de migração de VM habilitada]
+
+==== Desabilitando a rede de migração de VM
+
+. Vá para *Avançado > Configurações > rede-de-migração-de-vm*.
+
+. Selecione *Desabilitado*.
+
+. Clique em *Salvar*.
+
+Uma vez que a rede de migração de VM está desabilitada, o KubeVirt começa a usar `mgmt` para operações relacionadas à migração de VM.
+
+image::networking/vm-migration-network-disabled.png[Rede de migração de VM desabilitada]
+--
+
+CLI::
++
+--
+Você pode usar o seguinte comando para configurar a configuração xref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`].
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io vm-migration-network
+----
+
+A rede de migração de VM é habilitada automaticamente quando o campo valor contém uma string JSON válida.
+
+Exemplo:
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+value: '{"vlan":100,"clusterNetwork":"vm-migration","range":"192.168.1.0/24", "exclude":["192.168.1.100/32"]}'
+----
+
+A rede de migração de VM está desabilitada nas seguintes situações:
+
+* O campo valor está vazio.
++
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: vm-migration-network
+  value: ''
+----
+
+* O campo valor foi removido.
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+----
+
+[CAUTION]
+====
+{harvester-product-name} considera caracteres insignificantes extras em uma string JSON como uma configuração diferente.
+====
+--
+======
+
+Os seguintes eventos ocorrem uma vez que a configuração `vm-migration-network` é aplicada:
+
+* {harvester-product-name} cria um novo `NetworkAttachmentDefinition` e atualiza a configuração do KubeVirt.
+* O KubeVirt reinicia todos os pods `virt-handler` para aplicar a nova configuração de rede.
+
+=== Etapas pós-configuração
+
+. Verifique se o status da configuração é `True` e o tipo é `configured` usando o seguinte comando:
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io vm-migration-network -o yaml
+----
++
+Exemplo:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  annotations:
+    vm-migration-network.settings.harvesterhci.io/hash: ec8322fb6b741f94739cbb904fc73c3fda864d6d
+    vm-migration-network.settings.harvesterhci.io/net-attach-def: harvester-system/vm-migration-network-6flk7
+  creationTimestamp: "2025-06-13T06:36:39Z"
+  generation: 51
+  name: vm-migration--network
+  resourceVersion: "154638"
+  uid: 2233ad63-ee52-45f6-a79c-147e48fc88db
+status:
+  conditions:
+  - lastUpdateTime: "2025-06-13T13:05:17Z"
+    reason: Completed
+    status: "True"
+    type: configured
+----
+
+. Verifique se todos os pods `virt-handler` do KubeVirt estão prontos e se suas redes estão configuradas corretamente.
++
+Você pode inspecionar os detalhes do pod usando o seguinte comando:
++
+[,bash]
+----
+kubectl -n harvester-system describe pod <pod-name>
+----
+
+. Verifique as anotações `k8s.v1.cni.cncf.io/network-status` e confirme se existe uma interface chamada `migration0`. O endereço IP dessa interface deve estar dentro da faixa de IP designada.
++
+Você pode recuperar uma lista de pods `virt-handler` usando o seguinte comando:
++
+[,bash]
+----
+kubectl get pods -n harvester-system -l kubevirt.io=virt-handler -o yaml
+----
++
+Exemplo:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 004522bc8468ea707038b43813cce2fba144f0e97551d2d358808d57caf7b543
+    cni.projectcalico.org/podIP: 10.52.2.122/32
+    cni.projectcalico.org/podIPs: 10.52.2.122/32
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+        "name": "k8s-pod-network",
+        "ips": [
+            "10.52.2.122"
+        ],
+        "default": true,
+        "dns": {}
+      },{
+        "name": "harvester-system/vm-migration-network-6flk7",
+        "interface": "migration0",
+        "ips": [
+            "10.1.2.1"
+        ],
+        "mac": "c6:30:6f:02:52:3e",
+        "dns": {}
+      }]
+    k8s.v1.cni.cncf.io/networks: vm-migration-network-6flk7@migration0
+Omitted...
+----
+
+== Melhores práticas
+
+* Ao configurar uma <<Prerequisites,faixa de IP>> para a rede de migração de VM, certifique-se de que os endereços IP alocados possam atender às necessidades futuras do cluster. Isso é importante porque os pods do KubeVirt (`virt-handler`) param de funcionar quando novos nós são adicionados ao cluster após a configuração da rede de migração de VM, e quando o número necessário de IPs excede os IPs alocados. Resolver o problema envolve reconfigurar a rede de migração de VM com a faixa de IP correta.
+
+* Configure a rede de migração de VM em uma rede de cluster não `mgmt` para garantir a completa separação do tráfego de migração de VM do tráfego do plano de controle do Kubernetes. Usar `mgmt` é possível, mas não recomendado devido ao impacto negativo (conflito de recursos e largura de banda) no desempenho da rede do plano de controle. Use `mgmt` apenas se seu cluster tiver restrições relacionadas a NIC e se você puder segregar completamente o tráfego.

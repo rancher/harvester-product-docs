@@ -1,0 +1,168 @@
+= Imagesicherheit
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{harvester-product-name} ermöglicht es Ihnen, virtuelle Maschinenbilder zu verschlüsseln und zu entschlüsseln. Der Verschlüsselungsmechanismus nutzt das Linux-Kernel-Modul dm_crypt und das Befehlszeilentool cryptsetup.
+
+[NOTE]
+====
+Dieses Feature unterstützt nur die Longhorn V1 Datenengine. Sie können virtuelle Maschinenbilder, die in anderen Speicherlösungen gespeichert sind, nicht verschlüsseln und entschlüsseln.
+====
+
+== Voraussetzungen
+
+Bereiten Sie die folgenden Ressourcen vor:
+
+* Quell-virtuelle Maschine image: You can xref:./upload-image.adoc[virtuelles Maschinenbild hochladen oder erstellen] mit einer der unterstützen Methoden.
++
+[CAUTION]
+====
+Laden Sie kein verschlüsseltes Bild hoch.
+====
++
+* Geheim: Ein Kubernetes-Secret wird als Passphrase für dm_crypt verwendet. Sie müssen den Wert des Feldes `CRYPTO_KEY_VALUE` angeben. Alle anderen Felder sind festgelegt.
++
+image::vm/create-encryption-used-secret.png[]
++
+Beispiel eines Secrets:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+Das Beispiel enthält den Standard-YAML-Code für Kubernetes-Secrets. Neben diesem können Sie https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[Verschlüsselungsoptionen für den LUKS-Modus] verwenden, der ein Betriebsmodus von cryptsetup ist. Harvester v1.4.1 und spätere Versionen unterstützen diese Optionen, aber Sie müssen überprüfen, ob diese von Ihren Knoten unterstützt werden.
+
+|===
+| Option | Zulässige Werte
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Sie können ein Secret im System-Namespace mit kubectl und der {harvester-product-name} UI (*Als YAML bearbeiten* Funktion) erstellen. Ressourcen im System-Namespace werden nicht auf dem *Secrets* Bildschirm angezeigt.
+====
++
+* StorageClass: Virtuelle Maschinenbilder werden mit Longhorn verschlüsselt, daher müssen die erforderlichen Felder an den Longhorn CSI-Treiber übergeben werden. Sie können das Verschlüsselungsgeheimnis beim Erstellen einer StorageClass angeben. Für weitere Informationen siehe xref:./upload-image.adoc#_image_storageclass[Image StorageClass].
++ 
+image::vm/create-storage-class.png[]
++
+Beispiel einer StorageClass:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Sie können ein Secret im System-Namespace mit kubectl und der {harvester-product-name} UI (*Als YAML bearbeiten* Funktion) erstellen. Ressourcen im System-Namespace werden nicht auf dem *Secrets* Bildschirm angezeigt.
+====
+
+== Verschlüsseln Sie ein virtuelles Maschinenbild
+
+. Gehen Sie in der {harvester-product-name} Benutzeroberfläche zu *Images*.
++
+. Klicken Sie auf *Erstellen*.
++
+. Geben Sie einen Namespace und einen Namen an.
++
+. Wählen Sie im Tab *Basics* *Encrypt* aus und wählen Sie dann ein virtuelles Maschinenbild aus.
++
+image::vm/create-encrypted-image.png[]
++
+. Wählen Sie im Tab *Storage* eine StorageClass aus, die verschlüsselungsbezogene Felder enthält. 
++
+{harvester-product-name} übergibt die erforderlichen Felder an Longhorn.
++
+image::vm/select-encryption-storage-class.png[]
++
+. Klicken Sie auf *Erstellen*.
+
+== Entschlüsseln Sie ein virtuelles Maschinenbild
+
+. Gehen Sie in der {harvester-product-name} Benutzeroberfläche zu *Images*.
++
+. Klicken Sie auf *Erstellen*.
++
+. Geben Sie einen Namespace und einen Namen an.
++
+. Wählen Sie im Tab *Basics* *Decrypt* aus und wählen Sie dann ein virtuelles Maschinenbild aus.
++
+image::vm/create-decrypted-image.png[]
++
+. Wählen Sie im Tab *Storage* *harvester-longhorn (Standard)* oder eine andere häufig verwendete StorageClass aus.
++
+{harvester-product-name} verwendet die StorageClass des virtuellen Maschinenbildes, das Sie entschlüsseln möchten.
++
+image::vm/select-normal-storage-class.png[]
++
+. Klicken Sie auf *Erstellen*.
+
+== Verwenden Sie ein virtuelles Maschinenbild mit verschlüsselten Volumes
+
+Sie müssen das virtuelle Maschinenbild auswählen, das Sie beim Erstellen einer virtuellen Maschine verwenden möchten.
+
+image::vm/create.png[]
+
+Der Bildschirm *Virtual Machines* zeigt die folgenden Symbole und Nachrichten an, wenn Volumes, die von virtuellen Maschinen verwendet werden, verschlüsselt sind.
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+Um festzustellen, welche Volumes verschlüsselt sind, überprüfen Sie den Tab *Volumes* auf dem Detailbildschirm der *Virtual Machine*.
+
+image::vm/volume-detail.png[]
+
+== Erweiterte Nutzung mit {rancher-product-name} Integration
+
+Das Geheimnis ist eine unverschlüsselte Base64-codierte Zeichenkette. Um das Geheimnis sicher zu halten, können Sie Projekte und Namespaces verwenden, um Berechtigungen zu isolieren. Für weitere Informationen siehe xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== Nutzungsbeschränkungen
+
+Sie können die folgenden Aktionen nicht ausführen:
+
+* Ein neues virtuelles Maschinenbild aus einem verschlüsselten virtuellen Maschinenbild exportieren
+* Ein verschlüsseltes virtuelles Maschinenbild herunterladen
+* Ein verschlüsseltes virtuelles Maschinenbild hochladen

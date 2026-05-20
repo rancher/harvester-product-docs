@@ -1,0 +1,245 @@
+= Kube-OVN Operator（实验性）
+:revdate: 2025-09-15
+:page-revdate: {revdate}
+
+[NOTE]
+====
+**kubeovn-operator** 是一个 *实验性* 附加产品。有关实验性功能的更多信息，请参见 xref:introduction/document-conventions.adoc#_feature_labels[功能标签]。
+====
+
+https://github.com/harvester/kubeovn-operator[`kubeovn-operator`] 用于管理 https://github.com/kubeovn/kube-ovn[Kube-OVN] 作为底层 {harvester-product-name} 集群中次要 CNI 的生命周期。
+
+== 启用 `kubeovn-operator`
+
+您必须启用 `kubeovn-operator` 才能将 Kube-OVN 部署到 {harvester-product-name} 集群，以实现虚拟私有云（VPC）和虚拟机工作负载的子网等高级 SDN 功能。
+
+. 在 {harvester-product-name} 用户界面上，转到 *高级 -> 附加产品*。
+
+. 选择 *kubeovn-operator（实验性）*，然后选择 *⋮ -> 启用*。
++
+image::addons/kubeovn-operator.png[Kube-OVN Operator]
+
+该附加产品部署 `kubeovn-operator` 并创建名为 `Configuration` 的默认 `configuration.kubeovn.io` 对象，该对象使用合理的 {harvester-product-name} 特定默认值来配置 Kube-OVN CNI。
+
+以下是 `Configuration` 对象的示例：
+
+[,yaml]
+----
+apiVersion: kubeovn.io/v1
+kind: Configuration
+metadata:
+  name: kubeovn
+  namespace: kube-system
+spec:
+  cniConf:
+    cniBinDir: /opt/cni/bin
+    cniConfFile: /kube-ovn/01-kube-ovn.conflist
+    cniConfigDir: /etc/cni/net.d
+    cniConfigPriority: "90"
+    localBinDir: /usr/local/bin
+  components:
+    OVSDBConTimeout: 10
+    OVSDBInactivityTimeout: 10
+    checkGateway: true
+    enableANP: false
+    enableBindLocalIP: true
+    enableExternalVPC: true
+    enableIC: false
+    enableKeepVMIP: true
+    enableLB: true
+    enableLBSVC: false
+    enableLiveMigrationOptimize: true
+    enableNATGateway:  true
+    enableNP: true
+    enableOVNIPSec: false
+    enableTProxy: false
+    hardwareOffload: false
+    logicalGateway: false
+    lsCtSkipOstLportIPS: true
+    lsDnatModDlDst: true
+    secureServing: false
+    setVLANTxOff:  false
+    u2oInterconnection:  false
+  debug:
+    mirrorInterface: mirror0
+  dpdkCPU:  "0"
+  dpdkMEMORY: "0"
+  dpdkVersion: "19.11"
+  dualStack:
+    joinCIDR: fd00:100:64::/112
+    pingerExternalAddress: 2606:4700:4700::1111
+    pingerExternalDomain: google.com.
+    podCIDR: fd00:10:16::/112
+    podGateway: fd00:10:16::1
+    serviceCIDR: fd00:10:96::/112
+  global:
+    images:
+      kubeovn:
+        dpdkRepository: kube-ovn-dpdk
+        repository: kube-ovn
+        supportArm: true
+        thirdParty:  true
+        vpcRepository: vpc-nat-gateway
+    registry:
+      address: docker.io/kubeovn
+  hugePages: "0"
+  hugepageSizeType:  hugepages-2Mi
+  imagePullPolicy: IfNotPresent
+  ipv4:
+    joinCIDR: 100.64.0.0/16
+    pingerExternalAddress: 1.1.1.1
+    pingerExternalDomain: google.com.
+    podCIDR: 10.54.0.0/16
+    podGateway: 10.54.0.1
+    serviceCIDR: 10.55.0.1
+  ipv6:
+    joinCIDR: fd00:100:64::/112
+    pingerExternalAddress: 2606:4700:4700::1111
+    pingerExternalDomain: google.com.
+    podCIDR: fd00:10:16::/112
+    podGateway: fd00:10:16::1
+    serviceCIDR: fd00:10:96::/112
+  kubeOvnCNI:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+    limits:
+      cpu: "1"
+      memory:  "1Gi"
+  kubeOvnController:
+    requests:
+      cpu: "200m"
+      memory: "200Mi"
+    limits:
+      cpu: "1"
+      memory: "1Gi"
+  kubeOvnMonitor:
+    requests:
+      cpu: "200m"
+      memory: "200Mi"
+    limits:
+      cpu: "200m"
+      memory: "200Mi"
+  kubeOvnPinger:
+    requests:
+      cpu: "100m"
+      memory: "100Mi"
+    limits:
+      cpu: "200m"
+      memory: "400Mi"
+  kubeletConfig:
+    kubeletDir: /var/lib/kubelet
+  logConfig:
+    logDir: /var/log
+  masterNodesLabel: node-role.kubernetes.io/control-plane=true
+  networking:
+    defaultSubnet: ovn-default
+    defaultVPC: ovn-cluster
+    enableECMP: false
+    enableEIPSNAT: true
+    enableMetrics:  true
+    enableSSL: false
+    netStack: ipv4
+    networkType: geneve
+    nodeSubnet: join
+    ovnLeaderProbeInterval: 5
+    ovnNorthdNThreads: 1
+    ovnNorthdProbeInterval: 5000
+    ovnRemoteOpenflowInterval: 10
+    ovnRemoteProbeInterval: 10000
+    podNicType: veth-pair
+    probeInterval:  180000
+    tunnelType: vxlan
+    nodeLocalDNSIPS: ""
+    vlan:
+      providerName: provider
+      vlanId: 1
+      vlanName: ovn-vlan
+  openVSwitchDir: /var/lib/rancher/origin/openvswitch
+  ovnCentral:
+    requests:
+      cpu: 300m
+      memory: 200Mi
+    limits:
+      cpu: 3
+      memory: 4Gi
+  ovnDir: /etc/origin/ovn
+  ovsOVN:
+    limits:
+      cpu:  2
+      memory: 1000Mi
+    requests:
+      cpu: 200m
+      memory: 200Mi
+  performance:
+    gcInterval: 360
+    inspectInterval: 20
+    ovsVSCtlConcurrency: 100
+----
+
+[CAUTION]
+====
+该 `Configuration` 对象已针对 {harvester-product-name} 安装进行了验证。您可以通过编辑 `kubeovn-operator` 附加产品 YAML 来微调该对象，但在更改 `configurationSpec` 字段时请谨慎。
+
+确保 Kube-OVN IPv4 pod 和服务 CIDR 块与 Harvester pod 和服务 CIDR 块不重叠。
+====
+
+== 禁用 `kubeovn-operator`
+
+[IMPORTANT]
+====
+确保没有虚拟机使用由 Kube-OVN SDN 组件支持的 VM 网络。
+
+禁用 kubeovn-operator 附加产品是一个会中断服务的过程。
+====
+
+您可以使用以下命令禁用 `kubeovn-operator`：
+
+[,console]
+----
+kubectl delete configuration kubeovn -n kube-system --wait=false
+
+kubectl delete validatingwebhookconfiguration kube-ovn-webhook --ignore-not-found
+
+kubectl delete ips --all
+
+kubectl delete subnets join ovn-default --ignore-not-found
+
+kubectl delete vpc ovn-cluster --ignore-not-found
+
+# Remove annotations/labels in namespaces and nodes
+kubectl annotate node --all ovn.kubernetes.io/cidr-
+kubectl annotate node --all ovn.kubernetes.io/gateway-
+kubectl annotate node --all ovn.kubernetes.io/ip_address-
+kubectl annotate node --all ovn.kubernetes.io/logical_switch-
+kubectl annotate node --all ovn.kubernetes.io/mac_address-
+kubectl annotate node --all ovn.kubernetes.io/port_name-
+kubectl annotate node --all ovn.kubernetes.io/allocated-
+kubectl annotate node --all ovn.kubernetes.io/chassis- 
+kubectl label node --all kube-ovn/role-
+kubectl annotate ns --all ovn.kubernetes.io/cidr-
+kubectl annotate ns --all ovn.kubernetes.io/exclude_ips-
+kubectl annotate ns --all ovn.kubernetes.io/gateway-
+kubectl annotate ns --all ovn.kubernetes.io/logical_switch-
+kubectl annotate ns --all ovn.kubernetes.io/private-
+kubectl annotate ns --all ovn.kubernetes.io/allow-
+kubectl annotate ns --all ovn.kubernetes.io/allocated-
+
+# Remove annotations in all pods of all namespaces
+for ns in $(kubectl get ns -o name | awk -F/ '{print $2}'); do
+  echo "annotating pods in namespace $ns"
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/cidr-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/gateway-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/ip_address-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/logical_switch-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/mac_address-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/port_name-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/allocated-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/routed-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/vlan_id-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/network_type-
+  kubectl annotate pod --all -n $ns ovn.kubernetes.io/provider_network-
+done
+----
+
+您必须重启每个节点以完成卸载过程。一旦节点重启，您可以从 Harvester 用户界面禁用 `kubeovn-operator` 附加产品。

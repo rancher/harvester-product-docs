@@ -1,0 +1,79 @@
+= Acceso a la Máquina Virtual
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+Una vez que la máquina virtual esté en funcionamiento, puedes acceder a ella utilizando el cliente de Virtual Network Computing (VNC) o la consola serie desde la interfaz de usuario {harvester-product-name}.
+
+Además, puedes conectarte directamente desde el cliente SSH de tu ordenador.
+
+== Acceso con la interfaz de usuario {harvester-product-name}
+
+Se puede acceder a las máquinas virtuales directamente desde la interfaz de usuario utilizando VNC o la consola serie.
+
+Si la pantalla VGA no está habilitada en la máquina virtual, por ejemplo, la imagen `Ubuntu-Minimal-Cloud`, solo se puede acceder a la máquina virtual con la consola serie.
+
+image::vm/access-to-vm.png[]
+
+== Acceso SSH
+
+{harvester-product-name} proporciona dos formas de inyectar claves públicas SSH en las máquinas virtuales. Generalmente, estos métodos se dividen en dos categorías. <<Static SSH Key Injection via cloud-init,Inyección de clave estática>>, que coloca las claves en el script de cloud-init cuando la máquina virtual se enciende por primera vez; <<Dynamic SSH Key Injection via Qemu guest agent,inyección dinámica>>, que permite que las claves o la autenticación básica se actualicen dinámicamente en tiempo de ejecución.
+
+=== Inyección de clave SSH estática a través de cloud-init
+
+Puedes proporcionar claves SSH a tus máquinas virtuales durante el tiempo de creación en la pestaña `Basics`. Además, puedes colocar las claves públicas SSH en tu script de cloud-init para permitir que esto ocurra.
+
+image::vm/vm-ssh-keys.png[]
+
+==== Ejemplo de configuración de clave SSH en cloud-init:
+
+[,yaml]
+----
+#cloud-config
+ssh_authorized_keys:
+  - >-
+    ssh-rsa #replace with your public key
+----
+
+=== Inyección de clave SSH dinámica a través del agente huésped QEMU
+
+{harvester-product-name} admite la inyección dinámica de claves públicas SSH en tiempo de ejecución mediante el uso del https://wiki.qemu.org/Features/GuestAgent[agente huésped QEMU]. Esto se logra a través del método de propagación `qemuGuestAgent`.
+
+[NOTE]
+====
+Este método requiere que el agente huésped QEMU esté instalado dentro de la máquina virtual huésped.
+
+Al utilizar la propagación `qemuGuestAgent`, el archivo `/home/$USER/.ssh/authorized_keys` será propiedad del agente huésped. Los cambios en ese archivo que se realicen fuera del control del agente huésped de qemu se eliminarán.
+====
+
+Puedes inyectar tus credenciales de acceso a través de la interfaz de usuario {harvester-product-name} realizando los siguientes pasos:
+
+. Selecciona la máquina virtual.
+
+. Selecciona *⋮ -> Editar Configuración*.
+
+. En la pestaña *Credenciales de Acceso*, añade credenciales de autenticación básica o claves SSH.
++
+Solo puedes añadir un usuario que ya exista en el sistema operativo invitado. Por ejemplo, si estás utilizando openSUSE, puedes añadir el usuario `opensuse` y seleccionar claves SSH.
+
+. Haz clic en *Guardar*.
+
+. Verifica que el agente huésped de QEMU ya esté instalado.
+
+. Reinicia la máquina virtual.
+
+[NOTE]
+====
+Necesitas entrar en la máquina virtual para editar la contraseña o eliminar la clave SSH después de eliminar las credenciales de la interfaz de usuario.
+====
+
+
+image::vm/vm-add-access-credentails.png[]
+
+=== Accede con el cliente SSH
+
+Una vez que la máquina virtual esté en funcionamiento, puedes introducir la dirección IP de la máquina virtual en un cliente de emulación de terminal, como PuTTY. También puedes ejecutar el siguiente comando para acceder a la máquina virtual directamente desde el cliente SSH de tu ordenador:
+
+[,sh]
+----
+ ssh -i ~/.ssh/your-ssh-key user@<ip-address-or-hostname>
+----

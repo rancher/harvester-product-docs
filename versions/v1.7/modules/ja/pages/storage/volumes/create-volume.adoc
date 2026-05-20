@@ -1,0 +1,177 @@
+= ボリュームを作成する
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== 空のボリュームを作成する
+
+[tabs]
+======
+UI::
++
+--
+*ヘッダーセクション*
+
+. ボリューム `Name` を設定します。
+. （オプション）ボリューム用の `Description` を入力します。
+
+*基本タブ*
+
+. `New` で `Source` を選択します。
+. 既存の`StorageClass`を選択します。
+. ボリュームの `Size` を構成します。
++
+image::volume/create-empty-volume.png[空のボリュームを作成]
+
+[CAUTION]
+====
+* 選択した StorageClass のレプリカ数が `1` で、ボリュームが仮想マシンに接続されている場合、仮想マシンは xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可] と見なされます。
+
+* ボリュームが作成されると、選択した `StorageClass` から関連するパラメータがボリュームにコピーされます。後で `StorageClass` のパラメータを変更しても、ボリュームには書き戻されません。
+====
+
+*オーバーサイズのボリューム*
+
+{harvester-product-name} v1.5.0 では {longhorn-product-name} v1.8.1 を使用しており、オーバーサイズのボリューム（例えば、サイズが 999999 Gi のもの）は **準備完了ではない** とマークされ、削除できません。
+
+この問題を解決するには、次の手順を実行してください。
+
+. PVC webhook ルールを一時的に削除します。
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. 関連する PVC が削除されるのを待ちます。
+
+. PVC webhook ルールを復元して、検証を再有効化します。
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+この問題は {longhorn-product-name} v1.8.2 で対処される予定で、{harvester-product-name} v1.5.1 に含まれる可能性があります。
+
+関連する問題: https://github.com/harvester/harvester/issues/8096[#8096] および https://github.com/longhorn/longhorn/issues/10741[#10741]
+--
+
+API::
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: my-vol
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  volumeMode: Block
+  volumeName: pvc-my-vol
+----
+
+[CAUTION]
+====
+新しいボリュームを作成する際には `vmstate-persistence` および `longhorn-static` StorageClass を使用しないでください。 `vmstate-persistence` は TPM および UEFI の永続性に使用され、`longhorn-static` は既存の {longhorn-product-name} ボリュームの管理に使用されます。
+====
+
+テラフォーム::
++
+https://registry.terraform.io/providers/harvester/harvester/latest[Harvester Terraform Provider]を使用して{harvester-product-name}に空のボリュームを作成するには、`harvester_volume`リソースブロックを定義します。
++
+[,json]
+----
+resource "harvester_volume" "empty-volume" {
+  name      = "empty-volume"
+  namespace = "default"
+
+  size = "10Gi"
+}
+----
+======
+
+== イメージボリュームの作成
+
+[tabs]
+======
+UI::
++
+--
+*ヘッダーセクション*
+
+. ボリューム `Name` を設定します。
+. （オプション）ボリューム用の `Description` を入力します。
+
+**基本タブ**
+
+. `VM Image` で `Source` を選択します。
+. 既存の `Image` を選択します。
+. ボリュームの `Size` を構成します。
++
+[CAUTION]
+====
+VMイメージからボリュームを作成する際は、ボリュームサイズがイメージサイズ以上であることを確認してください。設定されたボリュームサイズが基になるイメージのサイズよりも小さい場合、ボリュームが破損する可能性があります。これはqcow2イメージにとって特に重要です。なぜなら、仮想サイズは通常物理サイズよりも大きいためです。デフォルトでは、{harvester-product-name}はボリュームサイズをイメージの仮想サイズに設定します。
+====
++
+image::volume/create-image-volume.png[イメージボリュームを作成]
+--
+
+API::
++
+ネームスペース`default`からイメージ`image-8rb2z`の内容で初期化されたボリュームを作成します。
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    harvesterhci.io/imageId: default/image-8rb2z
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: foobar
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn-image-8rb2z
+  volumeMode: Block
+  volumeName: pvc-foobar
+----
+
+テラフォーム::
++
+テラフォームを使用して{harvester-product-name}にボリュームを作成し、イメージの内容で初期化するには、`harvester_volume`リソースブロックを定義し、`image`プロパティを設定します。
++
+[,json]
+----
+resource "harvester_volume" "opensuse154-image-disk" {
+  name      = "opensuse154-image-disk"
+  namespace = "default"
+
+  size  = "10Gi"
+  image = harvester_image.opensuse154.id
+}
+----
+======

@@ -1,0 +1,108 @@
+= Longhorn V2 数据引擎
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+Longhorn V2 数据引擎利用存储性能开发工具包（SPDK）的强大功能，显著降低 I/O 延迟，同时提升 IOPS 和吞吐量。其结果是一个高性能的存储解决方案，能够满足多样化的工作负载需求。
+
+[IMPORTANT]
+====
+Longhorn V2 数据引擎是一个*实验性*功能，不应在生产环境中使用。
+====
+
+== 先决条件
+
+每个活跃的 Longhorn V2 数据引擎节点需要以下专用资源：
+
+* 1 个 CPU 内核供 Longhorn 实例管理器 Pod 使用
+* 2 GiB RAM（分配为 1024 × 2 GiB 大页）
+* 至少一个本地 NVMe 磁盘用于数据存储
+
+== 局限性
+
+Longhorn V2 数据引擎当前不支持以下操作：
+
+* 备份镜像的创建和使用
+* 卷加密
+
+SSD 和其他非 NVMe 磁盘使用 SPDK AIO bdev 驱动程序进行管理，该驱动程序不支持取消映射操作。如果您使用非 NVMe 磁盘，请避免修剪文件系统，因为这会导致 I/O 错误和虚拟机暂停。例如，在 Linux 虚拟机上创建 ext4 文件系统时，请使用 `mkfs.ext4 -E nodiscard /dev/vdb`（假设 `/dev/vdb` 是您的设备路径）。在 Windows 虚拟机上，您可以通过运行命令 `fsutil behavior set disabledeletenotify NTFS 1` 来禁用 NTFS 的修剪。
+
+== 用法
+
+Longhorn V2 数据引擎仅适用于新创建的卷和镜像。现有卷、虚拟机镜像和虚拟机根卷将继续使用 V1 数据引擎。
+
+. 在 {harvester-product-name} 用户界面上，转到 *高级 -> 设置*。
+
+. 将 `longhorn-v2-data-engine-enabled` 设置为 `true`。
++
+{harvester-product-name} 自动加载 Longhorn V2 数据引擎所需的内核模块，并尝试在所有节点上分配 1024 × 2 MiB 大页（例如，2 GiB RAM）。
++
+更改此设置会自动在所有节点上重启 RKE2，但不会影响正在运行的虚拟机工作负载。
++
+[TIP]
+====
+如果您遇到包含短语“可用的 hugepages-2Mi 容量不足”的错误消息，请稍等一段时间以解决该错误。如果错误仍然存在，请重启受影响的节点。
+
+要在特定节点（例如，处理和内存资源较少的节点）上禁用 Longhorn V2 数据引擎，请转到 *主机* 屏幕，并将以下标签添加到目标节点：
+
+* 标签：`node.longhorn.io/disable-v2-data-engine`
+* 值：`true`
+====
+
+. 转到 *主机* 屏幕，然后按照 xref:/hosts/hosts.adoc#_multi_disk_management[多磁盘管理] 中的描述为每个节点添加额外的磁盘。
++
+将每个额外磁盘的 `Provisioner` 设置为 `Longhorn V2 (CSI)`。
++
+[NOTE]
+====
+{harvester-product-name} 将 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn 磁盘驱动程序] 设置为 `auto`，以便 NVMe 磁盘使用 SPDK NVMe bdev 驱动程序，从而提供最佳性能，并支持诸如 trim（也称为丢弃）等高级操作。
+
+SSD 和其他非 NVMe 磁盘使用 SPDK AIO bdev 驱动程序进行管理，该驱动程序要求磁盘大小为 _4096 字节的偶数倍_。不满足此大小要求的非 NVMe 磁盘无法添加。此外，SPDK AIO bdev 驱动程序不支持取消映射操作。如果您使用非 NVMe 磁盘，请避免修剪文件系统，因为这会导致 I/O 错误和虚拟机暂停。
+====
+
+. 转到 *高级 -> 存储类*，然后按照 xref:./storageclass.adoc#_creating_a_storageclass[创建存储类] 中的描述添加新的 StorageClass。
++
+将 `Provisioner` 设置为 `Longhorn V2 (CSI)`。
+
+. 在创建以下内容时使用新的 StorageClass：
++
+* 卷（在 *卷* 屏幕上或在虚拟机创建期间）
+* 镜像（在 *镜像* 屏幕上）
++
+使用新的 StorageClass 创建的卷和镜像由 Longhorn V2 数据引擎支持。
+
+== 从 {harvester-product-name} v1.4.x 升级
+
+{harvester-product-name} v1.4.x，使用 {longhorn-product-name} v1.7.x，无法对附加 V2 卷的虚拟机进行在线迁移。此外，V2 数据引擎不能用于虚拟机镜像和启动卷。这些限制在 {harvester-product-name} v1.5.0 及更高版本中不存在，这些版本使用 {longhorn-product-name} v1.8.1 及更高版本。然而，这仅适用于在 _after_ {harvester-product-name} 升级后创建的卷和镜像。
+
+在使用 {harvester-product-name} v1.4.x 创建的 V2 存储类中，`migratable` 选项被设置为 `false`。与所有其他存储类属性一样，一旦设置后无法更改。同样，使用 {harvester-product-name} v1.4.x 创建的 V2 卷在升级后仍然不可迁移。如果您在 {harvester-product-name} v1.4.x 中使用了 V2 数据引擎并在后续升级到 {harvester-product-name} v1.5，您必须创建一个新的 V2 存储类。`migratable` 选项默认设置为 `true`，因此使用此新 V2 存储类创建的卷和镜像可以进行在线迁移。
+
+[IMPORTANT]
+====
+* 如果您使用的是 SPDK AIO bdev 驱动程序（具体来说，如果使用 `/dev/sd*` 路径添加了磁盘），_在升级之前创建的 V2 卷将变得不可用，并且在升级后无法恢复_。有关更多信息，请参见 https://github.com/longhorn/longhorn/issues/10461[问题 #10461]。
+
+* 如果您使用的是 SPDK NVMe bdev 驱动程序（具体来说，如果使用 `/dev/nvme*` 路径添加了磁盘），在升级之前创建的 V2 卷仍然可以正常工作。然而，这些卷将继续使用 {longhorn-product-name} v1.7.x 引擎，并保持不可迁移。如果需要，您可以导出数据并创建新的可迁移卷。
+
+* 在开始升级之前，所有附加 V2 卷的虚拟机必须停止。活动的 V2 卷将在 "升级系统服务" 阶段导致升级过程停滞。`apply-manifests` pod 日志将显示类似以下的重复消息：
++
+[,shell]
+----
+instance-manager (aio)(v2) (image=longhornio/longhorn-instance-manager:v1.8.1) state is not running on node harvester-node-0, will retry...
+----
++
+停止所有使用 V2 卷的虚拟机将允许升级继续进行。
+====
+
+如果您使用的是 SPDK NVMe bdev 驱动程序（具体来说，如果使用 `/dev/nvme*` 设备路径添加了磁盘），并且不可迁移的 V2 卷附加到现有虚拟机，您可以通过执行以下步骤过渡到可在线迁移的卷：
+
+. 停止虚拟机。
+
+. 将每个附加的 V2 卷导出为使用新 V2 存储类的镜像（`migratable` 选项设置为 `true`）。
+
+. 一旦将卷导出为镜像，请编辑虚拟机并在*卷*选项卡上执行以下操作：
++
+* 去除现有的 V2 卷。
+* 添加从导出的卷创建的镜像。
+
+. 启动虚拟机。
++
+此步骤可能需要一些时间，这取决于要复制的数据量。

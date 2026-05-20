@@ -1,0 +1,239 @@
+= Actualiza la versión de v1.6.x a v1.7.x
+:revdate: 2026-02-02
+:page-revdate: {revdate}
+
+== Información general
+
+Un *botón de actualización* aparece en la pantalla del *panel de control* cada vez que hay una nueva {harvester-product-name} versión disponible a la que se puede actualizar. Para más información, consulta xref:upgrades/upgrades.adoc#_start_an_upgrade[Iniciar una actualización].
+
+Los clústeres que ejecutan v1.6.x pueden actualizar a v1.7.x directamente porque {harvester-product-name} permite como máximo una actualización menor para los componentes subyacentes. v1.6.0 y v1.6.1 utilizan la misma versión menor de RKE2 (v1.33), mientras que {harvester-product-name} v1.7.0 y v1.7.1 utilizan la siguiente versión menor (v1.34). Para más información, consulta xref:upgrades/upgrades.adoc#_upgrade_paths[Rutas de actualización].
+
+Para obtener información sobre cómo actualizar {harvester-product-name} en entornos aislados, consulta xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar una actualización en entorno aislado].
+
+[CAUTION]
+====
+v1.7.x utiliza NetworkManager en lugar de wicked, que se utilizaba en versiones anteriores de {harvester-product-name}. Si modificaste la configuración de la interfaz de gestión después de la instalación inicial, debes realizar pasos manuales adicionales para evitar problemas durante la actualización. Para obtener más información, consulte el <<Migration from wicked to NetworkManager>>.
+
+Además, <<Persistent names of certain network interfaces may change during upgrade,los nombres persistentes de ciertas interfaces de red de Intel pueden cambiar>> durante las actualizaciones. Esto interrumpe la conectividad en el host y requiere pasos de remediación manuales.
+====
+
+[IMPORTANT]
+====
+Las direcciones IP del host configuradas a través de DHCP pueden cambiar durante las actualizaciones. Esto impide que el clúster se inicie correctamente y requiere pasos de recuperación manuales. Para obtener más información, consulte el <<Host IP address may change during upgrade when using DHCP>>.
+====
+
+=== Actualiza la extensión de la interfaz de usuario de Harvester en {rancher-product-name} v2.13
+
+Debes utilizar una versión compatible (v1.7.x) de la extensión de la interfaz de usuario de Harvester para importar clústeres de {harvester-product-name} v1.7.x en {rancher-short-name} v2.13.
+
+. En la interfaz de usuario de {rancher-short-name}, ve a *local -> Aplicaciones -> Repositorios*.
+
+. Localiza el repositorio llamado *harvester*, y luego selecciona *⋮ -> Actualizar*.
+
+. Ve a la pantalla de *Extensiones*.
+
+. Localiza la extensión llamada *Harvester*, y luego haz clic en *Actualizar*.
+
+. Selecciona una versión compatible, y luego haz clic en *Actualizar*.
+
+. Permite un tiempo para que la extensión se actualice, y luego actualiza la pantalla.
+
+=== Migración de wicked a NetworkManager
+
+{harvester-product-name} v1.7.x realiza la transición de wicked a NetworkManager para la gestión de redes. Debido a que no hay un mapeo directo 1:1 entre los archivos heredados `ifcfg` y los perfiles de conexión de NetworkManager, no es posible una migración in situ de la configuración de red existente.
+
+Durante las actualizaciones, {harvester-product-name} genera nuevos perfiles de conexión de NetworkManager utilizando la configuración de instalación original almacenada en `/oem/harvester.config`. Los archivos heredados `ifcfg` en `/oem/90_custom.yaml` permanecen en el sistema, pero NetworkManager ignora estos archivos y en su lugar almacena su configuración bajo `/etc/NetworkManager`.
+
+|===
+| Escenario | Acción requerida
+
+| Instalaste v1.1 o posterior, y nunca modificaste manualmente la interfaz de gestión o la configuración de DNS.
+| ninguna.
+
+| Modificaste manualmente la configuración de la interfaz de gestión editando el archivo `/oem/90_custom.yaml` o añadiendo recursos de CloudInit a los archivos `ifcfg`.
+| **Requerido** (La configuración personalizada será ignorada tras la actualización a v1.7.0.)
+|===
+
+Si se requiere acción, elige uno de los siguientes métodos:
+
+* Preactualización (Recomendado): Edita el archivo `/oem/harvester.config` en cada nodo. Configura los ajustes de red relevantes, particularmente `os.dns_nameservers` y `install.management_interface`. Para más información, consulta xref:installation-setup/config/configuration-file.adoc[Archivo de configuración].
++
+[NOTE]
+====
+Si inicialmente instalaste v1.0, asegúrate de que `install.management_interface` siga el esquema actualizado requerido por las versiones posteriores de {harvester-product-name}.
+====
+
+* Postactualización: Utiliza la herramienta `nmcli` para reaplicar manualmente tu configuración personalizada a los nuevos perfiles de conexión de NetworkManager.
+
+Si encuentras algún problema durante la actualización, puedes realizar las siguientes soluciones alternativas:
+
+|===
+| Escenario | Solución alternativa | Resultado
+
+| Un nodo queda atascado en el estado "Esperando reinicio".
+| Inicia sesión a través de la consola y verifica la configuración de red utilizando la herramienta `nmcli`. Si es necesario, corrige manualmente la configuración y luego reinicia el nodo.
+| La actualización se reanuda automáticamente.
+
+| Se producen errores cuando cambias manualmente la configuración.
+| Si deseas volver a los perfiles de conexión de NetworkManager generados automáticamente, ejecuta el comando `harvester-installer generate-network-config`.
+| Los perfiles de conexión de NetworkManager en `/etc/NetworkManager/system-connections/` se recrean en función de la configuración especificada en `/oem/harvester.config`.
+|===
+
+== Problemas conocidos
+
+=== La dirección IP del host puede cambiar durante la actualización al usar DHCP.
+
+v1.7.x utiliza NetworkManager en lugar de wicked, que se utilizaba en versiones anteriores de {harvester-product-name}. Estas dos pilas de red tienen diferentes valores predeterminados para generar identificadores de cliente DHCP. 
+
+Si las direcciones IP de los hosts están configuradas utilizando DHCP, una actualización {harvester-product-name} y el reinicio posterior pueden hacer que el servidor DHCP asigne direcciones IP diferentes de las que usaban anteriormente los hosts. Como resultado, los hosts afectados no pueden unirse al clúster al iniciar debido al cambio de dirección IP.
+
+Este problema ocurre típicamente cuando el servidor DHCP asigna direcciones IP basándose únicamente en el identificador de cliente DHCP. Es poco probable que encuentres este problema cuando el servidor DHCP está configurado para asignar direcciones IP fijas basadas en la dirección MAC (como se demuestra en los https://github.com/harvester/ipxe-examples[Ejemplos de iPXE]).
+
+El impacto de este problema varía según el tamaño del clúster:
+
+* Clústeres de un solo nodo: {harvester-product-name} no se inicia después de reiniciar porque la dirección IP ha cambiado.
+* Clústeres de múltiples nodos: Los nodos de gestión quedan atascados en el estado "Esperando reinicio".
+
+Para abordar el problema, realiza los siguientes pasos:
+
+[IMPORTANT]
+====
+Debes realizar los pasos para cada nodo afectado _después_ de que se complete la actualización y la dirección IP haya cambiado.
+====
+
+. Inicia sesión en el nodo afectado. Puedes acceder al nodo a través de SSH en su nueva dirección IP o usar la consola.
+
+. En el directorio `/var/lib/wicked`, comprueba el archivo XML de arrendamiento (nombrado similar a `/var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml`).
++
+Si estás utilizando una VLAN, el nombre de archivo incluye el ID de la VLAN (por ejemplo, `/var/lib/wicked/lease-mgmt-br.2017-dhcp-ipv4.xml`).
+
+. Visualiza el archivo e identifica el identificador del cliente DHCP.
++
+[,shell]
+----
+$ cat /var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml
+<lease>
+  ...
+  <ipv4:dhcp>
+    <client-id>ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05</client-id>
+    ...
+  </ipv4:dhcp>
+</lease>
+----
+
+. Utiliza el comando `nmcli` para establecer el identificador del cliente DHCP para el perfil de conexión de NetworkManager correspondiente.
++
+El perfil de conexión que necesitas modificar depende de si tu nodo utiliza una VLAN.
++
+* VLAN utilizada: Añade el identificador del cliente DHCP al perfil de conexión `vlan-mgmt`.
+* No VLAN: Añade el identificador del cliente DHCP al perfil de conexión `bridge-mgmt`.
++
+Ejemplo (sin VLAN):
++
+[,shell]
+----
+$ nmcli con modify bridge-mgmt \
+    ipv4.dhcp-client-id \
+    ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05
+----
++
+Debes reemplazar el identificador del cliente en el ejemplo por el identificador real obtenido de tu archivo de arrendamiento wicked.
+
+. Reinicia el nodo.
+
+El servidor DHCP debería devolver la dirección IP original y el nodo afectado debería poder unirse al clúster.
+
+[NOTE]
+====
+La propagación del identificador del cliente DHCP de wicked a NetworkManager se produce automáticamente al actualizar de v1.6.x a v1.7.1. Esta solución alternativa solo es necesaria al actualizar a v1.7.0.
+====
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/9260[#9260] y https://github.com/harvester/harvester/issues/3418[#3418]
+
+=== La actualización está atascada en "Actualizando el Servicio del Sistema"
+
+El proceso de actualización puede quedar atascado en la fase "Actualizando el Servicio del Sistema". Este problema está probablemente relacionado con el trabajo `apply-manifest` y con dos problemas conocidos relacionados con la actualización {fleet-product-name}.
+
+Puedes encontrar mensajes de registro similares a los siguientes:
+
+[,console]
+----
+...
+Happy Containering!
+Wait for Rancher dependencies helm releases...
+wait helm release cattle-fleet-system fleet fleet-108.0.0+up0.14.0 0.14.0 deployed
+wait helm release cattle-fleet-system fleet-crd fleet-crd-108.0.0+up0.14.0 0.14.0 deployed
+----
+
+Consulta el historial de Helm para determinar la causa y la solución alternativa relacionada.
+
+* Situación 1: El estado de la actualización {fleet-product-name} es `pending-upgrade` incluso después de que se haya completado la actualización.
++
+[,console]
+----
+$ helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                   APP VERSION     DESCRIPTION
+6               Tue Nov  4 06:22:34 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+7               Tue Nov  4 06:22:49 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+8               Mon Dec  8 07:10:43 2025        superseded      fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+9               Mon Dec  8 07:26:49 2025        deployed        fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+10              Mon Dec  8 07:27:10 2025        pending-upgrade fleet-106.1.1+up0.12.3  0.12.3          Preparing upgrade
+----
++
+Para abordar el problema, realiza la siguiente solución alternativa:
++
+.. Ejecuta el comando `$ helm rollback fleet -n cattle-fleet-system`.
++
+.. Espera a que el Rancher embebido reconcilie el CRD `ClusterRepo` y active la actualización del gráfico de Helm. Para acelerar el proceso, puedes reiniciar los pods del Rancher embebido.
+
+* Situación 2: La actualización está atascada en una versión candidata de lanzamiento (RC). 
++
+Esto no debería ocurrir a menos que estés actualizando de una versión RC a una versión estable, lo cual no está soportado. Para obtener asistencia, crea un [problema en GitHub](https://github.com/harvester/harvester/issues).
++
+[,console]
+----
+# helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                           APP VERSION     DESCRIPTION
+2               Mon Dec  8 10:43:42 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+3               Mon Dec  8 10:49:51 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+4               Mon Dec  8 10:50:04 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+5               Mon Dec  8 10:56:30 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+6               Mon Dec  8 10:56:42 2025        deployed        fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+----
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/9738[#9738] y https://github.com/harvester/harvester/issues/9680[#9680]
+
+=== Los nombres persistentes de ciertas interfaces de red pueden cambiar durante la actualización.
+
+{harvester-product-name} v1.7.x utiliza versiones más nuevas de los controladores de red `i40e` y `ice` del kernel de Linux, lo que provoca que se añada un número de puerto al nombre de ciertas interfaces de red de Intel, como la X710. Por ejemplo, una interfaz llamada `enp6s0f0` en {harvester-product-name} v1.6.x se renombra a `enp6s0f0np0` durante la actualización a v1.7.0. Esto rompe la conectividad en el host porque las configuraciones de red existentes aún hacen referencia al nombre original.
+
+Para resolver este problema, aplique argumentos del núcleo de Linux que restauren los nombres originales de las interfaces afectadas.
+
+. Recupere la lista de argumentos del núcleo de Linux no predeterminados (`third_party_kernel_args`) en el nodo.
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv list
+third_party_kernel_args=multipath=off
+----
+
+. Añada `ifname=nicName:macAddress` para cada interfaz de red en el nodo para restaurar los nombres originales.
++
+Asegúrese de que `third_party_kernel_args` esté incluido cuando añada los argumentos `ifname=`.
++
+Ejemplo:
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv set \
+    third_party_kernel_args="multipath=off ifname=enp6s0f0:d4:c9:ef:ce:30:68 ifname=enp6s0f1:d4:c9:ef:ce:30:69"
+----
+
+. Reinicie el nodo.
+
+[NOTE]
+====
+Esta solución alternativa solo es necesaria al actualizar a v1.7.0. En v1.7.1 y versiones posteriores, estos `ifname=` argumentos se añaden automáticamente para prevenir interrupciones de red durante las actualizaciones de controladores.
+====
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/9815[#9815] y https://github.com/harvester/harvester/issues/9802[#9802]

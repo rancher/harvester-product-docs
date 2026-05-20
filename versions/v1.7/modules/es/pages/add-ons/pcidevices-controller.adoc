@@ -1,0 +1,158 @@
+= Controlador de dispositivos PCI
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Un `PCIDevice` en SUSE® Virtualization representa un dispositivo host con una dirección PCI.
+Los dispositivos pueden ser pasados a través del hipervisor a una máquina virtual, creando un recurso `PCIDeviceClaim`, o utilizando la interfaz de usuario para habilitar el encaminamiento. Pasar un dispositivo a través del hipervisor significa que la máquina virtual puede acceder directamente al dispositivo y lo posee efectivamente. Una máquina virtual incluso puede instalar sus propios controladores para ese dispositivo.
+
+Esto se logra utilizando el complemento `pcidevices-controller`.
+
+Para utilizar la función de dispositivos PCI, los usuarios deben habilitar primero el complemento `pcidevices-controller`.
+
+image::vm-import-controller/EnableAddon.png[]
+
+Una vez que el complemento `pcidevices-controller` se despliega con éxito, puede tardar unos minutos en escanear y en que los CRD de PCIDevice estén disponibles.
+
+image::pcidevices/PcideviceEnabled.png[]
+
+== Habilitando el encaminamiento en un dispositivo PCI
+
+. Ahora ve a la página `Advanced -> PCI Devices`:
++
+image::pcidevices/advanced-pcidevices-index.png[]
+
+. Busca tu dispositivo por nombre de proveedor (por ejemplo, NVIDIA, Intel, etc.) o por nombre de dispositivo.
++
+image::pcidevices/search-pcidevices.png[]
+
+. Selecciona los dispositivos que deseas habilitar para el encaminamiento:
++
+image::pcidevices/select-pcidevices.png[]
+
+. Luego haz clic en *Habilitar Encaminamiento* y lee el mensaje de advertencia. Si aún deseas habilitar estos dispositivos, haz clic en *Habilitar* y espera a que todos los dispositivos estén `Enabled`.
++
+[CAUTION]
+====
+Por favor, no utilices dispositivos PCI `host-owned` (por ejemplo, NIC de gestión y VLAN). Una asignación incorrecta de dispositivos puede causar daños a tu clúster, incluyendo fallo en los nodos.
+====
++
+image::pcidevices/enable-pcidevices-inprogress.png[]
++
+image::pcidevices/enable-pcidevices-done.png[]
+
+== Adjuntando dispositivos PCI a una máquina virtual
+
+Después de habilitar estos dispositivos PCI, puedes navegar a la página *Máquinas Virtuales* y seleccionar *Editar Config* para pasar estos dispositivos.
+
+image::pcidevices/vm-pcidevices-edit-config.png[]
+
+Selecciona *Dispositivos PCI* y utiliza el menú desplegable *Dispositivos PCI Disponibles*. Selecciona los dispositivos que deseas adjuntar de la lista mostrada y luego haz clic en *Guardar*.
+
+image::pcidevices/vm-pcidevices-attach.png[]
+
+== Usando un dispositivo PCI con encaminamiento dentro de la VM
+
+Inicia la VM y ejecuta `lspci` dentro de la VM, los dispositivos PCI adjuntos aparecerán, aunque la dirección PCI en la VM no necesariamente coincida con la dirección PCI en el host.
+
+== Instalando controladores para tu dispositivo PCI dentro de la VM
+
+Esto es igual que instalar controladores en el host. La función de encaminamiento de PCI vinculará el dispositivo del host al controlador `vfio-pci`, lo que permite a las VMs utilizar sus propios controladores.
+
+== Problemas conocidos
+
+* https://github.com/harvester/harvester/issues/6648[Problema #6648]: Una máquina virtual puede programarse en un nodo incorrecto si el clúster tiene múltiples instancias del mismo dispositivo PCI. 
+
+El complemento pcidevices-controller actualmente utiliza descriptores de recursos únicos para publicar dispositivos al kubelet. Si existen múltiples `PCIDeviceClaims` del mismo tipo de dispositivo dentro del clúster, se utiliza el mismo descriptor de recurso único para estos `PCIDeviceClaims`, por lo que la máquina virtual puede programarse en un nodo incorrecto. Para asegurar que se utilicen el dispositivo y el nodo correctos, selecciona *Ejecutar VM en nodo específico* al configurar los ajustes de *Programación de Nodos*.
+
+image::pcidevices/vm-scheduling.png[]
+
+== Dispositivos de Red SR-IOV
+
+image::pcidevices/SriovNetworkDevicesLink.png[]
+
+El complemento `pcidevices-controller` ahora puede escanear interfaces de red en los hosts subyacentes y verificar si soportan Funciones Virtuales SRIOV (VFs). Si se encuentra un dispositivo válido, `pcidevices-controller` generará un nuevo objeto `SRIOVNetworkDevice`.
+
+image::pcidevices/SriovNetworkDevicesList.png[]
+
+Para crear VFs en un SriovNetworkDevice, puedes hacer clic en *⋮ -> Habilitar* y luego definir el *Número de Funciones Virtuales*.
+
+image::pcidevices/SriovNetworkDeviceEnable.png[]
+
+image::pcidevices/SriovNetworkVFDefinition.png[]
+
+El `pcidevices-controller` definirá los VFs en la interfaz de red e informará el nuevo estado del dispositivo PCI para los VFs recién creados.
+
+image::pcidevices/SriovNetworkDevicesVFStatus.png[]
+
+En el próximo escaneo, el `pcidevices-controller` creará los dispositivos PCI para los VFs. Esto puede tardar hasta 1 minuto.
+
+Ahora puedes navegar a la página *Dispositivos PCI* para ver los nuevos dispositivos.
+
+También hemos introducido un nuevo filtro para ayudarte a filtrar dispositivos PCI por la interfaz de red subyacente.
+
+image::pcidevices/SriovNetworkDevicesFilter.png[]
+
+El dispositivo PCI recién creado puede ser utilizado mediante encaminamiento a máquinas virtuales como cualquier otro dispositivo PCI.
+
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== Dispositivos USB
+
+Un recurso `USBDevice` en Harvester representa un dispositivo USB en el nodo. Los dispositivos USB pueden ser pasados a través del hipervisor para permitir el acceso directo desde las máquinas virtuales. Esto se realiza mediante el complemento `pcidevices-controller`. Para utilizar el encaminamiento USB, puedes crear un recurso `USBDeviceClaim` o habilitar la función en la interfaz de Harvester. 
+
+El encaminamiento USB es ligeramente diferente del encaminamiento PCI. Por ejemplo, puedes controlar completamente un controlador USB con cuatro puertos USB creando un `PCIDeviceClaim`. Sin embargo, también puedes crear un `USBDeviceClaim` para controlar solo un puerto USB. Los otros tres puertos USB permanecen disponibles para el nodo.
+
+[CAUTION]
+====
+Antes de eliminar el dispositivo USB, desconéctalo de la máquina virtual y luego desactiva el encaminamiento en la pantalla *Dispositivos USB*.
+====
+
+=== Habilitar Encaminamiento en un Dispositivo USB
+
+. En la interfaz de Harvester, ve a *Avanzado -> Dispositivos USB*.
++
+image::pcidevices/index.png[]
++
+. Localiza el dispositivo en la lista.
++
+image::pcidevices/search.png[]
++
+. Selecciona el dispositivo objetivo y luego selecciona *⋮ -> Habilitar Encaminamiento*.
++
+image::pcidevices/select.png[]
++
+. Lee el mensaje de confirmación y luego haz clic en *Habilitar*.
++
+Permite un tiempo para que el estado del dispositivo cambie a *Habilitado*.
++
+image::pcidevices/enable-done.png[]
+
+=== Adjuntar un dispositivo USB a una máquina virtual.
+
+. Verifica que el encaminamiento esté habilitado en el dispositivo objetivo.
++
+. Ve a *Máquinas Virtuales* y luego crea una máquina virtual o edita la configuración de una máquina virtual existente.
++
+. En la pantalla de configuración de la máquina virtual, ve a la pestaña *Dispositivos USB* y luego selecciona un dispositivo de la lista *Dispositivos USB Disponibles*.
++
+image::pcidevices/attach-vm.png[]
++
+. Haz clic en *Crear* o *Guardar*.
+
+=== Ver dispositivos USB conectados a una máquina virtual.
+
+. Inicia y luego accede a la máquina virtual.
++
+. Ejecute `lsusb`.
++
+Esta utilidad muestra información sobre los buses USB y los dispositivos conectados.
++
+image::pcidevices/usb-in-vm.png[]
+
+=== limitaciones
+
+* Las máquinas virtuales con dispositivos USB conectados no pueden ser migradas en vivo porque los dispositivos están vinculados a un nodo específico.
++
+* No se admite la conexión y reconexión en caliente de dispositivos USB. Para más información, consulta https://github.com/kubevirt/kubevirt/issues/11979[Problema de KubeVirt #11979].
++
+* Si la vía del dispositivo cambia al volver a conectar el dispositivo o reiniciar el nodo, debes desconectar el dispositivo de la máquina virtual y luego habilitar el encaminamiento de nuevo.

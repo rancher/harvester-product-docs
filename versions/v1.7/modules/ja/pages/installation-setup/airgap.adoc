@@ -1,0 +1,167 @@
+= エアギャップ(された)環境
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+このセクションでは、{harvester-product-name}をエアギャップ(された)環境で使用する方法について説明します。いくつかのユースケースとしては、{harvester-product-name}がオフラインで、ファイアウォールの背後やプロキシの背後にインストールされる場合があります。
+
+ISOイメージには、エアギャップ(された)環境で動作させるためのすべてのパッケージが含まれています。
+
+== HTTPプロキシの背後での作業
+
+一部の環境では、サーバーやVMから外部サービスへの接続にHTTP(S)プロキシが必要です。
+
+=== インストール中にHTTPプロキシを設定する
+
+以下の画像に示すように、xref:../installation-setup/methods/iso-install.adoc[ISOインストール]中にHTTP(S)プロキシを設定できます。
+
+image::install/iso-proxy.png[iso-proxy]
+
+=== HTTPプロキシを設定する
+
+UIを使用してHTTP(S)プロキシを設定できます。
+
+. UIの設定ページに移動します。
+. `http-proxy`設定を見つけ、*⋮ > 設定を編集*をクリックします。
+. `http-proxy`、`https-proxy`、および`no-proxy`の値を入力します。
+
+image::proxy-setting.png[proxy-setting]
+
+[NOTE]
+====
+{harvester-product-name}は、内部トラフィックが機能するように、ユーザーが設定した`no-proxy`に必要なアドレスを追加します。すなわち、`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`。v1.1.2以降、`harvester-system`がリストに追加されました。
+
+クラスター内のノードが互いに通信するためにプロキシを使用しない場合、最初のノードが正常にインストールされた後にCIDRを`http-proxy.noProxy`に追加する必要があります。xref:../troubleshooting/cluster.adoc#_fail_to_deploy_a_multi_node_cluster_due_to_incorrect_http_proxy_setting[マルチノードクラスターのデプロイに失敗する]を参照してください。
+====
+
+== ゲストクラスターイメージ
+
+{harvester-product-name}をインストールして実行するために必要なすべてのイメージがISOに便利にパッケージ化されており、ベアメタルノードにイメージを事前にロードする必要がなくなります。{harvester-product-name}クラスターは、それらを独立して効果的に管理します。
+
+ただし、xref:../integrations/rancher/node-driver/node-driver.adoc[Harvester Node Driver]によって作成されたゲストKubernetesクラスター（例えば、{rke2-product-name}クラスター）を理解することが重要です。それは{harvester-product-name}クラスターとは異なる独立したエンティティです。ゲストクラスターはVM内で動作し、インターネットまたは https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/global-configuration/global-default-private-registry.html#_configure_a_private_registry_with_credentials_when_creating_a_cluster[プライベートレジストリ]からイメージを取得する必要があります。
+
+ゲストKubernetesクラスターで*Cloud Provider*オプションが{harvester-product-name}に設定されている場合、Harvester Cloud ProviderおよびContainer Storage Interface (CSI)ドライバーがデプロイされます。
+
+image::cluster-registry.png[cluster-registry]
+
+その結果、エアギャップ環境で各RKE2リリースを監視し、必要なイメージをプライベートレジストリにプルすることをお勧めします。最適なHarvester Cloud ProviderおよびCSIドライバーの機能サポートについては、 https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[サポートマトリックス]を参照してください。
+
+== 外部{rancher-short-name}と統合する
+
+{rancher-short-name}は、{harvester-product-name}クラスターがインポートされるたびに使用される`rancher-agent`イメージを決定します。イメージが{harvester-product-name} ISOに含まれていない場合、インターネットからプルして各ノードにロードするか、{harvester-product-name}クラスターのリポジトリにプッシュする必要があります。
+
+[,bash]
+----
+# Run the following commands on a computer that can access both the internet and the {harvester-product-name} cluster.
+docker pull rancher/rancher-agent:<version>
+docker save rancher/rancher-agent:<version> -o rancher-agent-<version>.tar
+
+# Copy the image TAR file to the air-gapped environment.
+scp rancher-agent-<version>.tar rancher@<harvester-node-ip>:/tmp
+
+# Use SSH to connect to the {harvester-product-name} node, and then load the image.
+ssh rancher@<harvester-node-ip>
+sudo -i
+docker load -i /tmp/rancher-agent-<version>.tar
+----
+
+== {rancher-short-name}統合を伴うHarvester UI拡張機能
+
+Harvester UI拡張機能は、{rancher-short-name} v2.10.x以降のバージョンで{harvester-product-name} UIにアクセスするために必要です。ただし、エアギャップ環境ではネットワーク経由で拡張機能をインストールすることはできないため、次の回避策を実行する必要があります：
+
+. 最新のタグを持つイメージ https://hub.docker.com/r/rancher/ui-plugin-catalog/tags[rancher/ui-plugin-catalog]をプルします。
+
+. {rancher-short-name} UIで、*拡張機能*に移動し、次に*⋮ -> 拡張カタログの管理*を選択します。
++
+image::air-gapped/air-gappted-harvester-ui-extension-01.png[Rancher UI - 拡張カタログの管理]
+
+. 必要な情報を指定してください。
++
+image::air-gapped/air-gappted-harvester-ui-extension-02.png[Rancher UI - 拡張カタログのインポート]
++
+* *カタログイメージ参照*：プライベートレジストリのURLとイメージリポジトリを指定してください。
+* *イメージプルシークレット*：ユーザー名とパスワードが必要な場合にレジストリにアクセスするために使用される秘密を指定してください。その秘密を`cattle-ui-plugin-system`ネームスペースで作成する必要があります。`type`の値として`kubernetes.io/dockercfg`または`kubernetes.io/dockerconfigjson`のいずれかを使用してください。
++
+例:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-registry-secret-rancher
+  namespace: cattle-ui-plugin-system
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {base64 encoded data}
+----
+
+. *ロード*をクリックし、拡張機能が読み込まれるまでしばらくお待ちください。
++
+image::air-gapped/air-gappted-harvester-ui-extension-03.png[Rancher UI - 拡張機能カタログ]
+
+. *利用可能*タブで、*Harvester*という名前の拡張機能を見つけて、*インストール*をクリックしてください。
++
+image::air-gapped/air-gappted-harvester-ui-extension-04.png[Rancher UI - 利用可能な拡張機能]
+
+. {harvester-product-name}クラスターに一致するバージョンを選択し、*インストール*をクリックしてください。
++
+詳細については、xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[Harvester UI拡張機能サポートマトリックス]を参照してください。
++
+image::air-gapped/air-gappted-harvester-ui-extension-05.png[Rancher UI - Harvester UI拡張機能バージョンの選択]
++
+image::air-gapped/air-gappted-harvester-ui-extension-06.png[Rancher UI - Harvester UI拡張機能がインストールされました]
+
+. *仮想化管理 -> Harvester cluster*に移動します。
++
+これで{harvester-product-name}クラスターをインポートし、{harvester-product-name} UIにアクセスできます。
++
+image::air-gapped/air-gappted-harvester-ui-extension-07.png[Rancher UI - Harvester cluster]
+
+== 時間要件
+
+信頼できるネットワーク時間プロトコル（NTP）サーバーは、Kubernetesクラスター内のすべてのノードで正しいシステム時間を維持するために重要です。特に{harvester-product-name}を実行している場合はなおさらです。Kubernetesは、データの整合性を確保し、リーダー選出、ログの複製、クラスターの安定性に関する問題を防ぐために、正確な時間同期を必要とする分散型キー・バリューストアであるetcdに依存しています。
+
+外部の時間ソースが利用できないエアギャップ環境では、正確で同期された時間を維持することがさらに重要になります。適切な時間同期がないと、クラスターのノードは認証失敗、スケジューリングの問題、またはデータの破損を経験する可能性があります。これらのリスクを軽減するために、組織はネットワーク内のすべてのシステムの時間を同期させる堅牢な内部NTPサーバーを展開する必要があります。
+
+クラスタ全体で正確かつ一貫した時間を確保することは、信頼性、セキュリティ、全体的なシステムの整合性にとって重要です。
+
+== トラブルシューティング
+
+=== UI拡張が表示されません
+
+*拡張機能*画面が空の場合は、*Repositories*（*⋮ -> リポジトリの管理*）に移動し、次に*Refresh*をクリックしてください。
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-01.png[Rancher UI - リポジトリの管理]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-02.png[Rancher UI - 接続拒否エラー]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-03.png[Rancher UI - リポジトリ画面の更新]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-04.png[Rancher UI - リポジトリ]
+
+=== インストールに失敗しました
+
+インストール中にエラーが発生した場合は、`uiplugins`リソースを確認してください。
+
+image::air-gapped/air-gappted-harvester-ui-extension-05-01.png[Rancher UI - Harvester UI拡張のインストールエラー]
+
+例:
+
+[,shell]
+----
+bash-4.4# k get uiplugins -A
+NAMESPACE                 NAME        PLUGIN NAME   VERSION   STATE
+cattle-ui-plugin-system   harvester   harvester     1.0.3     pending
+bash-4.4# k get uiplugins harvester --namespace cattle-ui-plugin-system -o yaml
+apiVersion: catalog.cattle.io/v1
+kind: UIPlugin
+metadata:
+  # skip
+  name: harvester
+  namespace: cattle-ui-plugin-system
+spec:
+  plugin:
+    endpoint: http://ui-plugin-catalog-svc.cattle-ui-plugin-system:8080/plugin/harvester-1.0.3
+----
+
+`svc.namespace`が{rancher-short-name}からアクセス可能であることを確認してください。そのエンドポイントにアクセスできない場合は、`10.43.33.58:8080/plugin/harvester-1.0.3`のようなクラスターIPを直接使用できます。

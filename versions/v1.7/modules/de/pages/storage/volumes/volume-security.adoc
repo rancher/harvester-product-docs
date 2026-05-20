@@ -1,0 +1,112 @@
+= Volumensicherheit
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Harvester ermöglicht es Ihnen, virtuelle Maschinen-Images zu verschlüsseln und zu entschlüsseln. Der Verschlüsselungsmechanismus nutzt das Linux-Kernel-Modul dm_crypt und das Befehlszeilentool cryptsetup.
+
+== Voraussetzungen
+
+Bereiten Sie die folgenden Ressourcen vor:
+
+* Geheim: Ein Kubernetes-Secret wird als Passphrase für dm_crypt verwendet. Sie müssen den Wert des `CRYPTO_KEY_VALUE` Feldes angeben. Alle anderen Felder sind festgelegt.
++
+image::vm/create-encryption-used-secret.png[]
++
+Beispiel eines Secrets:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+Das Beispiel enthält den Standard-YAML-Code für Kubernetes-Secrets. Neben diesem können Sie https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[Verschlüsselungsoptionen für den LUKS-Modus] verwenden, was ein Betriebsmodus von cryptsetup ist. Harvester v1.4.1 und spätere Versionen unterstützen diese Optionen, aber Sie müssen überprüfen, ob diese von Ihren Knoten unterstützt werden.
+
+|===
+| Option | Zulässige Werte
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Sie können ein Secret im System-Namespace mit kubectl oder der Harvester-Benutzeroberfläche (*Als YAML bearbeiten* Funktion) erstellen. Ressourcen im System-Namespace werden nicht auf der Harvester-Benutzeroberfläche *Secrets* angezeigt.
+====
++
+* StorageClass: Images werden mit Longhorn verschlüsselt, daher müssen erforderliche Felder an den Longhorn CSI-Treiber übergeben werden. Sie können das Verschlüsselungs-Secret beim Erstellen einer StorageClass angeben. Für weitere Informationen siehe xref:/virtual-machines/vm-images/upload-image.adoc#_image_storageclass[Image StorageClass].
++
+image::vm/create-storage-class.png[]
++
+Beispiel einer StorageClass:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Sie können ein Secret im System-Namespace mit der Harvester-Benutzeroberfläche (*Als YAML bearbeiten* Funktion) und kubectl erstellen. Ressourcen im System-Namespace werden nicht auf der Harvester-Benutzeroberfläche *Secrets* angezeigt.
+====
+
+== Verschlüsselte Volumes
+
+Sie können ein verschlüsseltes Volume mit einer verschlüsselten StorageClass an den folgenden UI-Standorten erstellen:
+
+* *Volumes: Erstellen* Bildschirm
++
+image::volume/volume-security-create-empty-volume.png[leeres-volume-erstellen]
++
+* *Volumes* Tab auf der *Virtuellen Maschine: Erstellen* Bildschirm
++
+image::volume/volume-security-create-empty-volume-in-vm.png[create-empty-volume-in-vm]
+
+== Erweiterte Nutzung mit Rancher-Integration
+
+Das Geheimnis ist eine unverschlüsselte, Base64-kodierte Zeichenkette. Um das Geheimnis sicher zu halten, können Sie Projekte und Namespaces verwenden, um Berechtigungen zu isolieren. Für weitere Informationen siehe xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== Nutzungsbeschränkungen
+
+Sie können die folgenden Aktionen nicht ausführen:
+
+* Ein neues Volume aus einem verschlüsselten Volume exportieren
+* Ein verschlüsseltes Volume in ein unverschlüsseltes Volume wiederherstellen
+* Ein unverschlüsseltes Volume in ein verschlüsseltes Volume wiederherstellen

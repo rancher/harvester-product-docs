@@ -1,0 +1,92 @@
+= CPUピンニング
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name}は仮想マシンのCPUピニングをサポートしています。この機能を使用するには、まずノードでCPUマネージャーを有効にし、仮想マシンを作成する際にCPUピニングを有効にする必要があります。
+
+== Kubernetes CPUマネージャー
+
+https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[CPUマネージャー]機能は、KubernetesクラスターにおけるCPUリソースの割り当てを改善し、厳格なパフォーマンスニーズを持つワークロードが安定した予測可能なCPUリソースを受け取ることを保証します。これは特に高性能でレイテンシに敏感なアプリケーションにとって重要です。
+
+{harvester-product-name}は、CPUマネージャーが有効な場合に`static` CPUマネージャーポリシーを使用します。このポリシーは、次の構成を持つノード上のすべてのCPUを最初に含む共有CPUプールを管理します：
+
+* 全CPUコアを要求する https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`]QoSクラスのポッド（例：CPU:"2"）には専用のCPUが割り当てられます。これらのCPUはポッドに「ピンニング」され、共有CPUプールから除外されます。
++
+* https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`]および https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] QoSクラスのポッドは、共有プール内の残りのCPUを共有します。
+
+=== 共有CPUプールの計算
+
+{harvester-product-name}は、 https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[GKEの公式]に基づいてシステムレベルの操作のためにCPUリソースを予約し、 https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`]および https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`]の値を2:3の比率で割り当てます。
+
+例（16 CPUコアのノード）：
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+この例では、約15コア（14980ミリコア）がワークロードに利用可能です。
+
+保証されたQoSクラスの仮想マシン（ポッド）が4つのCPUを要求すると、4つのコアがその仮想マシンに専用されます。他のQoSクラスのポッドは、共有プール内の残りの11コアを共有します。
+
+== CPUマネージャーの有効化と無効化
+
+CPUマネージャーを有効にすると、{harvester-product-name}はCPUマネージャーポリシーを`static`に設定します。機能を無効にすると、{harvester-product-name}はCPUマネージャーポリシーを`none`に戻します。
+
+各ノードでCPUマネージャーを個別に有効または無効にする必要があります。
+
+. {harvester-product-name} UIで、*ホスト*に移動します。
++
+. リスト内のノードを見つけて、*⋮ -> CPUマネージャーを有効にする*または*CPUマネージャーを無効にする*を選択します。
++
+{harvester-product-name}が対応するCPUマネージャーポリシーを適用するまで、しばらくお待ちください。
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== 制限
+
+* ウィットネスノードではCPUマネージャーを有効にできません。
++
+* 各管理ノードでCPUマネージャーを個別に有効または無効にする必要があります。別の操作を開始する前に、操作が完了するのを待つ必要があります。
++
+* CPUピンニングが有効な仮想マシンは、対応するノードでCPUマネージャーが無効にされる前に停止する必要があります。
+
+== 新しい仮想マシンでCPUピンニングを有効にする
+
+. 1つ以上のノードでCPUマネージャーが有効になっていることを確認します。
++
+[IMPORTANT]
+====
+少なくとも1つのノードでCPUマネージャーが有効でない場合、仮想マシンは起動後に`Unschedulable`状態でフリーズします。詳細については、xref:virtual-machines/create-vm.adoc#_related_cpu_pinning_concepts[関連するCPUピンニングの概念]を参照してください。
+====
++
+. *仮想マシン*に移動します。
++
+. ［*作成*］をクリックします。
++
+image::vm/cpu-pinning-create-vm.png[create-vm]
++
+. *詳細オプション*タブで、*CPUピンニングを有効にする*を選択します。
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-advanced-options]
++
+. ［*保存*］をクリックします。
+
+CPUピンニングを有効にすると、仮想マシンの設定（YAML）に`dedicatedCpuPlacement: true`が`.spec.template.spec.domain.cpu`として追加されます。`dedicatedCpuPlacement`が`true`に設定されている場合、CPUおよびメモリリソースの要求は自動的に制限に合わせて設定され、保証されたQoSの基準が満たされるようになります。
+
+要求と制限が同一であるため、CPUピンニングが有効な仮想マシンにはCPUおよびメモリxref:./resource-overcommit.adoc[リソースオーバーコミット]設定は適用されません。
+
+[NOTE]
+====
+既存の仮想マシンでCPUピンニングを使用するには、機能を有効にして変更を保存した後に仮想マシンを再起動する必要があります。
+====
+
+== 仮想マシンのライブマイグレーション
+
+CPUピンニングが有効な仮想マシンは、ターゲットノードでCPUマネージャーが有効になっている場合にのみ移行できます。
+
+== アップグレード
+
+ノードをアップグレードする際、{harvester-product-name}はすべてのポッドを排出し、仮想マシンを別のノードへライブマイグレーションを実行します。アップグレードプロセスの中断を避けるために、他のノードでCPUマネージャーが有効になっており、CPUピンニングが有効な仮想マシンを使用する際に十分なリソースが利用可能であることを確認してください。

@@ -1,0 +1,109 @@
+= Harvester节点驱动程序
+:revdate: 2025-09-18
+:page-revdate: {revdate}
+
+https://github.com/harvester/docker-machine-driver-harvester[Harvester节点驱动程序]，类似于Docker Machine驱动程序，用于在{harvester-product-name}集群中配置虚拟机，并且{rancher-short-name}使用它来启动和管理Kubernetes集群。
+
+在由节点驱动程序托管的节点池上安装Kubernetes的一个好处是，如果某个节点与集群失去连接，Rancher可以自动创建另一个节点加入集群，以确保节点池的数量符合预期。
+此外，Harvester节点驱动程序默认与Harvester云提供商集成，提供xref:/integrations/rancher/cloud-provider.adoc#_load_balancer_support[内置负载均衡器支持]以及从裸机集群到来宾Kubernetes集群的xref:/integrations/rancher/csi-driver.adoc[存储直通]，以获得本地存储性能。
+
+在本节中，您将学习如何配置{rancher-short-name}以使用Harvester节点驱动程序启动和管理Kubernetes集群。
+
+[NOTE]
+====
+Harvester节点驱动程序仅支持云镜像。这是因为ISO 映像通常需要额外的设置，这会干扰干净的部署（无需用户干预），并且它们通常不在云环境中使用。
+====
+
+== Harvester节点驱动程序
+
+从{rancher-short-name} `v2.6.3`开始，Harvester节点驱动程序默认启用。您可以前往*集群管理* > *驱动程序* > *节点驱动程序*页面检查Harvester节点驱动程序的状态。
+
+image::rancher/edit-node-driver.png[edit-node-driver]
+
+当Harvester节点驱动程序启用时，您可以在{harvester-product-name}集群上创建Kubernetes集群并从{rancher-short-name}管理它们。
+
+image::rancher/harvester-node-driver.png[harvester-node-driver]
+
+[NOTE]
+====
+* 请参考 https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-7-5[{rancher-short-name}下游集群支持矩阵]以获取其支持的RKE2版本和来宾操作系统版本。
+* 对Harvester节点驱动程序配置所做的更改不会被保留。任何应用的修改将在重新启动{rancher-short-name}容器时重置。
+* 从Harvester节点驱动程序v0.6.3开始，已从后端移除`qemu-guest-agent`的自动注入。如果您使用的镜像不包含`qemu-guest-agent`软件包，您仍然可以通过`userdata`配置安装它。否则，集群将无法成功部署。
++
+[,yaml]
+----
+ #cloud-config
+ package_update: true
+ packages:
+ - qemu-guest-agent
+ runcmd:
+ - - systemctl
+   - enable
+   - '--now'
+   - qemu-guest-agent.service
+----
+====
+
+== 已知问题
+
+=== 当相应的API词元过期时，{rancher-short-name}失去管理或扩展来宾集群的能力。
+
+*问题*: https://github.com/harvester/harvester/issues/5827[#5827]
+
+*描述*：{rancher-short-name} 使用嵌入式身份验证令牌的 kubeconfigs 来在 {harvester-product-name} 上配置来宾 Kubernetes 集群。当这些词元过期时，{rancher-short-name} 将失去对相应 {rancher-short-name} 管理的来宾 Kubernetes 集群执行管理操作的能力。此问题仅影响在 {harvester-product-name} 上运行并使用在安装或升级到 {rancher-short-name} v2.8.x 后创建的云凭据的来宾 Kubernetes 集群，该版本将 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_kubeconfig_default_token_ttl_minutes[kubeconfig-default-token-ttl-minutes] 设置以及 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_auth_token_max_ttl_minutes[auth-token-max-ttl-minutes] 设置分别减少到 30 天和 90 天。
+
+*状态*：有一个 https://harvesterhci.io/kb/renew_harvester_cloud_credentials[临时解决方法] 可用。
+
+*上次更新*：2024-05-21
+
+== RKE2 Kubernetes 集群
+
+请参见 xref:./rke2-cluster.adoc[创建 RKE2 Kubernetes 集群]。
+
+== K3s Kubernetes 集群
+
+请参见 xref:./k3s-cluster.adoc[创建 K3s Kubernetes 集群]。
+
+== 拓扑扩展约束
+
+在您的来宾 Kubernetes 集群中，您可以使用 https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[拓扑扩展约束] 来管理工作负载在节点之间的分布，考虑到例如区域和可用区等故障域因素。这有助于实现 {harvester-product-name} 集群资源的高可用性和高效资源利用。
+
+对于 `v1.25.x` 之前的 RKE2 版本，支持拓扑标签同步功能的最低要求版本如下：
+
+|===
+| 最低要求 RKE2 版本
+
+| >=  v1.24.3+rke2r1
+| >=  v1.23.9+rke2r1
+| >=  v1.22.12+rke2r1
+|===
+
+此外，对于自定义安装，Harvester 云提供程序版本应为 `>= v0.1.4`。
+
+=== 将拓扑标签同步到来宾集群节点
+
+在集群安装期间，Harvester 节点驱动程序将自动帮助将拓扑标签从虚拟机节点同步到来宾集群节点。目前，仅支持 `region` 和 `zone` 拓扑标签。
+
+. 在 {harvester-product-name} 节点上配置拓扑标签，路径为 *主机* > *编辑配置* > *标签* 页面。例如，添加拓扑标签如下：
++
+[,yaml]
+----
+topology.kubernetes.io/region: us-east-1
+topology.kubernetes.io/zone: us-east-1a
+----
++
+image::rancher/node-add-affinity-labels.png[]
+
+. 使用启用 Harvester 云提供程序的 Harvester 节点驱动程序创建下游 RKE2 集群。我们建议添加 xref:./rke2-cluster.adoc#_add_node_affinity[节点亲和性规则]，以防止节点在虚拟机重建后漂移到其他区域。
++
+image::rancher/create-rke2-harvester-cluster-3.png[]
+
+. 集群准备好后，请确认这些拓扑标签已成功同步到来宾 Kubernetes 集群上的节点。
+. 现在在您的来宾 Kubernetes 集群上部署工作负载，您应该能够使用 https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[拓扑扩展约束] 来管理它们。
+
+[NOTE]
+====
+对于 Harvester 云提供程序 >= v0.2.0，当虚拟机（对应于来宾节点）进行迁移或更新时，{harvester-product-name} 节点上的拓扑标签将自动重新同步。
+
+对于 Harvester 云提供程序 < v0.2.0，标签同步仅在来宾节点初始化期间发生。为了防止节点漂移到不同的区域或可用区，我们建议在集群配置期间添加 xref:./rke2-cluster.adoc#_add_node_affinity[节点亲和性规则]。这将允许您在重建后仍然在同一区域调度虚拟机。
+====

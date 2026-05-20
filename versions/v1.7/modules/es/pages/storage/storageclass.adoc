@@ -1,0 +1,246 @@
+= StorageClass
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} utiliza StorageClasses para describir cómo {longhorn-product-name} debe aprovisionar volúmenes. Las StorageClasses {longhorn-product-name} pueden mapearse a políticas de réplica, políticas de programación de nodos o políticas de programación de discos creadas por los administradores del clúster. Este concepto se conoce como _perfiles_ en otros sistemas de almacenamiento.
+
+[NOTE]
+====
+La StorageClass por defecto `harvester-longhorn` tiene un valor de cuenta de réplicas de `3` para alta disponibilidad. Si utilizas `harvester-longhorn` en un clúster de un solo nodo, {longhorn-product-name} no puede crear el número por defecto de réplicas, y los volúmenes se marcan como _Degradados_ en la interfaz de usuario {harvester-product-name}. 
+
+Para evitar este problema, puedes realizar cualquiera de las siguientes acciones: 
+
+* Cambia la xref:installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[cuenta de réplicas] de `harvester-longhorn` a `1` utilizando un archivo de configuración.
+* xref:storage/storageclass.adoc#_creating_a_storageclass[Crea una nueva StorageClass] con el parámetro *Número de Réplicas* establecido en `1`. Una vez creada, localiza la nueva StorageClass en la lista y luego selecciona *⋮ -> Establecer como predeterminado*.
+====
+
+Para información sobre el soporte para el aprovisionamiento de volúmenes utilizando controladores de interfaz de almacenamiento de contenedores externos (CSI), consulta xref:./csidriver.adoc[Soporte de Almacenamiento de Terceros].
+
+== Creando una StorageClass
+
+[tabs]
+======
+INTERFAZ DE USUARIO::
++
+--
+[CAUTION]
+====
+Después de que se crea una StorageClass, los campos en la sección **Parámetros** y la mayoría de las otras opciones se vuelven inmutables.
+====
+
+. Ve a *StorageClasses Avanzadas ->*.
++
+image::storageclass/create_storageclasses_entry.png[]
+
+. En la sección de información general, configura lo siguiente:
++
+* *Nombre*: Nombre de la StorageClass.
+* *Descripción* (opcional): Descripción de la StorageClass.
+* *Proveedor*: Proveedor que determina el complemento de volumen que se utilizará para aprovisionar volúmenes.
+
+. En la pestaña *Parámetros*, configura lo siguiente:
++
+* *Cuenta de Réplicas*: Cuenta de réplicas creadas para cada {longhorn-product-name}. El valor por defecto es `3`. 
+* *Tiempo de espera de réplicas obsoletas*: Número de minutos que {longhorn-product-name} espera antes de limpiar una réplica con el estado `ERROR`. El valor por defecto es `30`.
+* *Selector de Nodo* (opcional): Etiquetas de nodo que deben coincidir durante la programación de volúmenes. Puedes añadir etiquetas de nodo en la pantalla de configuración del host (*Host -> Editar Config*).
+* *Selector de Disco* (opcional): Etiquetas de disco que deben coincidir durante la programación de volúmenes. Puedes añadir etiquetas de disco en la pantalla de configuración del host (*Host -> Editar Config*).
+* *Migrable*: Configuración que habilita xref:virtual-machines/live-migration.adoc[Migración en Vivo] para volúmenes creados utilizando la StorageClass. El valor por defecto es `Yes`.
+
+[CAUTION]
+====
+Si se utiliza una StorageClass con una cuenta de réplicas de `1` para crear un volumen que está adjunto a una máquina virtual, esa máquina virtual se considera xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[no migrable].
+====
+
+. En la pestaña *Personalizar*, configura lo siguiente:
++
+* *Directiva de Recuperación*: Directiva de recuperación que se aplica a los volúmenes creados utilizando la StorageClass. El valor por defecto es `Delete`.
+** *Eliminar*: Elimina volúmenes y los dispositivos subyacentes cuando se elimina la reclamación del volumen.
+** *Retener*: Retiene el volumen para limpieza manual.
++
+* *Permitir expansión de volumen*: Configuración que permite la expansión de volumen, lo que implica el redimensionamiento del dispositivo de bloque y la expansión del sistema de archivos. Cuando la configuración está habilitada, puedes aumentar el tamaño del volumen editando el objeto PVC correspondiente.
++
+[NOTE]
+====
+Solo puedes utilizar la función de expansión de volumen para aumentar el tamaño del volumen.
+====
++
+* *Modo de vinculación de volumen*: Configuración que controla cuándo ocurren la vinculación de volumen y la provisión dinámica. El valor por defecto es `Immediate`.
+** *De inmediato*: Vincula y provisiona un volumen una vez que se crea el PVC.
+** *WaitForFirstConsumer*: Vincula y provisiona un volumen una vez que se crea una máquina virtual que utiliza el PVC. 
+
+. Haga clic en *Crear*.
+--
+
+API::
++
+[,yaml]
+---- 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    storageclass.beta.kubernetes.io/is-default-class: 'true'
+    storageclass.kubernetes.io/is-default-class: 'true'
+  name: single-replica
+parameters:
+  migratable: 'false'
+  numberOfReplicas: '1'
+  staleReplicaTimeout: '30'
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+----
+
+Terraform::
++
+[,hcl]
+----
+resource "harvester_storageclass" "single-replica" {
+  name = "single-replica"
+
+  is_default = "true"
+  allow_volume_expansion = "true"
+  volume_binding_mode = "immediate"
+  reclaim_policy = "delete"
+
+  parameters = {
+    "migratable"          = "false"
+    "numberOfReplicas"    = "1"
+    "staleReplicaTimeout" = "30"
+  }
+}
+----
+======
+
+== Configuraciones de localidad de datos
+
+Puedes utilizar el parámetro `dataLocality` cuando al menos una réplica de un volumen {longhorn-product-name} debe programarse en el mismo nodo que el pod que utiliza el volumen (siempre que sea posible).
+
+{harvester-product-name} admite oficialmente la localización de datos. Esto se aplica incluso a los volúmenes creados a partir de xref:virtual-machines/vm-images/upload-image.adoc[imágenes]. Para configurar la localización de datos, crea una nueva StorageClass en la interfaz de usuario de {harvester-product-name} (*Clases de Almacenamiento -> Crear -> Parámetros*) y luego añade el siguiente parámetro:
+
+* *Clave*: `dataLocality`
+* *Valor*: `deshabilitado` o `mejor-esfuerzo`
+
+image::storageclass/data-locality.png[]
+
+=== Opciones de Localización de Datos
+
+{harvester-product-name} actualmente admite las siguientes opciones:
+
+* `deshabilitado`: Cuando se aplica, {longhorn-product-name} puede o no programar una réplica en el mismo nodo que el pod que utiliza el volumen. Ésta es la opción por defecto.
+* `mejor-esfuerzo`: Cuando se aplica, {longhorn-product-name} siempre intenta programar una réplica en el mismo nodo que el pod que utiliza el volumen. {longhorn-product-name} no detiene el volumen incluso cuando una réplica local no está disponible debido a una limitación ambiental (por ejemplo, espacio en disco insuficiente o etiquetas de disco incompatibles).
+
+[NOTE]
+====
+{longhorn-product-name} proporciona una tercera opción llamada `estricto-local`, que obliga a {longhorn-product-name} a mantener solo una réplica en el mismo nodo que el pod que utiliza el volumen. {harvester-product-name} no admite esta opción porque puede afectar ciertas operaciones como xref:virtual-machines/live-migration.adoc[Migración en Vivo de VM].
+====
+
+Para más información, consulta https://documentation.suse.com/cloudnative/storage/1.8/en/high-availability/data-locality.html[Localización de datos] en la documentación de {longhorn-product-name}.
+
+== Configuraciones del Importador de Datos en contenedores (CDI)
+
+{harvester-product-name} se integra con el https://kubevirt.io/user-guide/storage/containerized_data_importer[Importador de Datos en contenedores] (CDI) para gestionar la administración de imágenes de VM para las siguientes StorageClasses:
+
+* Motor de Datos Longhorn V2
+* LVM
+* Almacenamiento de terceros
+
+Puedes usar la interfaz de usuario de {harvester-product-name} o las anotaciones de CDI para anular la configuración predeterminada de los atributos de StorageClass de CDI.
+
+[NOTE]
+====
+La interfaz de usuario de {harvester-product-name} actualmente no admite el uso de CDI con almacenamiento de terceros. Debes aplicar las anotaciones de {harvester-product-name} CDI directamente a la StorageClass de terceros.
+====
+
+Para habilitar la edición de configuraciones de CDI para operaciones del día 2, {harvester-product-name} proporciona atributos de StorageClass que actualizan automáticamente las configuraciones subyacentes de CDI.
+
+Cada campo en la pantalla *Configuraciones de CDI* corresponde a una anotación en la StorageClass.
+
+|===
+| Campo de UI | Anotación | Descripción | Valores admitidos | Ejemplo
+
+| *Modo de Volumen / Modos de Acceso*
+| `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`
+| Modo de volumen PVC predeterminado y modos de acceso
+| Objeto JSON con modos de volumen y modos de acceso
+| `'{"Block":["ReadWriteOnce"]}'`
+
+| *Clase de Instantánea de Volumen*
+| `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`
+| Nombre de la clase de instantáneas de volumen que se utilizará al tomar instantáneas de imágenes de máquinas virtuales bajo esta StorageClass. Esta configuración se aplica solo cuando utilizas la estrategia de clonación `instantánea`. Si ya has configurado el `volumeSnapshotClassName` en la configuración `csi-driver-config` para el aprovisionador correspondiente, ese valor se utilizará como predeterminado.
+| Valid VolumeSnapshotClass name | `lvm-snapshot`, `longhorn-snapshot`
+
+| *Estrategia de clonación*
+| `cdi.harvesterhci.io/storageProfileCloneStrategy`
+| Estrategia de clonación que se utilizará para volúmenes creados con imágenes de VM que utilizan esta StorageClass.
+| `copy`: Copia bloques de datos a través de la red; `instantánea`: Clona el volumen creando una instantánea de volumen temporal y restaurándola a un nuevo PVC; `csi-clone`: Clona el volumen utilizando una operación de clonación CSI
+| `snapshot`
+
+| *Sobrecarga del sistema de archivos*
+| `cdi.harvesterhci.io/filesystemOverhead`
+| Porcentaje de sobrecarga del sistema de archivos a considerar al calcular el tamaño del PVC.
+| Valor decimal entre 0 y 1 con un máximo de 3 dígitos
+| `0.05`
+|===
+
+Ejemplo de una configuración YAML de StorageClass:
+
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lvm
+  annotations:
+    cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
+    cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: lvm-snapshot
+    cdi.harvesterhci.io/filesystemOverhead: '0.05'
+----
+
+[CAUTION]
+====
+Evita cambiar el perfil de almacenamiento o el CDI directamente. En su lugar, permite que el controlador {harvester-product-name} sincronice y persista la configuración del perfil de almacenamiento a través del uso de anotaciones CDI.
+====
+
+Los siguientes son los valores predeterminados para las StorageClasses soportadas:
+
+* Motor de Datos Longhorn V2
++
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`: `"copy"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`: `"longhorn-snapshot"`
+
+* LVM
+** `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`: `'{"Block":["ReadWriteOnce"]}'`
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`: `"snapshot"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`: `"lvm-snapshot"`
+
+* Almacenamiento de terceros: Consulta https://github.com/kubevirt/containerized-data-importer/blob/v1.61.1/pkg/storagecapabilities/storagecapabilities.go#L35-L127[`storagecapabilities.go`] en el repositorio CDI. Si el proveedor no está listado, debes especificar la anotación `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`.
+
+== Casos de Uso
+
+=== Escenario HDD
+
+Con la introducción de _StorageClass_, los usuarios pueden ahora utilizar *HDDs* para almacenamiento en frío en capas o archivado.
+
+[CAUTION]
+====
+No se recomienda el HDD para clústeres RKE2 de invitados o máquinas virtuales con requisitos de disco de buen rendimiento.
+====
+
+==== Práctica Recomendada
+
+Primero, añade tu HDD en la página `Host` y especifica las etiquetas de disco según sea necesario, como `HDD` o `ColdStorage`. Para más información sobre cómo añadir discos adicionales y etiquetas de disco, consulta xref:hosts/hosts.adoc#_multi_disk_management[Multi-disk Management].
+
+image::storageclass/add_hdd_on_host_page.png[]
+
+image::storageclass/add_tags.png[]
+
+Luego, crea un nuevo `StorageClass` para el HDD (utiliza las etiquetas de disco anteriores). Para discos duros con gran capacidad pero bajo rendimiento, se puede reducir el número de réplicas para mejorar el rendimiento.
+
+image::storageclass/create_hdd_storageclass.png[]
+
+Ahora puedes crear un volumen utilizando el `StorageClass` anterior con HDDs principalmente para almacenamiento en frío o con fines de archivado.
+
+image::storageclass/create_volume_hdd.png[]

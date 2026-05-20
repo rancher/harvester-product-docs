@@ -1,0 +1,102 @@
+= v1.2.1からv1.2.2にアップグレードする
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== 一般情報
+
+新しい{harvester-product-name}バージョンが利用可能になると、*ダッシュボード*画面に*アップグレード*ボタンが表示されます。詳細については、xref:./upgrades.adoc#_start_an_upgrade[アップグレードを開始する]を参照してください。
+
+エアギャップ環境については、xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[エアギャップ(された)アップグレードの準備]を参照してください。
+
+== 既知の問題
+
+=== 1.`Upgrading System Service`状態でアップグレードが停止している
+
+特定のシステムサービスの証明書が期限切れになると、アップグレードが`Upgrading System Service`状態で長時間停止する可能性があります。この問題を解決するには、次の手順を実行してください。
+
+. apply-manifestジョブの名前を特定します。
++
+[,sh]
+----
+kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+----
++
+出力の例：
++
+[,console]
+----
+NAME                                 COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-apply-manifests   0/1           46s        46s
+----
++
+. apply-manifestジョブのログを確認します。
++
+[,sh]
+----
+ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
+----
++
+ログに次のメッセージが表示された場合は、次のステップに進みます。
++
+[,console]
+----
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+----
++
+. Cluster API (CAPI) クラスターの状態を確認します。
++
+[,sh]
+----
+kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+出力が次の例に似ている場合、問題はクラスターに存在する可能性があります。
++
+[,console]
+----
+    - lastUpdateTime: "2023-01-17T16:26:48Z"
+      message: 'configuring bootstrap node(s) custom-24cb32ce8387: waiting for probes:
+        kube-controller-manager, kube-scheduler'
+      reason: Waiting
+      status: Unknown
+      type: Updated
+----
++
+. 影響を受けたノードのホスト名を特定し、サービス証明書が期限切れになるかどうかを確認するために https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[回避策]を実施します。
++
+[,sh]
+----
+kubectl get machines.cluster.x-k8s.io -n fleet-local <machine_name> -o yaml | yq .status.nodeRef.name
+----
++
+`<machine_name>`を影響を受けたノードの名前（前のステップの出力に記載されている通り）に置き換えます。
++
+[NOTE]
+====
+複数のノードが同時にクラスターに参加した場合、すべてのノードで https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[回避策]を実施する必要があります。
+====
+
+関連する問題： https://github.com/harvester/harvester/issues/3863[#3863]（ https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[回避策]を参照）
+
+'''
+
+=== 2.*harvester-seeder*アドオンはアップグレードされていません
+
+Harvesterクラスターをv1.2.1からv1.2.2にアップグレードする際、*harvester-seeder*アドオンはHelmチャートのバージョンが一致しないため、完全にはアップグレードされません。Harvester v1.2.2にバンドルされている`harvester-seeder`チャートはv0.1.1ですが、`harvester-seeder`アドオンはv0.1.0チャートを使用しています。
+
+[,console]
+----
+Error: chart "harvester-seeder" matching 0.1.0 not found in harvester-seeder index. (try 'helm repo update'): no chart version found for harvester-seeder-0.1.0
+----
+
+Harvester v1.2.2にアップグレードした後にアドオンを有効にすると、前述の不一致のためにチャートのインストールもできなくなります。
+
+回避策は、次のコマンドを使用して*harvester-seeder*アドオンのマニフェストを手動で更新することです。パッチを適用する前に、アドオンを無効にする必要があります。
+
+[,sh]
+----
+kubectl -n harvester-system patch addons.harvesterhci harvester-seeder --type=json -p '[{"op": "replace", "path": "/spec/version", "value": "0.1.1"}]'
+----

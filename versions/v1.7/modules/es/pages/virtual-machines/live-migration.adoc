@@ -1,0 +1,195 @@
+= Migración en vivo
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+La migración en vivo significa mover una máquina virtual a un host diferente sin tiempo de inactividad. Un par de procesos y tareas exhaustivas se realizan en segundo plano para llevar a cabo la migración en vivo.
+
+== Requisitos previos
+
+La migración en vivo puede ocurrir cuando se cumplen los siguientes requisitos:
+
+* Además del nodo actual, el clúster tiene al menos un nodo programable que coincide con todas las reglas de programación de la máquina virtual.
+
+* El nodo de destino de la migración tiene suficientes recursos disponibles para alojar la máquina virtual.
+
+* La CPU, la memoria, xref:virtual-machines/create-vm.adoc#_volumes[volúmenes], dispositivos y otros recursos solicitados por la máquina virtual pueden ser copiados o reconstruidos en el nodo de destino de la migración mientras la máquina virtual de origen sigue funcionando.
+
+== Máquinas Virtuales No Migrables
+
+Una máquina virtual se considera no migrable si tiene una o más de las siguientes:
+
+* Volumen con las siguientes propiedades:
+
+** Tipo: `CD-ROM` o `Container Disk`
+** Modo de acceso: `ReadWriteOnce`
+** Recuento de réplicas de StorageClass: `1` (Esto no se detecta en todos los casos.)
+
+* Dispositivos de host en modo passthrough como `PCI` y `vGPU`
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Selector de nodo] que vincula la máquina virtual a un nodo específico
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Reglas de programación] que coinciden solo con un nodo.
+
+Los siguientes son ejemplos de condiciones de regla que se verifican en tiempo de ejecución:
+
+* La máquina virtual está conectada a una red de clúster que cubre solo un nodo.
+
+* El pinning de CPU está habilitado en la máquina virtual, y el Administrador de CPU solo está habilitado en un nodo.
+
+* La máquina virtual tiene reglas de anti-afinidad estrictas que impiden que se co-localice con ciertas otras máquinas virtuales.
+
+Para más información, consulta xref:virtual-machines/create-vm.adoc#_automatically_applied_affinity_rules[Reglas de Afinidad Aplicadas Automáticamente].
+
+[NOTE]
+====
+Para realizar la migración en vivo de la máquina virtual, primero debes eliminar los dispositivos no migrables y añadir nodos programables.
+====
+
+== Máquinas Virtuales Migrables en Vivo
+
+Las máquinas virtuales que no tienen las propiedades de máquinas virtuales no migrables pueden ser migradas en vivo.
+
+== Cómo Funciona la Migración
+
+=== `VirtualMachineInstanceMigration` Objeto
+
+Cuando se activa una acción de migración de máquina virtual, se crea un `VirtualMachineInstanceMigration` objeto para rastrear el estado y el progreso de la operación. El controlador {harvester-product-name} correlaciona el `VirtualMachineInstanceMigration` objeto con el `VirtualMachineInstance` objeto asegurando que la identidad del objeto de instancia se refleje en el objeto de migración.
+
+En el siguiente ejemplo, la máquina virtual llamada `demo` tiene un objeto de migración asociado. El UID de este objeto se añade a la propiedad `.status.migrationState.migrationUID` del objeto de instancia durante la migración.
+
+[bash, shell]
+----
+$ kubectl get vmi demo -ojsonpath={.status.migrationState.migrationUID}
+
+1d6d7273-275d-48e0-bb76-62e240b42aaf
+----
+
+El nombre del objeto de instancia se añade a la propiedad `.spec.vmiName` del objeto de migración.
+
+[bash, shell]
+----
+$ kubectl get vmim demo-6crrk -ojsonpath={.spec.vmiName}
+
+demostración
+----
+
+El formato del nombre del objeto `VirtualMachineInstanceMigration` varía dependiendo de si la migración es activada manualmente o automáticamente.
+
+Cuando se activa una migración desde el **Migrar** xref:#_starting_a_migration[elemento del menú], el nombre del objeto `VirtualMachineInstanceMigration` se precede con el nombre de la máquina virtual y una cadena aleatoria (por ejemplo, `vm1-a3d1f`).
+
+Cuando se activa una migración xref:#_automatically_triggered_batch_migration[automáticamente], al nombre del objeto `VirtualMachineInstanceMigration` se le antepone `kubevirt-evacuation-` y una cadena aleatoria (por ejemplo, `kubevirt-evacuation-9c485`).
+
+[NOTE]
+====
+La interfaz de usuario {harvester-product-name} no especifica la fuente de la migración. Debe comprobar el nombre del objeto `VirtualMachineInstanceMigration` para recuperar esta información.
+====
+
+=== Coincidencia del Modelo de CPU
+
+Cada nodo tiene múltiples modelos de CPU que están etiquetados con diferentes claves.
+
+* Modelo de CPU principal: `host-model-cpu.node.kubevirt.io/{cpu-model}`
+* Modelos de CPU compatibles: `cpu-model.node.kubevirt.io/{cpu-model}`
+* Modelos de CPU compatibles para migración: `cpu-model-migration.node.kubevirt.io/{cpu-model}`
+
+Durante la migración en vivo, el controlador verifica el valor de `spec.domain.cpu.model` en el CR de VirtualMachineInstance (VMI), que se deriva de `spec.template.spec.domain.cpu.model` en el CR de VirtualMachine (VM). Si el valor de `spec.template.spec.domain.cpu.model` no está establecido, el controlador utiliza el valor predeterminado `host-model`.
+
+Cuando se utiliza `host-model`, el proceso obtiene el valor del modelo de CPU principal y llena `spec.NodeSelectors` del pod recién creado con la etiqueta `cpu-model-migration.node.kubevirt.io/{cpu-model}`.
+
+Alternativamente, puedes personalizar el modelo de CPU en `spec.domain.cpu.model`. Por ejemplo, si el modelo de CPU es `XYZ`, el proceso llena `spec.NodeSelectors` del pod recién creado con la etiqueta `cpu-model.node.kubevirt.io/XYZ`.
+
+Sin embargo, `host-model` solo permite la migración de la VM a un nodo con el mismo modelo de CPU. Para obtener más información, consulte xref:#_limitations[Limitaciones].
+
+== Inicio de una migración
+
+. Ve a la página de *Máquinas Virtuales*.
+. Encuentra la máquina virtual que deseas migrar y selecciona *⋮ > Migrar*.
+. Elige el nodo al que deseas migrar la máquina virtual. Haga clic en *Aplicar*.
+
+image::vm/migrate-action.png[]
+
+[NOTE]
+====
+La opción de menú **Migrar** no está disponible en las siguientes situaciones:
+
+* El clúster tiene solo un nodo.
+* La máquina virtual es [no migrable](#non-migratable-virtual-machines).
+* La máquina virtual ya tiene un proceso de migración en ejecución o pendiente.
+====
+
+image::vm/migrate.png[]
+
+== Abortando una migración
+
+. Ve a la página de *Máquinas Virtuales*.
+. Encuentra la máquina virtual en estado de migración que deseas abortar. Selecciona *⋮ -> Abortar migración*.
+
+[NOTE]
+====
+* El elemento de menú **Abortar migración** está disponible cuando la máquina virtual ya tiene un proceso de migración en ejecución o pendiente.
+
+* No utilices esta función de la interfaz si el proceso de migración fue creado utilizando xref:#_automatically_triggered_batch_migration[migración por lotes]. Para obtener más información, consulta xref:#_virtualmachineinstancemigration_object[`VirtualMachineInstanceMigration` Objeto].
+====
+
+== Migración por lotes activada automáticamente
+
+xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[Actualizar versión] y xref:hosts/hosts.adoc#_node_maintenance[mantenimiento de nodos] se benefician de la migración en vivo. El proceso subyacente, que se llama *migración por lotes*, es ligeramente diferente del que se describe en xref:#_starting_a_migration[Iniciar una migración]. Este proceso implica los siguientes pasos:
+
+. El controlador observa una marca dedicada en el objeto nodo.
+
+. El controlador crea un objeto `VirtualMachineInstanceMigration` para cada xref:#_live_migratable_virtual_machines[máquina virtual migrable en vivo] en el nodo actual.
+
+. Las migraciones se ponen en cola, se programan internamente y se procesan en lotes. La interfaz de usuario {harvester-product-name} muestra los estados **Migración pendiente** y **Migrando** para indicar el progreso.
+
+. El controlador supervisa el procesamiento y espera hasta que todos se completen o hayan expirado.
+
+== Tiempos de espera de migración
+
+=== Tiempo de espera de finalización
+
+El proceso de migración en vivo copia las páginas de memoria de la máquina virtual y los bloques de disco al destino. En ciertos casos, la máquina virtual puede escribir en diferentes páginas de memoria o bloques de disco a una tasa más alta de la que se pueden copiar. Como resultado, se impide que el proceso de migración se complete en un tiempo razonable.
+
+La migración en vivo se abortará si supera el tiempo de finalización de 800s por GiB de datos. Por ejemplo, una máquina virtual con 8 GiB de memoria supera el tiempo de espera después de 6400 segundos.
+
+=== Tiempo de espera de progreso
+
+La migración en vivo también se aborta cuando la copia de la memoria no avanza en 150s.
+
+== limitaciones
+
+=== Modelos de CPU
+
+`host-model` solo permite la migración de la máquina virtual a un nodo con el mismo modelo de CPU. Sin embargo, especificar un modelo de CPU no siempre es necesario. Cuando no se especifica un modelo de CPU, debes apagar la máquina virtual, asignar un modelo de CPU que sea compatible con todos los nodos y luego reiniciar la máquina virtual.
+
+Ejemplo:
+
+* Nodo A: `host-model-cpu.node.kubevirt.io/XYZ` `cpu-model-migration.node.kubevirt.io/XYZ` `cpu-model.node.kubevirt.io/123`
+* Nodo B: `host-model-cpu.node.kubevirt.io/ABC` `cpu-model-migration.node.kubevirt.io/ABC` `cpu-model.node.kubevirt.io/123`
+
+No es posible migrar una máquina virtual con `host-model` porque los valores de `host-model-cpu.node.kubevirt.io` no son idénticos. Sin embargo, ambos nodos son compatibles con el modelo de CPU `123`, por lo que puedes migrar cualquier máquina virtual con el modelo de CPU `123` utilizando cualquiera de los siguientes métodos:
+
+* Nivel de clúster: Ejecuta `kubectl edit kubevirts.kubevirt.io -n harvester-system` y añade `spec.configuration.cpuModel: "123"`. Este cambio también afecta a las máquinas virtuales recién creadas.
+* Máquinas virtuales individuales: Modifica la configuración de la máquina virtual para incluir `spec.template.spec.domain.cpu.model: "123"`.
+
+Ambos métodos requieren que reinicies las VMs. Si estás seguro de que todos los nodos en el clúster son compatibles con un modelo de CPU específico, puedes definir esto a nivel de clúster antes de crear cualquier VM. Al hacerlo, eliminas la necesidad de reiniciar las VMs (para asignar el modelo de CPU) durante la migración en vivo.
+
+=== Interrupciones de red
+
+La migración en vivo es muy sensible a las interrupciones de red. Cualquier interrupción en la conexión de red entre los nodos de origen y destino durante la migración puede tener una variedad de resultados.
+
+==== `mgmt` interrupciones de red
+
+La migración en vivo a través de `mgmt` (la red de clúster integrada) depende de la disponibilidad de las interfaces de gestión en los nodos de origen y destino. Las `mgmt` interrupciones de red se consideran críticas porque no solo interrumpen el proceso de migración, sino que también afectan la gestión general de los nodos.
+
+==== Interrupciones de red de migración de VM
+
+Una xref:networking/vm-network.adoc[red de migración de VM] aísla el tráfico de migración de otras actividades de red. Si bien esta configuración mejora el rendimiento y la fiabilidad de la migración, especialmente en entornos con alto tráfico de red, también hace que el proceso de migración dependa de la disponibilidad de esa red específica.
+
+Una interrupción en la red de migración de VM puede afectar el proceso de migración de las siguientes maneras:
+
+* Interrupción breve: El proceso de migración se detiene abruptamente. Una vez que se restaura la conectividad, el proceso se reanuda y puede completarse con éxito, aunque con un retraso.
+* Interrupción prolongada: El proceso de migración se agota y falla. La máquina virtual de origen continúa funcionando normalmente en el nodo de origen.
+
+El proceso de migración se ejecuta en modo punto a punto, lo que significa que el daemon de libvirt (libvirtd) en el nodo de origen controla la migración llamando directamente al daemon de destino. Un mecanismo de keepalive integrado asegura que la conexión del cliente permanezca activa durante el proceso de migración. Si la conexión permanece inactiva durante un período específico, se cierra y el proceso de migración se aborta.
+
+Por defecto, el intervalo de keepalive se establece en 5 segundos y el recuento de reintentos se establece en 5. Dado estos valores predeterminados, el proceso de migración se aborta si la conexión está inactiva durante 30 segundos. Sin embargo, la migración puede fallar antes o después, dependiendo de las condiciones reales del clúster.

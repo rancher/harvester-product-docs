@@ -1,0 +1,347 @@
+= サードパーティストレージのサポート
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+{harvester-product-name}は外部 https://kubernetes-csi.github.io/docs/introduction.html[コンテナストレージインターフェース（CSI）]ドライバーを使用して、ルートボリュームとデータボリュームのプロビジョニングをサポートします。この機能強化により、パフォーマンスの最適化や既存の内部ストレージソリューションとのシームレスな統合など、特定の要件を満たすドライバーを選択できるようになります。
+
+{harvester-product-name}チームは以下のCSIドライバーを検証しました：
+
+* Longhorn V2データエンジン：`driver.longhorn.io`
+* LVM：`lvm.driver.harvesterhci.io`
+* NFS: `nfs.csi.k8s.io`
+* Rook（RADOSブロックデバイス）：`rook-ceph.rbd.csi.ceph.com`
+
+これらの検証済みCSIドライバーには、以下の機能があります：
+
+|===
+| ストレージソリューション | VMイメージ | VMルートディスク | VMデータディスク | ボリュームをVMイメージにエクスポート | VMテンプレートジェネレーター | VMライブマイグレーション | VM Snapshot | VMバックアップ
+
+| Longhorn V2データエンジン
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+
+| LVM
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10004;
+| &#10006;
+
+| NFS
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10006;
+
+| Rook（RADOSブロックデバイス）
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+|===
+
+[NOTE]
+====
+サードパーティストレージのサポートは、外部コンテナストレージインターフェース（CSI）ドライバーを使用してルートボリュームとデータボリュームをプロビジョニングするサポートに相当します。これは、ストレージベンダーが{harvester-product-name}でストレージアプライアンスを検証し、相互運用性を高めることができることを意味します。
+
+{harvester-product-name}と互換性があると認定されたエンタープライズグレードのストレージソリューションに関する情報は、 https://scc.suse.com/home[SUSE Customer Center]を通じてアクセスできる{rancher-product-name}のドキュメントに記載されています。
+====
+
+== 前提条件
+
+{harvester-product-name}が正常に機能するようにするには、次の機能をサポートするCSIドライバーを使用してください：
+
+* ボリュームの拡張（オンラインリサイズ）
+* スナップショットの作成（ボリュームおよび仮想マシンスナップショット）
+* クローン作成（ボリュームおよび仮想マシンクローン）
+* xref:../virtual-machines/live-migration.adoc[ライブマイグレーション]のための読み書き多数（RWX）ボリュームの使用
+
+== {harvester-product-name}クラスターを作成する
+
+{harvester-product-name}のオペレーティングシステムは不変の設計に従っており、再起動後にほとんどのOSファイルが事前に設定された状態に戻ります。したがって、サードパーティのCSIドライバー用に{harvester-product-name}クラスターをインストールする前に、追加の設定を行う必要があるかもしれません。
+
+一部のCSIドライバーは、ホスト上に追加の永続パスを必要とします。これらのパスをxref:../installation-setup/config/configuration-file.adoc#_os_persistent_state_paths[`os.persistent_state_paths`]に追加できます。
+
+一部のCSIドライバーは、ホスト上に追加のソフトウェアパッケージを必要とします。これらのパッケージはxref:../installation-setup/config/configuration-file.adoc#_os_after_install_chroot_commands[`os.after_install_chroot_commands`]を使用してインストールできます。
+
+[NOTE]
+====
+{harvester-product-name}をアップグレードすると、`after-install-chroot`ステージでOSに加えた変更が失われます。アップグレードする際に変更を永続化するためには、`after-upgrade-chroot`も設定する必要があります。 https://rancher.github.io/elemental-toolkit/docs/customizing/runtime_persistent_changes/[ランタイム永続変更]を参照してから、{harvester-product-name}をアップグレードする前に確認してください。
+====
+
+== CSIドライバーをインストールしてください。
+
+{harvester-product-name}クラスターのインストール完了後、xref:../troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[kubeconfigファイルへのアクセス方法]を参照して、クラスターのkubeconfigを取得してください。
+
+{harvester-product-name}クラスターのkubeconfigを使用して、各CSIドライバーのインストール手順に従い、クラスターにサードパーティのCSIドライバーをインストールできます。CSIドライバーのドキュメントも参照して、{harvester-product-name}クラスターに`StorageClass`と`VolumeSnapshotClass`を作成する必要があります。
+
+== {harvester-product-name}クラスターを設定する
+
+{harvester-product-name} の *バックアップとスナップショット* 機能を利用する前に、{harvester-product-name} xref:../installation-setup/config/settings.adoc#_csi_driver_config[csi-driver-config] 設定を通じていくつかの基本的な構成を設定する必要があります。これらの設定を行うには、次の手順に従ってください：
+
+. {harvester-product-name} UI にログインし、次に *高度な -> 設定* に移動します。
+. *csi-driver-config* を見つけて選択し、次に *⋮ -> 設定を編集* を選択して構成オプションにアクセスします。
+. 設定で*プロビジョナー*をサードパーティのCSIドライバーに設定します。
+. 次に、*ボリュームスナップショットクラス名* を構成します。この設定は、ボリュームスナップショットまたは VM スナップショットを作成するために使用される `VolumeSnapshotClass` の名前を指します。
+
+image::third-party-storage/csi-driver-config-external.png[]
+
+[NOTE]
+====
+バックアップは現在、以下のものとのみ動作します：
+
+* Longhorn V1 データエンジン
+* Longhorn V2 データエンジン（非ルートディスクのみ）
+
+他のストレージプロバイダーを使用している場合は、*バックアップボリュームスナップショットクラス名* の構成をスキップできます。詳細については、 https://documentation.suse.com/cloudnative/virtualization/v1.4/en/storage/csidriver.html#_virtual_machine_backup_compatibility[仮想マシンバックアップの互換性] を参照してください。
+
+StorageClass プロビジョナーが CDI の https://github.com/kubevirt/containerized-data-importer/blob/v1.61.1/pkg/storagecapabilities/storagecapabilities.go#L35-L127[デフォルトアクセスおよびボリュームモードを持つプロビジョナー] のリストにない場合は、StorageClass に `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` を注釈付けする必要があります。この注釈がないと、Helm のインストールが失敗する可能性があります。StorageClass に注釈を付ける方法については、CSI ドライバーの Helm チャートドキュメントを確認してください。詳細については、xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[コンテナ化データインポーター (CDI) 設定] を参照してください。
+====
+
+== CSI ドライバーを使用する
+
+CSIドライバーがインストールされ、{harvester-product-name}クラスターが設定されると、ストレージ管理に関わるタスクで外部ストレージソリューションを使用できます。
+
+=== 仮想マシンイメージの作成
+
+外部ストレージソリューションを使用して、仮想マシンイメージを保存および管理できます。
+
+xref:../virtual-machines/vm-images/upload-image.adoc[仮想マシンイメージをアップロードする]際には、{harvester-product-name} UI (*イメージ -> 作成*)を使用して、*ストレージ*タブで外部ストレージソリューションのStorageClassを選択する必要があります。次の例では、StorageClassは*nfs-csi*です。
+
+image::third-party-storage/create-image-with-nfs-csi.png[]
+
+{harvester-product-name}は作成したイメージを外部ストレージソリューションに保存します。
+
+image::third-party-storage/created-image-with-nfs-csi.png[]
+
+=== 仮想マシンの作成
+
+仮想マシンは外部ストレージ内のルートおよびデータボリュームを使用できます。
+
+xref:../virtual-machines/create-vm.adoc[仮想マシンを作成する]際には、{harvester-product-name} UI (*仮想マシン -> 作成*)を使用して、*ボリューム*タブで次の操作を行う必要があります：
+
+* 外部ストレージソリューションに保存されている仮想マシンイメージを選択し、必要な設定を構成します。
+* データボリュームを追加します。
+
+image::third-party-storage/various-volumes-for-vm-creating.png[]
+
+次の例では、ルートボリュームはNFSを使用して作成され、データボリュームはLonghorn V2データエンジンを使用して作成されます。
+
+image::third-party-storage/various-volumes-for-vm-created.png[]
+
+=== ボリュームの作成
+
+外部ストレージソリューションでボリュームを作成できます。
+
+xref:./volumes/create-volume.adoc[ボリュームを作成する]際には、{harvester-product-name} UI (*ボリューム -> 作成*)を使用して、次の操作を行う必要があります：
+
+* *ストレージクラス*：対象のStorageClassを選択します（例：*nfs-csi*）。
+* *ボリュームモード*：対応するボリュームモードを選択します（例：*ファイルシステム*）。
+
+image::third-party-storage/create-fs-volume.png[]
+
+== 詳細トピック
+
+=== ストレージプロファイル
+
+CDI APIを使用して、データボリュームの定義を簡素化するカスタム https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[ストレージプロファイル]を作成できます。ストレージプロファイルは、複数のデータボリュームが同じプロビジョナー設定を共有できるようにします。
+
+以下はLVMストレージプロファイルの例です：
+
+[,yaml]
+----
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: StorageProfile
+metadata:
+  name: lvm-node-1-striped
+spec:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+status:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+  cloneStrategy: snapshot
+  dataImportCronSourceFormat: pvc
+  provisioner: lvm.driver.harvesterhci.io
+  snapshotClass: lvm-snapshot
+  storageClass: lvm-node-1-striped
+----
+
+デフォルトの設定を上書きするフィールドを定義できます。詳細については、CDIドキュメントの https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[ストレージプロファイル]を参照してください。
+
+[CAUTION]
+====
+ストレージプロファイルやCDIを直接変更しないでください。代わりに、{harvester-product-name}コントローラーがxref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[CDIアノテーション]を使用してストレージプロファイルの設定を同期し、永続化できるようにしてください。
+====
+
+=== 制限
+
+* バックアップサポートは現在{longhorn-product-name}ボリュームに制限されています。{harvester-product-name}は外部ストレージ内のボリュームのバックアップを作成できません。
+* CDIには、{harvester-product-name}が接続されたPVCを仮想マシンイメージに変換するのを防ぐ制限があります。外部ストレージにボリュームをエクスポートする前に、PVCがワークロードに接続されていないことを確認してください。これにより、結果として得られるイメージが*エクスポート中*の状態でスタックするのを防ぎます。
+
+image::third-party-storage/convert-pvc-to-image-stuck.png[]
+
+=== NFS CSIドライバのデプロイメント
+
+[NOTE]
+====
+NFSサーバーがすでにインストールされ、実行中である場合にのみ、NFS CSIドライバをデプロイできます。
+サーバーがすでに実行中の場合は、`squash`オプションを確認してください。KubeVirtがボリュームを適切に同期できるようにするために、リモートルートユーザーのスクワッシング（`no_root_squash`または`no_all_squash`）を無効にする必要があります。
+====
+
+. `csi-driver-nfs` Helmチャートを使用してドライバをインストールします。
++
+[,shell]
+----
+$ helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+$ helm install csi-driver-nfs csi-driver-nfs/csi-driver-nfs --namespace kube-system --version v4.10.0
+----
+
+. NFS用のStorageClassを作成します。
++
+パラメータに関する詳細は、Kubernetes NFS CSIドライバのドキュメントの https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/docs/driver-parameters.md[ドライバパラメータ：ストレージクラスの使用]を参照してください。
++
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <your-nfs-server-ip>
+  share: <your-nfs-share>
+  # csi.storage.k8s.io/provisioner-secret is only needed for providing mountOptions in DeleteVolume
+  # csi.storage.k8s.io/provisioner-secret-name: "mount-options"
+  # csi.storage.k8s.io/provisioner-secret-namespace: "default"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.2
+----
++
+作成後、StorageClassを使用して仮想マシンイメージ、ルートボリューム、およびデータボリュームを作成できます。
+
+== 参考資料
+
+* https://harvesterhci.io/kb/use_rook_ceph_external_storage[Rook Ceph外部ストレージをHarvesterと共に使用する]
+* https://harvesterhci.io/kb/install_netapp_trident_csi[HarvesterでのNetAppストレージの使用]
+* https://github.com/harvester/harvester/blob/master/enhancements/20250203-third-party-storage-support.md[サードパーティ製ストレージのサポート]
+
+== 当バージョンの注意事項
+
+=== 1.無限の画像ダウンロードループ
+
+画像のStorageClassがLVM CSIドライバーを使用している場合、画像ダウンロードプロセスが無限にループします。この問題は、CDIによって作成され、画像データを一時的に保存するために使用されるスクラッチボリュームに関連しています。この問題があなたの環境に存在する場合、`importer-prime-xxx`ポッドログに次のエラーメッセージが表示されることがあります：
+
+[,shell]
+----
+E0418 01:59:51.843459       1 util.go:98] Unable to write file from dataReader: write /scratch/tmpimage: no space left on device
+E0418 01:59:51.861235       1 data-processor.go:243] write /scratch/tmpimage: no space left on device
+unable to write to file
+kubevirt.io/containerized-data-importer/pkg/importer.streamDataToFile
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/util.go:101
+kubevirt.io/containerized-data-importer/pkg/importer.(*HTTPDataSource).Transfer
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/http-datasource.go:162
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).initDefaultPhases.func2
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:173
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessDataWithPause
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:240
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessData
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:149
+main.handleImport
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:188
+main.main
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:148
+runtime.main
+----
+
+メッセージ`no space left on device`は、スクラッチボリュームを使用して作成されたファイルシステムが画像データを保存するには不十分であることを示しています。CDIは、ターゲットボリュームのサイズに基づいてスクラッチボリュームを作成しますが、ファイルシステムのオーバーヘッドにより一部のスペースが失われます。デフォルトのオーバーヘッド値は`0.055`（5.5%に相当）であり、ほとんどの場合において十分です。ただし、画像サイズが1GB未満で、その仮想サイズが画像サイズに非常に近い場合、デフォルトのオーバーヘッドは不十分である可能性があります。
+
+回避策は、次のコマンドを使用してファイルシステムのオーバーヘッドを20%に増加させることです：
+
+[,shell]
+----
+# kubectl patch cdi cdi --type=merge -p '{"spec":{"config":{"filesystemOverhead":{"global":"0.2"}}}}'
+----
+
+ファイルシステムのオーバーヘッドが増加すると、画像がダウンロードされるはずです。
+
+[NOTE]
+====
+オーバーヘッド値を増加させても、画像PVCサイズには影響しません。画像がインポートされた後、スクラッチボリュームは削除されます。
+====
+
+関連する問題： https://github.com/harvester/harvester/issues/7993[#7993]（ https://github.com/harvester/harvester/issues/7993#issuecomment-2790260841[このコメント]を参照してください。）
+
+=== 2.マルチパスのサポート
+
+`multipathd`サービスは、デフォルトで{harvester-product-name}で無効になっています。ただし、一部のサードパーティ製CSIでは、サービスを有効にする必要があります。
+
+{harvester-product-name}をインストールした後、各クラスターのノードにログインし、次のコマンドを実行することで`multipathd`を有効にして開始できます：
+
+[,shell]
+----
+systemctl enable multipathd
+systemctl start multipathd
+----
+
+また、各ホストの`/oem`ディレクトリに{elemental-product-name} CloudInitファイルを作成することもできます（例えば、`/oem/99-start-multipathd.yaml`）次の内容で：
+
+[,yaml]
+----
+stages:
+   default:
+   - name: "start multipathd"
+     systemctl:
+       enable:
+         - multipathd
+       start:
+         - multipathd
+----
+
+この処理は、`CloudInit` CRDを使用してHarvesterクラスター全体で自動化できます。
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-mutlitpathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-mutlitpathd
+  contents: |
+    stages:
+      default:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----

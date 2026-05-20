@@ -1,0 +1,222 @@
+= Atualize da v1.4.2 ou v1.4.3 para v1.5.0
+:revdate: 2025-07-07
+:page-revdate: {revdate}
+
+== Informações gerais
+
+Um botão *fazer upgrade* aparece na tela *Dashboard* sempre que uma nova versão {harvester-product-name} para a qual você pode fazer upgrade se torna disponível. Para mais informações, veja xref:./upgrades.adoc#_start_an_upgrade[Iniciar um upgrade].
+
+Você pode fazer upgrade diretamente da v1.4.2 para a v1.5.0 porque {harvester-product-name} permite um máximo de um upgrade de versão menor para componentes subjacentes. {harvester-product-name} v1.4.2 e v1.4.3 usam a mesma versão menor de {rke2-product-name} (v1.31), enquanto {harvester-product-name} v1.5.0 usa a próxima versão menor (v1.32).
+
+Para informações sobre como fazer upgrade do {harvester-product-name} em ambientes air-gapped, veja xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar um upgrade em ambiente air-gapped].
+
+=== Atualize a Extensão de UI do Harvester na {rancher-product-name} v2.11.0
+
+Você deve usar **v1.5.0** da Extensão da Interface do Usuário do Harvester para importar {harvester-product-name} clusters v1.5.0 na {rancher-short-name} v2.11.0.
+
+. Na interface do {rancher-short-name}, vá para *local -> Aplicativos -> Repositórios*.
+
+. Localize o repositório chamado *harvester*, e então selecione *⋮ -> Atualizar*.
++
+Este repositório possui as seguintes propriedades:
++
+* URL: **https://github.com/harvester/harvester-ui-extension**
+* Branch: **gh-pages**
++
+image::upgrade/rancher-2.10.1-repository-page.png[]
+
+. Vá para a tela *Extensões*.
+
+. Localize a extensão chamada *Harvester*, e então clique em *Atualizar*.
+
+. Selecione a versão *1.5.0*, e então clique em *Atualizar*.
++
+image::upgrade/update-harvester-ui-extension-modal.png[]
+
+. Aguarde um tempo para que a extensão seja atualizada, e então atualize a tela.
+
+== Problemas conhecidos
+
+=== 1. O status da URL de gerenciamento é "Não pronto" durante a atualização.
+
+O console {harvester-product-name} em alguns nós pode exibir `Status: NotReady` enquanto a atualização está em andamento.
+
+O status correto é exibido após a conclusão da atualização para v1.5.0.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/7963[#7963]
+
+=== 2. Atualização air-gapped travada com erro `ImagePullBackOff` nos pods do Fluentd e Fluent Bit.
+
+A atualização pode ficar travada no início do processo, conforme indicado por 0% de progresso e itens marcados como *Pending* na caixa de diálogo *Upgrade* da interface {harvester-product-name}.
+
+image::upgrade/upgrade-dialog-with-empty-status.png[]
+
+Especificamente, os pods do Fluentd e do Fluent Bit podem ficar travados no status `ImagePullBackOff`. Para verificar o status dos pods, execute os seguintes comandos:
+
+[,bash]
+----
+$ kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-x2hz8   7m14s
+
+$ kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=hvst-upgrade-x2hz8
+NAME                            UPGRADE
+hvst-upgrade-x2hz8-upgradelog   hvst-upgrade-x2hz8
+
+$ kubectl -n harvester-system get pods -l harvesterhci.io/upgradeLog=hvst-upgrade-x2hz8-upgradelog
+NAME                                                        READY   STATUS             RESTARTS   AGE
+hvst-upgrade-x2hz8-upgradelog-downloader-6cdb864dd9-6bw98   1/1     Running            0          7m7s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-2nq7q         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-697wf         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-kd8kl         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentd-0               0/2     ImagePullBackOff   0          7m42s
+----
+
+Isso ocorre porque as seguintes imagens de contêiner não estão pré-carregadas nos nós do cluster nem foram baixadas da internet:
+
+* `ghcr.io/kube-logging/fluentd:v1.15-ruby3`
+* `ghcr.io/kube-logging/config-reloader:v0.0.5`
+* `fluent/fluent-bit:2.1.8`
+
+Para corrigir o problema, realize qualquer uma das seguintes ações:
+
+* Atualize o CR de Logging para usar as imagens que já estão pré-carregadas nos nós do cluster. Para fazer isso, execute os seguintes comandos no cluster:
++
+[,bash]
+----
+# Get the Logging CR names
+OPERATOR_LOGGING_NAME=$(kubectl get loggings -l app.kubernetes.io/name=rancher-logging -o jsonpath="{.items[0].metadata.name}")
+INFRA_LOGGING_NAME=$(kubectl get loggings -l harvesterhci.io/upgradeLogComponent=infra -o jsonpath="{.items[0].metadata.name}")
+
+# Gather image info from operator's Logging CR
+FLUENTD_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.repository}")
+FLUENTD_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.tag}")
+
+FLUENTBIT_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.repository}")
+FLUENTBIT_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.tag}")
+
+CONFIG_RELOADER_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.repository}")
+CONFIG_RELOADER_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.tag}")
+
+# Patch the Logging CR
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentbit/image\",\"value\":{\"repository\":\"$FLUENTBIT_IMAGE_REPO\",\"tag\":\"$FLUENTBIT_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/image\",\"value\":{\"repository\":\"$FLUENTD_IMAGE_REPO\",\"tag\":\"$FLUENTD_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/configReloaderImage\",\"value\":{\"repository\":\"$CONFIG_RELOADER_IMAGE_REPO\",\"tag\":\"$CONFIG_RELOADER_IMAGE_TAG\"}}]"
+----
++
+O status dos pods do Fluentd e do Fluent Bit deve mudar para `Running` em breve e o processo de upgrade deve continuar após a atualização do CR de Logging. Se o status do pod do Fluentd ainda estiver `ImagePullBackOff`, você pode excluir o pod para forçá-lo a reiniciar.
++
+[,bash]
+----
+UPGRADE_NAME=$(kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true -o jsonpath='{.items[0].metadata.name}')
+UPGRADELOG_NAME=$(kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=$UPGRADE_NAME -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n harvester-system delete pods -l harvesterhci.io/upgradeLog=$UPGRADELOG_NAME,harvesterhci.io/upgradeLogComponent=aggregator
+----
+
+* Em um computador com acesso à internet, baixe as imagens de contêiner necessárias e, em seguida, exporte-as para um arquivo TAR. Em seguida, transfira o arquivo TAR para os nós do cluster e importe as imagens executando os seguintes comandos em cada nó:
++
+[,bash]
+----
+# Pull down the three container images
+docker pull ghcr.io/kube-logging/fluentd:v1.15-ruby3
+docker pull ghcr.io/kube-logging/config-reloader:v0.0.5
+docker pull fluent/fluent-bit:2.1.8
+
+# Export the images to a tar file
+docker save \
+  ghcr.io/kube-logging/fluentd:v1.15-ruby3 \
+  ghcr.io/kube-logging/config-reloader:v0.0.5 \
+  fluent/fluent-bit:2.1.8 > upgradelog-images.tar
+
+# After transferring the tar file to the cluster nodes, import the images (need to be run on each node)
+ctr -n k8s.io images import upgradelog-images.tar
+----
++
+O processo de upgrade deve continuar após as imagens serem pré-carregadas.
+
+- (Não recomendado) Reinicie o processo de upgrade com o registro desativado. Certifique-se de que a caixa de seleção *Enable Logging* na caixa de diálogo *Upgrade* não esteja selecionada.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/7955[#7955]
+
+=== 3. Atualização travada aguardando o bundle CR `mcc-harvester`.
+
+Quando você atualiza de uma versão antiga do {harvester-product-name} (como `v1.0.x`, `v1.1.x` e `v1.2.x`), o processo de atualização pode ficar travado esperando que o bundle CR `mcc-harvester` fique pronto.
+
+[,shell]
+----
+> kubectl get bundles -n fleet-local
+NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
+mcc-harvester                                 0/1                       Modified(1) [Cluster fleet-local/local]; kubevirt.kubevirt.io harvester-system/kubevirt modified {"spec":{"configuration":{"vmStateStorageClass":"vmstate-persistence"}}}
+----
+
+A causa raiz é que os CRDs mais recentes do `dependency_charts` não foram aplicados, o que ocorreu porque o Helm não gerencia CRDs para {harvester-product-name}. Para permitir que a atualização continue, execute o seguinte script:
+
+[,shell]
+----
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/kubevirt-operator/crds/crd-kubevirt.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/csi-snapshotter/crds/volumesnapshotclasses.yaml
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/csi-snapshotter/crds/volumesnapshotcontents.yaml
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/csi-snapshotter/crds/volumesnapshots.yaml
+
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_ippools.yaml
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+----
+
+Após cinco minutos, verifique o status no `mcc-harvester` bundle CR de `bundle.fleet.cattle.io/v1alpha1`. Se o mesmo erro ainda for exibido, você deve ressincronizar o bundle CR usando o seguinte script:
+
+[,shell]
+----
+#!/bin/bash
+
+patch_fleet_bundle() {
+  local bundleName=$1
+  local generation=$(kubectl get -n fleet-local bundle ${bundleName} -o jsonpath='{.spec.forceSyncGeneration}')
+  local new_generation=$((generation+1))
+  patch_manifest="$(mktemp)"
+  cat > "$patch_manifest" <<EOF
+{
+  "spec": {
+    "forceSyncGeneration": $new_generation
+  }
+}
+EOF
+  echo "patch bundle to new generation: $new_generation"
+  kubectl patch -n fleet-local bundle ${bundleName}  --type=merge --patch-file $patch_manifest
+  rm -f $patch_manifest
+}
+
+for bundle in mcc-harvester
+do
+  patch_fleet_bundle ${bundle}
+done
+----
+
+Você também deve garantir que o `cdi` CRD exista.
+
+[,shell]
+----
+> kubectl get bundle -n fleet-local
+NAMESPACE     NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
+fleet-local   mcc-harvester                                 0/1                       Modified(1) [Cluster fleet-local/local]; cdi.cdi.kubevirt.io cdi missing
+----
+
+Se o `cdi` CRD existir, execute o script `patch_fleet_bundle` para ressincronizar o `mcc-harvester` bundle CR. Caso contrário, execute o seguinte script para criar o `cdi` CRD:
+
+[,shell]
+----
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/refs/tags/v1.5.0/deploy/charts/harvester/dependency_charts/cdi/crds/cdi.yaml
+----
+
+Problema relacionado: https://github.com/harvester/harvester/issues/8163[#8163]
+
+=== 4. Máquinas virtuais que usam volumes RWX migráveis reiniciam inesperadamente
+
+Máquinas virtuais que usam xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[volumes RWX] migráveis reiniciam inesperadamente quando os pods do plugin CSI são reiniciados. Esse problema afeta {harvester-product-name} v1.4.x, v1.5.0 e v1.5.1.
+
+A solução alternativa é desativar a configuração https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[Excluir automaticamente o pod de carga de trabalho quando o volume for desconectado inesperadamente] na interface {longhorn-product-name} antes de iniciar a atualização. Você deve habilitar a configuração novamente assim que a atualização for concluída.
+
+O problema será corrigido em {longhorn-product-name} v1.8.3, v1.9.1 e em versões posteriores. {harvester-product-name} v1.6.0 incluirá {longhorn-product-name} v1.9.1. 
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8534[#8534] e https://github.com/longhorn/longhorn/issues/11158[#11158]

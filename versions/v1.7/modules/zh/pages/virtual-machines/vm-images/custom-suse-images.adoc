@@ -1,0 +1,117 @@
+= 自定义 SUSE 虚拟机映像
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+SUSE 提供适用于 https://www.suse.com/download/sles/[SUSE Linux Enterprise (SLE)] 和 https://get.opensuse.org/leap/[openSUSE Leap] 的虚拟机映像，适合在 {harvester-product-name} 中使用。这些映像基于 https://build.opensuse.org/[openSUSE Build Service] (OBS) 使用 https://osinside.github.io/kiwi/[Kiwi] 映像构建工具构建，下载后即可立即使用。
+
+在大多数情况下，您可以使用 _Minimal VM Cloud_ qcow2 映像，因为这些映像包含自动虚拟机配置所需的 cloud-init 工具。其他映像变体需要您登录虚拟机控制台，然后执行初始配置。
+
+[IMPORTANT]
+====
+在 SLES 15 SP5 和 openSUSE 15.5 之前的版本中，_Minimal VM Cloud_ 映像被命名为 _Minimal VM OpenStack Cloud_。
+====
+
+== 使用 openSUSE Build Service (OBS)
+
+您可以使用 SUSE 的 OBS https://build.opensuse.org/image_templates[映像模板] 创建自定义映像，这些模板是预配置的 Kiwi 映像配置。例如，如果您想在 SLE 15 SP7 中使用其他软件包，可以使用 _SLE 17 SP5 Minimal_ 模板创建映像。OBS 提供了一个添加软件包的接口，并自动构建映像，您可以下载后上传到 {harvester-product-name}。有关更多信息，请参见 https://openbuildservice.org/help/manuals/obs-user-guide/[OBS 用户指南]。
+
+=== 1.基于现有模板创建自定义映像。
+
+. 前往 https://build.opensuse.org/image_templates.。您必须登录到您的 openSUSE 账户以访问资源。
+. 选择您想要使用的模板。
+. 为映像指定一个名称，然后选择 *创建设备*。
++
+image::advanced/custom-vm-01-select-template.png[]
++
+OBS 会自动构建映像。默认情况下，界面显示 *概述* 选项卡，其中包含软件包数量和构建状态等信息。
++
+image::advanced/custom-vm-02-image-overview.png[]
+
+=== 2.选择映像配置文件并添加软件包。
+
+. 前往 *软件* 选项卡。
+. 选择您希望 OBS 构建的映像配置文件。
++
+[IMPORTANT]
+====
+在大多数情况下，您可以使用 _Minimal VM Cloud_ qcow2 映像，因为这些映像包含自动虚拟机配置所需的 cloud-init 工具。其他映像变体需要您登录虚拟机控制台，然后执行初始配置。
+====
++
+image::advanced/custom-vm-03-image-software.png[]
+
+. （可选）添加和去除软件包。
++
+image::advanced/custom-vm-04-image-software-packages.png[]
++
+image::advanced/custom-vm-05-image-software-add-package.png[]
+
+=== 3.（可选）切换到 _查看软件包_ 模式。
+
+_查看软件包_ 模式提供更细粒度的配置控制。要切换，请点击导航栏中的 _查看软件包_ 图标。
+
+image::advanced/custom-vm-06-view-package.png[]
+
+*概述* 标签中的 *源文件* 部分显示构成您的 Kiwi 模板的所有文件。您可以通过选择相应的文件名来编辑任何文件。
+
+image::advanced/custom-vm-07-view-package-details.png[]
+
+=== 4.（可选）编辑配置文件 `Minimal.kiwi`。
+
+选择文件名以打开文本编辑器。`<packages type="image">` 部分列出了要安装的软件包。您可以为每个映像配置文件指定额外的软件包。
+
+默认情况下，_云_ 映像配置文件 (`<package type="image" profiles="Cloud">`) 安装 _kernel-default-base_ 软件包。在以下示例中，该软件包被替换为 _kernel-default_，其中包含 iSCSI 支持所需的模块。
+
+image::advanced/custom-vm-08-edit-kiwi-config.png[]
+
+=== 5.等待 OBS 完成构建镜像。
+
+一旦过程完成，*概述* 标签上的 *构建结果* 部分显示状态为 _成功_。
+
+image::advanced/custom-vm-09-build-succeeded.png[]
+
+*构建结果* 部分还包含新镜像的下载链接。
+
+image::advanced/custom-vm-10-binaries-link.png[]
+
+image::advanced/custom-vm-11-binaries-download.png[]
+
+=== 6.启用发布以共享镜像。
+
+要允许公众下载您的自定义镜像，请转到您的 OBS 项目的 *仓库* 标签并启用 _发布_ 标志。
+
+image::advanced/custom-vm-12-project-publish-repositories.png[]
+
+您的镜像已发布到 https://download.opensuse.org/（在 `repositories/home:/YOUR_USER_NAME:/branches:/SUSE:/Templates:/Images:/` 下）。
+
+image::advanced/custom-vm-13-download.openuse.org.png[]
+
+== 使用 Kiwi 命令行工具
+
+作为 openSUSE Build Service 的替代方案，您可以使用 Kiwi 命令行工具在本地创建镜像。有关该工具的更多信息，请参见 https://documentation.suse.com/appliance/kiwi-9/html/kiwi/index.html[使用 KIWI 下一代构建 Linux 系统设备]。
+
+要创建自定义映像，您必须首先从 OBS 的相应项目下载文件 `Minimal.kiwi`、脚本 `config.sh` 和 `editbootinstall_rpi.sh`。
+
+|===
+| 操作系统 | openSUSE Build Service 项目
+
+| SLE 15 SP7
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP7:GA/kiwi-templates-Minimal
+
+| SLE 15 SP6
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP6:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.6
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.6/kiwi-templates-Minimal
+
+| SLE 15 SP5
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP5:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.5
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.5/kiwi-templates-Minimal
+
+| SLE 15 SP4
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP4:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.4
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.4/kiwi-templates-Minimal
+|===

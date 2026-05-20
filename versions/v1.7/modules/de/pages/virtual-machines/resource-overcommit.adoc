@@ -1,0 +1,59 @@
+= Ressourcenüberbelegung
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name} unterstützt die globale Konfiguration von Überlastungsprozentsätzen für CPU, RAM und Speicher. Durch die Einstellung von xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] wird die Planung zusätzlicher virtueller Maschinen ermöglicht, selbst wenn die physischen Ressourcen vollständig ausgelastet sind.
+
+{harvester-product-name} ermöglicht es Ihnen, CPU und RAM auf Rechenknoten zu überbelegen. Dies ermöglicht es Ihnen, die Anzahl der Instanzen, die in Ihrer Cloud ausgeführt werden, zu erhöhen, auch wenn dies zu einer Verringerung der Leistung der Instanzen führt. Der Compute-Dienst verwendet standardmäßig die folgenden Verhältnisse:
+
+* CPU-Zuteilungsverhältnis: 1600%
+* RAM-Zuteilungsverhältnis: 150%
+* Speicher-Zuteilungsverhältnis: 200%
+
+[NOTE]
+====
+Klassische Speicherüberbelegung oder Speicherballooning wird von dieser Funktion noch nicht unterstützt. Mit anderen Worten, der von einer virtuellen Maschineninstanz verwendete Speicher kann nach der Zuteilung nicht zurückgegeben werden.
+====
+
+== Konfigurieren Sie die globale Einstellung xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]
+
+Benutzer können die globale `overcommit-config` ändern, indem sie die folgenden Schritte ausführen, und sie wird auf jede neu erstellte virtuelle Maschine nach der Änderung angewendet.
+
+. Gehen Sie zu *Erweiterte -> Einstellungen*.
++
+image::vm/overcommit-page.png[Überbelegungsseite]
++
+. Finden Sie die `overcommit-config` Einstellung.
+. Konfigurieren Sie das gewünschte Verhältnis von CPU, RAM und Speicher.
++
+image::vm/overcommit-panel.png[Überbelegungs-Panel]
+
+== Konfigurieren Sie die Überbuchung für eine einzelne virtuelle Maschine.
+
+In Situationen, in denen Sie spezifische Konfigurationen für einzelne virtuelle Maschinen benötigen, ohne die globalen Einstellungen zu beeinflussen, können Sie dies einfach erreichen, indem Sie den Wert `spec.template.spec.domain.resources.limits.<memory|cpu>` direkt in der entsprechenden Spezifikation der virtuellen Maschine ändern.
+
+image::vm/vm-overcommit-config.png[VM-Überbelegungskonfiguration]
+
+== Reservieren Sie mehr Arbeitsspeicher für den Systemoverhead.
+
+Standardmäßig reserviert der {harvester-product-name} eine bestimmte Menge an Arbeitsspeicher für das Systemmanagement aus dem für die virtuelle Maschine zugewiesenen Arbeitsspeicher. In den meisten Fällen wird dies keine Probleme verursachen. Einige Betriebssysteme, wie Windows 2022, werden jedoch mehr Arbeitsspeicher anfordern, als reserviert ist.
+
+Um das Problem zu beheben, bietet {harvester-product-name} eine Annotation `harvesterhci.io/reservedMemory` auf der benutzerdefinierten Ressource der virtuellen Maschine, mit der Sie die Menge an Arbeitsspeicher, die reserviert werden soll, angeben können. Fügen Sie beispielsweise `harvesterhci.io/reservedMemory: 200Mi` hinzu, wenn Sie sich entscheiden, 200 MiB für den Systemoverhead der virtuellen Maschine zu reservieren.
+
+[,diff]
+----
+ apiVersion: kubevirt.io/v1
+ kind: VirtualMachine
+ metadata:
+   annotations:
++    harvesterhci.io/reservedMemory: 200Mi
+     kubevirt.io/latest-observed-api-version: v1
+     kubevirt.io/storage-observed-api-version: v1alpha3
+     network.harvesterhci.io/ips: '[]'
+   ...
+   ...
+----
+
+== Warum werden meine virtuellen Maschinen ungleichmäßig geplant?
+
+Die Planung der virtuellen Maschinen hängt vom zugrunde liegenden Verhalten des kube-schedulers ab. Wir haben einen speziellen Artikel, der die Einzelheiten erklärt. Wenn Sie mehr erfahren möchten, schauen Sie sich an: https://harvesterhci.io/kb/vm-scheduling/[VM-Planung].

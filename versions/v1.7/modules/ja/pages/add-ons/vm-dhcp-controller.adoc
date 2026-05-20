@@ -1,0 +1,303 @@
+= VM DHCPコントローラー (実験的)
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-vm-dhcp-controller* は *実験的* アドオンです。ISOには含まれていませんが、 https://github.com/harvester/experimental-addons[`experimental-addons` リポジトリ] からダウンロードできます。実験的機能に関する詳細は、xref:introduction/document-conventions.adoc#_feature_labels[機能ラベル] を参照してください。
+====
+
+埋め込まれた管理DHCP機能を使用して、{harvester-product-name} クラスター上で実行されている VM に IP アドレスを提供するための IP プール情報を構成できます。この機能は、スタンドアロンDHCPサーバーの代替として、ゲストクラスターの展開を簡素化するために `vm-dhcp-controller` アドオンを使用します。
+
+[NOTE]
+====
+{harvester-product-name} は計画されたインフラストラクチャネットワークを使用するため、ネットワーク接続が利用可能であることを確認し、事前に IP プールを計画する必要があります。
+====
+
+== ユニークな機能
+
+* DHCPリースは、クラスター全体の真実の唯一のソースとして etcd に保存されます。
+* 各リースは本質的に静的であり、現在のネットワークインフラストラクチャとよく機能します。
+* 管理DHCPエージェントは、クラスターのコントロールプレーンが停止しても、既存のエンティティに対するDHCPリクエストを引き続き処理でき、仮想マシンのワークロードのネットワークが利用可能であることを保証します。
+
+== 制限
+
+* 管理DHCP機能は、`VirtualMachine` CR で指定されたネットワークインタフェースでのみ機能します。仮想マシンで作成されたネットワークインタフェースはサポートされていません。
+* 仮想マシンが作成された後にネットワークインタフェースを追加または削除しても、IPアドレスは割り当てられたり解放されたりしません。実際のMACアドレスは `VirtualMachineNetworkConfig` CR に記録されます。
+* 現在、DHCP RELEASE操作はサポートされていません。
+* IPプール設定の更新は、関連するエージェントポッドを手動で再起動した後にのみ有効になります。
+
+== アドオンのインストールと有効化
+
+次のコマンドを実行することでアドオンをインストールできます：
+
+[,shell]
+----
+kubectl apply -f https://raw.githubusercontent.com/harvester/experimental-addons/main/harvester-vm-dhcp-controller/harvester-vm-dhcp-controller.yaml
+----
+
+[NOTE]
+====
+アドオンはクラスター固有のサービス CIDR を動的に検出できず、デフォルトで `10.53.0.0/16` を使用します。
+
+クラスターが異なるサービス CIDR を使用する場合は、問題を防ぐために `Addon` CR の `valuesContent` セクションで明示的に構成する必要があります。特に、CIDR がデフォルトの `10.53.0.0/16` サービス CIDR と重複する場合、IP プールリソース (IPPools) を作成しようとすると失敗する可能性があります。
+
+例:
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Addon
+metadata:
+  ...
+  name: harvester-vm-dhcp-controller
+  namespace: harvester-system
+spec:
+  ...
+  valuesContent: |
+    serviceCIDR: <your-cluster-service-cidr> # for instance, 10.96.0.0/16
+----
+
+クラスターのサービス CIDR を確認するには、次のコマンドを使用します：
+
+[,bash]
+----
+kubectl -n kube-system get pods -l component=kube-apiserver -o yaml | grep "service-cluster-ip-range"
+----
+====
+
+インストール後、*ダッシュボード*画面の{harvester-product-name} UIでアドオンを有効にするか、コマンドラインツール kubectl を使用します。
+
+image::vm-dhcp-controller/enable-addon.png[]
+
+== アドオンを使用する
+
+. UIの*ダッシュボード*画面で、xref:networking/vm-network.adoc#_create_a_vm_network[VMネットワークを作成]します。
++
+image::vm-dhcp-controller/vm-network.png[]
+
+. コマンドラインツール kubectl を使用して`IPPool`オブジェクトを作成します。
++
+[,shell]
+----
+ cat <<EOF | kubectl apply -f -
+ apiVersion: network.harvesterhci.io/v1alpha1
+ kind: IPPool
+ metadata:
+   name: net-48
+   namespace: default
+ spec:
+   ipv4Config:
+     serverIP: 192.168.48.77
+     cidr: 192.168.48.0/24
+     pool:
+       start: 192.168.48.81
+       end: 192.168.48.90
+       exclude:
+       - 192.168.48.81
+       - 192.168.48.90
+     router: 192.168.48.1
+     dns:
+     - 1.1.1.1
+     leaseTime: 300
+   networkName: default/net-48
+ EOF
+----
+
+. xref:virtual-machines/create-vm.adoc#_how_to_create_a_virtual_machine[Create a VM]し、以前に作成した VM ネットワークに接続します。
++
+image::vm-dhcp-controller/create-vm.png[]
+
+. 対応する`VirtualMachineNetworkConfig`オブジェクトが作成され、VM のネットワークインタフェースのMACアドレスがオブジェクトに適用されるのを待ちます。
+
+. `IPPool`および`VirtualMachineNetworkConfig`オブジェクトの`.status`フィールドを確認し、IPアドレスがMACアドレスに割り当てられていることを確認します。
++
+[,shell]
+----
+ $ kubectl get ippools.network net-48 -o yaml
+ apiVersion: network.harvesterhci.io/v1alpha1
+ kind: IPPool
+ metadata:
+   creationTimestamp: "2024-02-15T13:17:21Z"
+   finalizers:
+   - wrangler.cattle.io/vm-dhcp-ippool-controller
+   generation: 1
+   name: net-48
+   namespace: default
+   resourceVersion: "826813"
+   uid: 5efd44b7-3796-4f02-947e-3949cb4c8e3d
+ spec:
+   ipv4Config:
+     cidr: 192.168.48.0/24
+     dns:
+     - 1.1.1.1
+     leaseTime: 300
+     pool:
+       end: 192.168.48.90
+       exclude:
+       - 192.168.48.81
+       - 192.168.48.90
+       start: 192.168.48.81
+     router: 192.168.48.1
+     serverIP: 192.168.48.77
+   networkName: default/net-48
+ status:
+   agentPodRef:
+     name: default-net-48-agent
+     namespace: harvester-system
+   conditions:
+   - lastUpdateTime: "2024-02-15T13:17:21Z"
+     status: "True"
+     type: Registered
+   - lastUpdateTime: "2024-02-15T13:17:21Z"
+     status: "True"
+     type: CacheReady
+   - lastUpdateTime: "2024-02-15T13:17:30Z"
+     status: "True"
+     type: AgentReady
+   - lastUpdateTime: "2024-02-15T13:17:21Z"
+     status: "False"
+     type: Stopped
+   ipv4:
+     allocated:
+       192.168.48.81: EXCLUDED
+       192.168.48.84: ca:70:82:e6:84:6e
+       192.168.48.90: EXCLUDED
+     available: 7
+     used: 1
+   lastUpdate: "2024-02-15T13:48:20Z"
+----
++
+[,shell]
+----
+ $ kubectl get virtualmachinenetworkconfigs.network test-vm -o yaml
+ apiVersion: network.harvesterhci.io/v1alpha1
+ kind: VirtualMachineNetworkConfig
+ metadata:
+   creationTimestamp: "2024-02-15T13:48:02Z"
+   finalizers:
+   - wrangler.cattle.io/vm-dhcp-vmnetcfg-controller
+   generation: 2
+   labels:
+     harvesterhci.io/vmName: test-vm
+   name: test-vm
+   namespace: default
+   ownerReferences:
+   - apiVersion: kubevirt.io/v1
+     kind: VirtualMachine
+     name: test-vm
+     uid: a9f8ce12-fd6c-4bd2-b266-245d8e77dae3
+   resourceVersion: "826809"
+   uid: 556440c7-eeeb-4daf-9c98-60ab39688ba8
+ spec:
+   networkConfig:
+   - macAddress: ca:70:82:e6:84:6e
+     networkName: default/net-48
+   vmName: test-vm
+ status:
+   conditions:
+   - lastUpdateTime: "2024-02-15T13:48:20Z"
+     status: "True"
+     type: Allocated
+   - lastUpdateTime: "2024-02-15T13:48:02Z"
+     status: "False"
+     type: Disabled
+   networkConfig:
+   - allocatedIPAddress: 192.168.48.84
+     macAddress: ca:70:82:e6:84:6e
+     networkName: default/net-48
+     state: Allocated
+----
+
+. xref:virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[VMのシリアルコンソール]を確認し、ネットワークインタフェースにIPアドレスが正しく設定されていることを確認します（DHCP経由）。
++
+image::vm-dhcp-controller/vm-console.png[]
+
+== ポッドとCRD
+
+アドオンが有効になると、次のタイプのポッドが実行されます:
+
+* コントローラ:CRDオブジェクトを調整して、IPアドレスとMACアドレスの間の割り当てとマッピングを決定します。結果は`IPPool`オブジェクトに永続化されます。
+* ウェブフック:リクエスト（作成、更新、削除）を受信したときにCRDオブジェクトを検証および変更します。
+* エージェント:DHCPリクエストに応答し、内部DHCPリースストアが最新であることを確認します。これは、エージェントが関連付けられている特定の`IPPool`オブジェクトを同期することによって達成されます。新しい`IPPool`オブジェクトを作成するたびに、エージェントがオンデマンドで生成されます。
+
+アドオンは次の新しいCRDを導入します:
+
+* `IPPool` (`ippl`)
+* `VirtualMachineNetworkConfig` (`vmnetcfg`)
+
+=== `IPPool` CRD
+
+`IPPool` CRDは、IPプール情報を定義することを可能にします。各IPPoolオブジェクトを特定の`NetworkAttachmentDefinition`（NAD）オブジェクトにマッピングする必要があり、そのオブジェクトは事前に作成されている必要があります。
+
+[NOTE]
+====
+`IPPool`という名前の複数のCRDが{harvester-product-name}エコシステムで使用されており、`loadbalancer.harvesterhci.io` APIグループにも同様の名前のCRDがあります。問題を避けるために、*IPPool CRD in the `network.harvesterhci.io` APIグループ*を使用していることを確認してください。ロードバランサーに関連する`IPPool` CRD操作に関する詳細情報は、xref:networking/ip-pool.adoc[IPプール]を参照してください。
+====
+
+例:
+
+[,yaml]
+----
+apiVersion: network.harvesterhci.io/v1alpha1
+kind: IPPool
+metadata:
+  name: example
+  namespace: default
+spec:
+  ipv4Config:
+    serverIP: 192.168.100.2 # The DHCP server's IP address
+    cidr: 192.168.100.0/24 # The subnet information, must be in the CIDR form
+    pool:
+      start: 192.168.100.101
+      end: 192.168.100.200
+      exclude:
+      - 192.168.100.151
+      - 192.168.100.187
+    router: 192.168.100.1 # The default gateway, if any
+    dns:
+    - 1.1.1.1
+    domainName: example.com
+    domainSearch:
+    - example.com
+    ntp:
+    - pool.ntp.org
+    leaseTime: 300
+  networkName: default/example # The namespaced name of the NAD object
+----
+
+`IPPool`オブジェクトが作成された後、コントローラーの調整プロセスがIP割り当てモジュールを初期化し、ネットワーク用のエージェントポッドを生成します。
+
+[,shell]
+----
+$ kubectl get ippools.network example
+NAME      NETWORK           AVAILABLE   USED   REGISTERED   CACHEREADY   AGENTREADY
+example   default/example   98          0      True         True         True
+----
+
+=== `VirtualMachineNetworkConfig` CRD
+
+`VirtualMachineNetworkConfig` CRDは、*IPアドレス発行のリクエスト*に似ており、`NetworkAttachmentDefinition`（NAD）オブジェクトに関連付けられています。
+
+サンプルの`VirtualMachineNetworkConfig`オブジェクトは以下のようになります：
+
+[,yaml]
+----
+apiVersion: network.harvesterhci.io/v1alpha1
+kind: VirtualMachineNetworkConfig
+metadata:
+  name: test-vm
+  namespace: default
+spec:
+  networkConfig:
+  - macAddress: 22:37:37:82:93:7d
+    networkName: default/example
+  vmName: test-vm
+----
+
+`VirtualMachineNetworkConfig`オブジェクトが作成された後、コントローラーは記録された各MACアドレスのためにIP割り当てモジュールから未使用のIPアドレスのリストを取得しようとします。IP-MACマッピングは、その後`VirtualMachineNetworkConfig`オブジェクトおよび対応する`IPPool`オブジェクトで更新されます。
+
+[NOTE]
+====
+ほとんどの場合、VM用の`VirtualMachineNetworkConfig`オブジェクトを手動で作成する必要はありません。なぜなら、アドオンが`VirtualMachine`調整プロセス中にそのタスクを処理するからです。自動的に作成された`VirtualMachineNetworkConfig`オブジェクトは、`VirtualMachine`オブジェクトが削除されるときに削除されます。
+====

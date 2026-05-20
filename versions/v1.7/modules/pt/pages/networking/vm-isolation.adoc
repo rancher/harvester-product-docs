@@ -1,0 +1,265 @@
+= Isolamento de máquinas virtuais
+:revdate: 2025-09-15
+:page-revdate: {revdate}
+
+[NOTE]
+====
+Todos os recursos que utilizam Kube-OVN são considerados experimentais. Para mais informações sobre recursos experimentais, veja xref:introduction/document-conventions.adoc#_feature_labels[Rótulos de Recursos].
+====
+
+O isolamento entre máquinas virtuais é tipicamente alcançado usando VLANs (em redes tradicionais) ou switches virtuais (no Kube-OVN). Se você deseja isolar máquinas virtuais dentro da mesma rede de switch virtual, pode usar um dos seguintes métodos para alcançar a micro-segmentação necessária:
+
+* Listas de controle de acesso de sub-rede (ACLs): Aplique regras a uma sub-rede utilizada por máquinas virtuais.
+* Políticas de rede do Kubernetes: Aplique regras dentro de namespaces de rede e usando seletores de pod.
+
+== ACLs de Sub-rede
+
+Para mais informações sobre o esquema e diretrizes de uso, veja https://kubeovn.github.io/docs/v1.13.x/en/guide/subnet/#subnet-acl[ACL de Sub-rede] e https://kubeovn.github.io/docs/v1.13.x/en/reference/kube-ovn-api/#acl[Referência da API de ACL] na documentação do Kube-OVN.
+
+=== Exemplos
+
+* Exemplo 1: Todas as máquinas virtuais dentro da sub-rede `172.20.10.0/24`, exceto aquelas com os endereços `172.20.10.2` e `172.20.10.3` no intervalo da sub-rede `172.20.10.0/30`, estão autorizadas a se comunicar entre si.
++
+O Kube-OVN adiciona automaticamente o endereço do gateway `172.20.10.1` à lista `excludeIps`, impedindo que ele seja atribuído a qualquer máquina virtual. No entanto, a comunicação para e do endereço do gateway também é afetada.
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.0/30
+      priority: 1005
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.0/30
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* Exemplo 2: Todas as máquinas virtuais dentro da sub-rede `172.20.10.0/24`, exceto aquelas com o endereço `172.20.10.3`, estão autorizadas a se comunicar entre si. Máquinas virtuais com o endereço `172.20.10.2` estão autorizadas a se comunicar porque a execução da regra de ACL é baseada em prioridade. Para esta sub-rede, regras com um valor de prioridade de `1006` são executadas antes de `1005`.
++
+O Kube-OVN adiciona automaticamente o endereço do gateway `172.20.10.1` à lista `excludeIps`, impedindo que ele seja atribuído a qualquer máquina virtual. No entanto, a comunicação para e do endereço do gateway também é afetada.
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: allow
+      direction: to-lport
+      match: ip4.dst == 172.20.10.2
+      priority: 1006
+    - action: allow
+      direction: from-lport
+      match: ip4.src == 172.20.10.2
+      priority: 1006
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.0/30
+      priority: 1005
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.0/30
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* Exemplo 3: Máquinas virtuais com o endereço `172.20.10.2` estão autorizadas a se comunicar com outras máquinas virtuais. No entanto, o tráfego na direção oposta está bloqueado. Nenhuma máquina virtual pode se comunicar com `172.20.10.2`.
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.2
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* Exemplo 4: O tráfego TCP originado da porta `9501` e do endereço IP `172.20.10.6` está bloqueado na sub-rede `vswitch1`.
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.6 && tcp.src == 9501
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+== Políticas de Rede
+
+[CAUTION]
+====
+As regras de NetworkPolicy negam tráfego por padrão. Para evitar afetar outros pods, certifique-se do seguinte:
+
+* Todas as condições de correspondência necessárias são adicionadas à política.
+* O tráfego é isolado usando seletores de pod e namespaces.
+====
+
+Os exemplos neste documento se concentram em alcançar isolamento entre máquinas virtuais dentro da mesma sub-rede.
+
+Para mais informações, consulte https://kubernetes.io/docs/concepts/services-networking/network-policies[Políticas de Rede] na documentação do Kubernetes e https://kubeovn.github.io/docs/v1.13.x/en/guide/networkpolicy-log[Registro de NetworkPolicy] na documentação do Kube-OVN.
+
+=== Exemplos
+
+As seguintes máquinas virtuais são criadas no namespace `default` e estão conectadas à rede sobreposta criada para o intervalo de sub-rede `172.20.10.0/24`.
+
+|===
+| Máquina virtual | Endereço IP
+
+| `VM1`
+| `172.20.10.2`
+
+| `VM2`
+| `172.20.10.3`
+
+| `VM3`
+| `172.20.10.4`
+
+| `VM4`
+| `172.20.10.5`
+
+| `VM5`
+| `172.20.10.6`
+|===
+
+* Exemplo 1: `VM1` e `VM2` podem se comunicar entre si porque seus endereços estão dentro da sub-rede `172.20.10.0/30`. Todo o outro tráfego no namespace `default`, incluindo tráfego de e para `VM3`, `VM4` e `VM5`, está bloqueado.
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+    - Egress
+----
+
+* Exemplo 2: `VM1` e `VM2` podem se comunicar entre si e com outras máquinas virtuais na sub-rede `172.20.10.0/24`. No entanto, outras máquinas virtuais nessa sub-rede não podem se comunicar com `VM1`, `VM2` e entre si. Isso ocorre porque a política de entrada permite apenas tráfego originado de `172.20.10.0/30`.
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+----
+
+* Exemplo 3: `VM1` e `VM2` podem se comunicar entre si, mas não com outras máquinas virtuais na sub-rede `172.20.10.0/24`. As outras máquinas virtuais na mesma sub-rede podem se comunicar com `VM1` e `VM2`. Isso ocorre porque a política de saída permite que o tráfego seja enviado para `172.20.10.0/30`.
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - egress
+----
+
+* Exemplo 4: `VM2` pode se comunicar com `VM1`, mas não com outras máquinas virtuais na sub-rede `172.20.10.0/24`. Isso ocorre porque um rótulo de seletor de pod é aplicado a `VM2`. Todas as outras máquinas virtuais na mesma sub-rede podem se comunicar com `VM1` e entre si.
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    podSelector:
+      matchLabels:
+        vm.kubevirt.io/name: VM2
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+    - Egress
+----

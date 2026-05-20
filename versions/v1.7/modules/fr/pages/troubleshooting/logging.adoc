@@ -1,0 +1,104 @@
+= Problèmes de journalisation
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Échec de l'activation du produit complémentaire `rancher-logging`
+
+=== Description du problème
+
+Un message d'erreur apparaît sur l'interface utilisateur {harvester-product-name} lorsque vous tentez d'activer le produit complémentaire `rancher-logging`.
+
+image::troubleshooting/failed-to-enable-rancher-logging-addon.png[Échec de l'activation du produit complémentaire rancher-logging]
+
+Les messages de journal du pod `cattle-logging-system/helm-install-rancher-logging` confirment qu'une erreur s'est produite.
+
+Exemple :
+
+[,shell]
+----
+...
+ echo 'Installing helm chart'
+...
++ helm install --version ... rancher-logging rancher-logging/rancher-logging ...
+...
+Error: INSTALLATION FAILED: Unable to continue with install: ClusterRole "logging-admin" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata;
+annotation validation error: key "meta.helm.sh/release-name" must equal "rancher-logging":
+current value is "hvst-upgrade-md54b-upgradelog-operator"
+----
+
+image::troubleshooting/logging-installation-failure-due-to-conflict.png[Erreur d'installation de rancher-logging en raison d'un conflit]
+
+=== Cause racine
+
+Lorsque vous activez le produit complémentaire `rancher-logging`, {harvester-product-name} tente d'installer le https://kube-logging.dev/docs/#overview[Logging Operator]. L'installation échoue lorsque l'opérateur existe déjà sur le cluster, ce qui peut être une ressource obsolète provenant de tentatives de mise à niveau précédentes ou créée par la mise à niveau en cours.
+
+L'écran *Mettre à niveau le logiciel* comprend une option *Activer la journalisation* que vous devez sélectionner pour permettre à {harvester-product-name} d'enregistrer les événements de mise à niveau. Cependant, le traitement en arrière-plan dépend de l'activation de l'add-on `rancher-logging`.
+
+image::troubleshooting/upgrade-with-enable-logging.png[Journalisation activée pendant la mise à niveau]
+
+Lorsque le produit complémentaire est désactivé, le Upgrade Controller crée les objets `logging` et `managedchart` suivants.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-hpfnw   36s
+
+$ kubectl get logging -A
+NAME                                          LOGGINGREF             CONTROLNAMESPACE
+hvst-upgrade-hpfnw-upgradelog-infra           harvester-upgradelog   harvester-system        // newly created by upgrade controller
+hvst-upgrade-hpfnw-upgradelog-operator-root                          cattle-logging-system   // newly created by upgrade controller, acts as logging-operator
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                                     AGE
+fleet-local   hvst-upgrade-hpfnw-upgradelog-operator   18s  // newly created by upgrade controller
+----
+
+Lorsque le produit complémentaire est activé, le Upgrade Controller crée l'objet `logging` suivant.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-9sn4x   14s
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                     AGE
+
+$ kubectl get logging -A
+NAME                                  LOGGINGREF                     CONTROLNAMESPACE
+hvst-upgrade-9sn4x-upgradelog-infra   harvester-upgradelog           harvester-system        // newly created by upgrade controller
+rancher-logging-kube-audit            harvester-kube-audit-log-ref   cattle-logging-system   // originally created by rancher-logging addon
+rancher-logging-root                                                 cattle-logging-system   // originally created by rancher-logging addon, acts as logging-operator
+----
+
+Vous pouvez rencontrer le problème dans les situations suivantes{nbsp}:
+
+* Le produit complémentaire `rancher-logging` est initialement désactivé. Vous commencez la mise à niveau avec l'option *Activer la journalisation* sélectionnée. Sans attendre que la mise à niveau soit terminée, vous activez le produit complémentaire `rancher-logging`. L'interface utilisateur {harvester-product-name} affiche un message d'erreur.
+
+* Le produit complémentaire `rancher-logging` est initialement désactivé. Vous commencez la mise à niveau avec l'option *Activer la journalisation* sélectionnée et attendez que la mise à niveau soit terminée. Les objets `managedchart` et `logging` ne sont pas supprimés en raison d'un https://github.com/harvester/harvester/issues/7654[problème connu]. Ensuite, vous activez le produit complémentaire `rancher-logging`. L'interface utilisateur {harvester-product-name} affiche un message d'erreur.
+
+=== Solution provisoire
+
+. Si une mise à niveau est en cours, attendez qu'elle soit terminée avec succès ou supprimée.
++
+[IMPORTANT]
+====
+Pour éviter les conflits de journalisation, n'activez ni ne désactivez le produit complémentaire `rancher-logging` pendant qu'une mise à niveau est en cours. Cette action est bloquée dans {harvester-product-name} v1.7.0 et les versions ultérieures.
+====
+
+. Si le produit complémentaire `rancher-logging` est activé mais dans un état d'échec, désactivez-le.
+
+. Vérifiez les objets `logging` et `managedchart`. Si les noms de ces objets commencent par `hvst-upgrade-`, supprimez-les manuellement.
+
+. Activez le produit complémentaire `rancher-logging`.
+
+[NOTE]
+====
+Tous les produits complémentaires doivent être dans un état sain avant de commencer à mettre à niveau. Cette condition préalable est automatiquement vérifiée dans {harvester-product-name} v1.7.0 et les versions ultérieures.
+====
+
+=== Problèmes liés
+
+https://github.com/harvester/harvester/issues/9289[#9289] et https://github.com/harvester/harvester/issues/9644[#9644]

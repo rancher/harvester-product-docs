@@ -1,0 +1,102 @@
+= 从 v1.2.1 升级到 v1.2.2
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的 {harvester-product-name} 版本可供升级时，*升级* 按钮会出现在 *仪表板* 屏幕上。有关更多信息，请参见 xref:./upgrades.adoc#_start_an_upgrade[开始升级]。
+
+对于隔离环境，请参见 xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离的升级]。
+
+== 已知问题
+
+=== 1.升级卡在 `Upgrading System Service` 状态
+
+某些系统服务的证书过期可能导致升级在 `Upgrading System Service` 状态下卡住很长时间。要解决此问题，请执行以下步骤：
+
+. 识别应用清单作业的名称。
++
+[,sh]
+----
+kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+----
++
+输出示例：
++
+[,console]
+----
+NAME                                 COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-apply-manifests   0/1           46s        46s
+----
++
+. 检查应用清单作业的日志。
++
+[,sh]
+----
+ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
+----
++
+如果日志中出现以下消息，请继续下一步。
++
+[,console]
+----
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+----
++
+. 检查集群 API (CAPI) 集群的状态。
++
+[,sh]
+----
+kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+如果输出类似于以下示例，则问题可能存在于集群中。
++
+[,console]
+----
+    - lastUpdateTime: "2023-01-17T16:26:48Z"
+      message: 'configuring bootstrap node(s) custom-24cb32ce8387: waiting for probes:
+        kube-controller-manager, kube-scheduler'
+      reason: Waiting
+      status: Unknown
+      type: Updated
+----
++
+. 识别受影响节点的主机名，并实施 https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[解决方法] 以查看服务证书是否过期。
++
+[,sh]
+----
+kubectl get machines.cluster.x-k8s.io -n fleet-local <machine_name> -o yaml | yq .status.nodeRef.name
+----
++
+用受影响节点的名称替换 `<machine_name>`（如前一步的输出中所述）。
++
+[NOTE]
+====
+如果多个节点在同一时间加入集群，则必须在所有这些节点上实施 https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[解决方法]。
+====
+
+相关问题： https://github.com/harvester/harvester/issues/3863[#3863]（请参见 https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[解决方法]）
+
+'''
+
+=== 2.*harvester-seeder* 附加产品未升级
+
+在将 Harvester 集群从 v1.2.1 升级到 v1.2.2 时，*harvester-seeder* 附加产品未完全升级，因为 Helm Chart 版本不匹配。与 Harvester v1.2.2 捆绑的 `harvester-seeder` Chart 为 v0.1.1，而 `harvester-seeder` 附加产品使用的是 v0.1.0 Chart。
+
+[,console]
+----
+Error: chart "harvester-seeder" matching 0.1.0 not found in harvester-seeder index. (try 'helm repo update'): no chart version found for harvester-seeder-0.1.0
+----
+
+如果您在升级到 Harvester v1.2.2 后启用附加产品，由于提到的不匹配，安装 Chart 也将无法进行。
+
+解决方法是使用以下命令手动更新 *harvester-seeder* 附加产品清单。您必须在应用补丁之前禁用附加产品。
+
+[,sh]
+----
+kubectl -n harvester-system patch addons.harvesterhci harvester-seeder --type=json -p '[{"op": "replace", "path": "/spec/version", "value": "0.1.1"}]'
+----

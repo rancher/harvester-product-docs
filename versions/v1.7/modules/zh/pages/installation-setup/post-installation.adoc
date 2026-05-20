@@ -1,0 +1,49 @@
+= 安装后任务
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+您可以通过在安装完成后执行以下步骤来增强您的{harvester-product-name}集群的安全性和性能。
+
+== 禁用 SSH 密码认证
+
+默认情况下，在安装期间，{harvester-product-name}节点上启用了 SSH 密码认证。这允许管理员访问节点进行安装后的诊断。
+
+然而，一旦安装完成，建议禁用 SSH 密码认证。您可以运行以下命令，该命令使用`kubectl`来应用 https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`]配置，从而禁用所有{harvester-product-name}节点上的 SSH 密码认证：
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* `matchSelector`字段用于选择具有特定标签的{harvester-product-name}节点。
+* 所有受影响的节点必须重启，以使`CloudInit`配置生效。
+====
+
+一旦配置应用，任何尝试使用 SSH 密码访问{harvester-product-name}节点的行为都将被拒绝。
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----

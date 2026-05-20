@@ -1,0 +1,168 @@
+= Seguridad de la Imagen
+:revdate: 10-06-2025
+:page-revdate: {revdate}
+
+{harvester-product-name} te permite cifrar y descifrar imágenes de máquinas virtuales. El mecanismo de cifrado utiliza el módulo del kernel de Linux dm_crypt y la utilidad de línea de comandos cryptsetup.
+
+[NOTE]
+====
+Esta función solo admite el motor de datos Longhorn V1. No puedes cifrar y descifrar imágenes que están almacenadas en otras soluciones de almacenamiento.
+====
+
+== Requisitos previos
+
+Prepara los siguientes recursos:
+
+* Máquina virtual de origen image: You can xref:./upload-image.adoc[sube o crea una imagen] utilizando cualquiera de los métodos soportados.
++
+[CAUTION]
+====
+No subas una imagen cifrada.
+====
++
+* Secreto: Un secreto de Kubernetes se utiliza como la frase de paso de dm_crypt. Debes especificar el valor del campo `CRYPTO_KEY_VALUE`. Todos los demás campos son fijos.
++
+image::vm/create-encryption-used-secret.png[]
++
+Ejemplo de un secreto:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+El ejemplo contiene el código YAML predeterminado para secretos de Kubernetes. Aparte de esto, puedes usar https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[opciones de cifrado para el modo LUKS], que es un modo de operación de cryptsetup. Harvester v1.4.1 y versiones posteriores admiten estas opciones, pero debes verificar que sean compatibles con tus nodos.
+
+|===
+| Opción | Posibles valores
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Puedes crear un secreto en el espacio de nombres system utilizando kubectl y la interfaz de usuario {harvester-product-name} (*Editar como YAML* función). Los recursos en el espacio de nombres system no se muestran en la pantalla *Secretos*.
+====
++
+* Clase de Almacenamiento: Las imágenes se cifran utilizando Longhorn, por lo que se deben pasar los campos requeridos al controlador CSI de Longhorn. Puedes especificar el secreto de cifrado al crear una Clase de Almacenamiento. Para más información, consulta xref:./upload-image.adoc#_image_storageclass[Clase de Almacenamiento de Imágenes].
++ 
+image::vm/create-storage-class.png[]
++
+Ejemplo de una Clase de Almacenamiento:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Puedes crear un secreto en el espacio de nombres system utilizando kubectl y la interfaz de usuario {harvester-product-name} (*Editar como YAML* función). Los recursos en el espacio de nombres system no se muestran en la pantalla *Secretos*.
+====
+
+== Cifrar una Imagen de Máquina Virtual
+
+. En la interfaz de usuario {harvester-product-name}, ve a *Imágenes*.
++
+. Haga clic en *Crear*.
++
+. Especifica un espacio de nombres y un nombre.
++
+. En la pestaña *Fundamentos*, selecciona *Cifrar* y luego selecciona una imagen de origen.
++
+image::vm/create-encrypted-image.png[]
++
+. En la pestaña *Almacenamiento*, selecciona una Clase de Almacenamiento que incluya campos relacionados con el cifrado. 
++
+{harvester-product-name} pasa los campos requeridos a Longhorn.
++
+image::vm/select-encryption-storage-class.png[]
++
+. Haga clic en *Crear*.
+
+== Descifrar una Imagen de Máquina Virtual
+
+. En la interfaz de usuario {harvester-product-name}, ve a *Imágenes*.
++
+. Haga clic en *Crear*.
++
+. Especifica un espacio de nombres y un nombre.
++
+. En la pestaña *Fundamentos*, selecciona *Descifrar* y luego selecciona una imagen de origen.
++
+image::vm/create-decrypted-image.png[]
++
+. En la pestaña *Almacenamiento*, selecciona *harvester-longhorn (Predeterminado)* u otra Clase de Almacenamiento de uso común.
++
+{harvester-product-name} utiliza la Clase de Almacenamiento de la imagen de origen que deseas descifrar.
++
+image::vm/select-normal-storage-class.png[]
++
+. Haga clic en *Crear*.
+
+== Usa una Imagen con Volúmenes Cifrados
+
+Debes seleccionar la imagen que deseas utilizar al crear una máquina virtual.
+
+image::vm/create.png[]
+
+La pantalla de *Máquinas Virtuales* muestra los siguientes iconos y mensajes cuando los volúmenes utilizados por las máquinas virtuales están cifrados.
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+Para determinar qué volúmenes están cifrados, consulta la pestaña *Volúmenes* en la pantalla de detalles de la *Máquina Virtual*.
+
+image::vm/volume-detail.png[]
+
+== Uso Avanzado con {rancher-product-name} Integración
+
+El secreto es una cadena codificada en Base64 sin cifrar. Para mantener el secreto a salvo, puedes utilizar proyectos y espacios de nombres para aislar permisos. Para más información, consulta xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multitenencia].
+
+== limitaciones
+
+No puedes realizar las siguientes acciones:
+
+* Exportar una nueva imagen desde una imagen cifrada
+* Descargar una imagen cifrada
+* Subir una imagen cifrada

@@ -1,0 +1,83 @@
+= Rancher-Probleme
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== Protokollsammlung für Gastcluster
+
+Sie können Protokolle und Konfigurationsdateien des Gastclusters sammeln. Führen Sie die folgenden Schritte auf jedem Gastcluster-Knoten aus:
+
+. Melden Sie sich am Knoten an.
+
+. Laden Sie das Rancher v2.x Linux-Protokollsammlungsskript herunter und generieren Sie ein Protokollpaket mit den folgenden Befehlen:
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+Die Ausgabe des Skripts zeigt den Speicherort des generierten Tarballs an.
+
+Für weitere Informationen siehe https://www.suse.com/support/kb/doc/?id=000020191[Das Rancher v2.x Linux-Protokollsammlungsskript].
+
+== Import von Harvester-Clustern in Rancher
+
+Nachdem das `cluster-registration-url` auf Harvester festgelegt ist, wird ein Deployment mit dem Namen `cattle-system/cattle-cluster-agent` erstellt, um den Harvester-Cluster in Rancher zu importieren.
+
+=== Import ausstehend aufgrund von `unable to read CA file` Fehler
+
+Die folgenden Fehlermeldungen in den `cattle-cluster-agent-*` Pod-Protokollen zeigen an, dass der Harvester-Cluster nicht in Rancher importiert werden kann.
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+Die Hauptursache ist eine ineffektive Konfiguration der `agent-tls-mode` Einstellung von Rancher, die steuert, wie die Agenten von Rancher (`cluster-agent`, `fleet-agent` und `system-agent`) das Zertifikat von Rancher validieren, wenn eine Verbindung hergestellt wird. Der Standardwert dieser Einstellung hängt von der Rancher-Version und dem Installationstyp ab.
+
+|===
+| Typ | Version | Standardwert
+
+| Neuinstallation
+| v2.8
+| `system-store`
+
+| Neuinstallation
+| v2.9 und höher
+| `strict`
+
+| Aufrüsten
+| v2.8 bis v2.9
+| `system-store`
+|===
+
+Sie können diese Einstellung an Ihre Anforderungen anpassen, indem Sie die folgenden Schritte ausführen:
+
+. Melden Sie sich an der Rancher-Benutzeroberfläche an.
+
+. Gehen Sie zu *Globale Einstellungen -> Einstellungen*.
+
+. Wählen Sie *agent-tls-mode* aus und wählen Sie dann *⋮ -> Einstellungen bearbeiten*, um auf die Konfigurationsoptionen zuzugreifen.
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. Wählen Sie einen der folgenden Werte aus:
++
+* *Streng*: Die Agenten von Rancher vertrauen nur Zertifikaten, die von der im `cacerts` festgelegten Zertifizierungsstelle (CA) erstellt wurden. Dies ist die empfohlene Standard-TLS-Einstellung.
++
+Die Option *Streng* ermöglicht ein höheres Sicherheitsniveau, indem sie erfordert, dass Rancher Zugriff auf die CA hat, die das Zertifikat erstellt hat, das den Agenten sichtbar ist. Im Falle bestimmter Zertifikatkonfigurationen (insbesondere bei externen Zertifikaten) ist dies nicht automatisch der Fall, und *zusätzliche Konfiguration ist erforderlich*. Für weitere Informationen zu Szenarien, die eine zusätzliche Konfiguration erfordern, siehe https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[Wählen Sie Ihre SSL-Konfiguration] in der Rancher-Dokumentation.
++
+* *Systemspeicher*: Die Agenten von Rancher vertrauen jedem Zertifikat, das von einer öffentlichen CA erstellt wurde, die im Vertrauensspeicher des Betriebssystems angegeben ist. Verwenden Sie diese Einstellung, wenn Ihr setup eine externe Vertrauensbehörde verwendet und Sie nicht über die Zertifizierungsstelle verfügen.
++
+[IMPORTANT]
+====
+Die Verwendung der Einstellung *Systemspeicher* impliziert, dass der Agent allen externen Behörden vertraut, die im Vertrauensspeicher des Betriebssystems gefunden werden, einschließlich derjenigen, die außerhalb der Kontrolle des Benutzers liegen.
+====
+
+. Klicken Sie auf *Speichern*.
+
+Verwandte Probleme:
+
+- Harvester: https://github.com/harvester/harvester/issues/7105[#7105] und https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher: https://github.com/rancher/rancher/issues/45628[#45628] (Siehe https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[diesen Kommentar].)

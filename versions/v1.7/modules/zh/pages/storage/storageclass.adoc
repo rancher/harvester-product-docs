@@ -1,0 +1,246 @@
+= StorageClass
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} 使用 StorageClasses 来描述 {longhorn-product-name} 如何配置卷。{longhorn-product-name} StorageClasses 可以映射到集群管理员创建的副本策略、节点调度策略或磁盘调度策略。在其他存储系统中，这个概念被称为 _profiles_。
+
+[NOTE]
+====
+默认的 StorageClass `harvester-longhorn` 的副本数量值为 `3`，以确保高可用性。如果在单节点集群中使用 `harvester-longhorn`，{longhorn-product-name} 将无法创建默认数量的副本，卷在 {harvester-product-name} 界面上标记为 _Degraded_。
+
+为避免此问题，您可以执行以下任一操作：
+
+* 使用配置文件将 `harvester-longhorn` 的 xref:installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[副本数量] 更改为 `1`。
+* xref:storage/storageclass.adoc#_creating_a_storageclass[创建一个新的 StorageClass]，并将 *副本数量* 参数设置为 `1`。创建后，在列表中找到新的 StorageClass，然后选择 *⋮ -> 设置为默认*。
+====
+
+有关使用外部容器存储接口 (CSI) 驱动程序进行卷配置的支持信息，请参见 xref:./csidriver.adoc[第三方存储支持]。
+
+== 创建 StorageClass
+
+[tabs]
+======
+UI::
++
+--
+[CAUTION]
+====
+创建 StorageClass 后，**参数** 部分中的字段和大多数其他选项将变为不可变。
+====
+
+. 转到 *高级 -> StorageClasses*。
++
+image::storageclass/create_storageclasses_entry.png[]
+
+. 在一般信息部分，配置以下内容：
++
+* *名称*:StorageClass 的名称。
+* *描述*（可选）：StorageClass 的描述。
+* *配置器*：确定用于配置卷的卷插件的配置器。
+
+. 在 *参数* 选项卡上，配置以下内容：
++
+* *副本数量*：为每个 {longhorn-product-name} 卷创建的副本数量。默认值为 `3`。
+* *过期副本超时*：在清理状态为 {longhorn-product-name} 的副本之前，`ERROR` 等待的分钟数。默认值为 `30`。
+* *节点选择器*（可选）：在卷调度期间要匹配的节点标签。您可以在主机配置屏幕上添加节点标签（*主机 -> 编辑配置*）。
+* *磁盘选择器*（可选）：在卷调度期间要匹配的磁盘标签。您可以在主机配置屏幕上添加磁盘标签（*主机 -> 编辑配置*）。
+* *可迁移*：启用 xref:virtual-machines/live-migration.adoc[实时迁移] 的设置，适用于使用 StorageClass 创建的卷。默认值为 `Yes`。
+
+[CAUTION]
+====
+如果使用副本数量为 `1` 的 StorageClass 创建的卷附加到虚拟机，则该虚拟机被视为 xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[不可迁移]。
+====
+
+. 在 *自定义* 选项卡上，配置以下内容：
++
+* *回收策略*：适用于使用 StorageClass 创建的卷的回收策略。默认值为 `Delete`。
+** *删除*：当卷声明被删除时，删除卷及其底层设备。
+** *保留*：保留卷以便手动清理。
++
+* *允许卷扩展*：允许卷扩展的设置，涉及块设备的调整大小和文件系统的扩展。当该设置启用时，您可以通过编辑相应的 PVC 对象来增加卷的大小。
++
+[NOTE]
+====
+您只能使用卷扩展功能来增加卷的大小。
+====
++
+* *卷绑定模式*：控制卷绑定和动态预配发生时机的设置。默认值为 `Immediate`。
+** *立即*：在创建 PVC 后绑定并配置卷。
+** *等待第一个消费者*：在使用 PVC 的虚拟机创建后绑定并配置卷。
+
+. 单击*创建*。
+--
+
+API::
++
+[,yaml]
+---- 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    storageclass.beta.kubernetes.io/is-default-class: 'true'
+    storageclass.kubernetes.io/is-default-class: 'true'
+  name: single-replica
+parameters:
+  migratable: 'false'
+  numberOfReplicas: '1'
+  staleReplicaTimeout: '30'
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+----
+
+Terraform::
++
+[,hcl]
+----
+resource "harvester_storageclass" "single-replica" {
+  name = "single-replica"
+
+  is_default = "true"
+  allow_volume_expansion = "true"
+  volume_binding_mode = "immediate"
+  reclaim_policy = "delete"
+
+  parameters = {
+    "migratable"          = "false"
+    "numberOfReplicas"    = "1"
+    "staleReplicaTimeout" = "30"
+  }
+}
+----
+======
+
+== 数据本地性设置
+
+当至少一个 {longhorn-product-name} 卷的副本必须尽可能与使用该卷的 pod 调度在同一节点上时，可以使用 `数据本地性` 参数。
+
+{harvester-product-name} 正式支持数据本地性。这适用于从 xref:virtual-machines/vm-images/upload-image.adoc[镜像] 创建的卷。要配置数据本地性，请在 {harvester-product-name} UI 上创建一个新的 StorageClass (*StorageClass -> 创建 -> 参数*)，然后添加以下参数：
+
+* *键*：`数据本地性`
+* *值*：`已禁用` 或 `尽力而为`
+
+image::storageclass/data-locality.png[]
+
+=== 数据本地性选项
+
+{harvester-product-name} 目前支持以下选项：
+
+* `已禁用`：应用后，{longhorn-product-name} 可能会或可能不会在与使用该卷的 pod 相同的节点上调度副本。这是默认选项。
+* `尽力而为`：应用时，{longhorn-product-name} 始终尝试在使用该卷的 pod 所在的同一节点上调度副本。{longhorn-product-name} 即使在由于环境限制（例如，磁盘空间不足或磁盘标签不兼容）导致本地副本不可用时，也不会停止该卷。
+
+[NOTE]
+====
+{longhorn-product-name} 提供了一个名为 `严格本地` 的第三种选项，该选项强制 {longhorn-product-name} 仅在使用该卷的 pod 所在的同一节点上保留一个副本。{harvester-product-name} 不支持此选项，因为它可能会影响某些操作，例如 xref:virtual-machines/live-migration.adoc[虚拟机实时迁移]。
+====
+
+有关更多信息，请参见 https://documentation.suse.com/cloudnative/storage/1.8/en/high-availability/data-locality.html[数据本地性] 的 {longhorn-product-name} 文档。
+
+== 容器化数据导入器（CDI）设置
+
+{harvester-product-name} 与 https://kubevirt.io/user-guide/storage/containerized_data_importer[容器化数据导入器]（CDI）集成，以处理以下 StorageClasses 的虚拟机映像管理：
+
+* Longhorn V2 数据引擎
+* LVM
+* 第三方存储
+
+您可以使用 {harvester-product-name} 用户界面或 CDI 注释来覆盖 StorageClass CDI 属性的默认设置。
+
+[NOTE]
+====
+{harvester-product-name} 用户界面目前不支持与第三方存储一起使用 CDI。您必须将 {harvester-product-name} CDI 注释直接应用于第三方 StorageClass。
+====
+
+为了启用对 CDI 设置的编辑以进行第二天的操作，{harvester-product-name} 提供了 StorageClass 属性，自动更新底层 CDI 设置。
+
+*CDI 设置* 屏幕上的每个字段对应于 StorageClass 中的一个注释。
+
+|===
+| 用户界面字段 | 注释 | 说明 | 支持的值 | 示例
+
+| *卷模式 / 访问模式*
+| `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`
+| 默认 PVC 卷模式和访问模式
+| 包含卷模式和访问模式的 JSON 对象
+| `'{"Block":["ReadWriteOnce"]}'`
+
+| *卷快照类*
+| `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`
+| 在此 StorageClass 下拍摄虚拟机镜像快照时使用的 VolumeSnapshotClass 名称。此设置仅在您使用 `快照` 克隆策略时适用。如果您已经在相应的提供者的 `csi-driver-config` 设置中配置了 `volumeSnapshotClassName`，则该值将作为默认值使用。
+| 有效的 VolumeSnapshotClass 名称 | `lvm-snapshot`，`longhorn-snapshot`
+
+| *克隆策略*
+| `cdi.harvesterhci.io/storageProfileCloneStrategy`
+| 用于使用此StorageClass的虚拟机镜像创建的卷的克隆策略。
+| `复制`：通过网络复制数据块；`快照`：通过创建临时 VolumeSnapshot 并将其恢复到新的 PVC 来克隆卷；`csi-clone`：使用 CSI 克隆操作克隆卷。
+| `snapshot`
+
+| *文件系统开销*
+| `cdi.harvesterhci.io/filesystemOverhead`
+| 计算 PVC 大小时要考虑的文件系统开销百分比。
+| 介于 0 和 1 之间的十进制值，最多 3 位数字。
+| `0.05`
+|===
+
+StorageClass YAML 配置示例：
+
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lvm
+  annotations:
+    cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
+    cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: lvm-snapshot
+    cdi.harvesterhci.io/filesystemOverhead: '0.05'
+----
+
+[CAUTION]
+====
+避免直接更改存储控制文件或CDI。相反，允许 {harvester-product-name} 控制器通过使用 CDI 注释来同步和持久化存储控制文件配置。
+====
+
+以下是支持的 StorageClasses 的默认值：
+
+* Longhorn V2 数据引擎
++
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`：`"copy"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`：`"longhorn-snapshot"`
+
+* LVM
+** `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`：`'{"Block":["ReadWriteOnce"]}'`
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`：`"snapshot"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`：`"lvm-snapshot"`
+
+* 第三方存储：请在 CDI 库中查看 https://github.com/kubevirt/containerized-data-importer/blob/v1.61.1/pkg/storagecapabilities/storagecapabilities.go#L35-L127[`storagecapabilities.go`]。如果未列出提供者，您必须指定 `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` 注释。
+
+== 使用案例
+
+=== HDD场景
+
+随着 _StorageClass_ 的引入，用户现在可以使用 *HDDs* 进行分层或归档冷存储。
+
+[CAUTION]
+====
+不建议在具有良好性能磁盘要求的来宾 RKE2 集群或虚拟机中使用 HDD。
+====
+
+==== 推荐实践
+
+首先，在 `Host` 页面上添加您的 HDD，并根据需要指定磁盘标签，例如 `HDD` 或 `ColdStorage`。有关如何添加额外磁盘和磁盘标签的更多信息，请参见 xref:hosts/hosts.adoc#_multi_disk_management[Multi-disk Management] 以获取详细信息。
+
+image::storageclass/add_hdd_on_host_page.png[]
+
+image::storageclass/add_tags.png[]
+
+然后，为 HDD 创建一个新的 `StorageClass`（使用上述磁盘标签）。对于容量大但性能较慢的硬盘，可以减少副本数量以提高性能。
+
+image::storageclass/create_hdd_storageclass.png[]
+
+您现在可以使用上述`StorageClass`，利用主要用于冷存储或归档目的的HDD来创建卷。
+
+image::storageclass/create_volume_hdd.png[]

@@ -1,0 +1,168 @@
+= Segurança da Imagem
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{harvester-product-name} permite que você criptografe e descriptografe imagens de máquinas virtuais. O mecanismo de criptografia utiliza o módulo do kernel dm_crypt e o utilitário de linha de comando cryptsetup.
+
+[NOTE]
+====
+Este recurso suporta apenas o Longhorn V1 Data Engine. Você não pode criptografar e descriptografar imagens que estão armazenadas em outras soluções de armazenamento.
+====
+
+== Pré-requisitos
+
+Prepare os seguintes recursos:
+
+* Máquina virtual de origem image: You can xref:./upload-image.adoc[carregar ou criar uma imagem] usando qualquer um dos métodos suportados.
++
+[CAUTION]
+====
+Não carregue uma imagem criptografada.
+====
++
+* Segredo: Um segredo do Kubernetes é usado como a frase de acesso do dm_crypt. Você deve especificar o valor do campo `CRYPTO_KEY_VALUE`. Todos os outros campos são fixos.
++
+image::vm/create-encryption-used-secret.png[]
++
+Exemplo de um segredo:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+O exemplo contém o código YAML padrão para segredos do Kubernetes. Além disso, você pode usar https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[opções de criptografia para o modo LUKS], que é um modo de operação do cryptsetup. Harvester v1.4.1 e versões posteriores suportam essas opções, mas você deve verificar se elas são suportadas pelos seus nós.
+
+|===
+| Opção | Valores Possíveis
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Você pode criar um segredo no namespace do sistema usando kubectl e a interface {harvester-product-name} (*Editar como YAML* recurso). Recursos no namespace do sistema não são exibidos na tela *Segredos*.
+====
++
+* Classe de Armazenamento : As imagens são criptografadas usando Longhorn, portanto, os campos obrigatórios devem ser passados para o Longhorn CSI Driver. Você pode especificar o segredo de criptografia ao criar um StorageClass. Para mais informações, veja xref:./upload-image.adoc#_image_storageclass[Image StorageClass].
++ 
+image::vm/create-storage-class.png[]
++
+Exemplo de um StorageClass:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Você pode criar um segredo no namespace do sistema usando kubectl e a interface {harvester-product-name} (*Editar como YAML* recurso). Recursos no namespace do sistema não são exibidos na tela *Segredos*.
+====
+
+== Criptografar uma Imagem de Máquina Virtual
+
+. Na interface do {harvester-product-name}, vá para *Images*.
++
+. Clique em *Criar*.
++
+. Especifique um namespace e um nome.
++
+. Na aba *Basics*, selecione *Encrypt* e, em seguida, selecione uma imagem de origem.
++
+image::vm/create-encrypted-image.png[]
++
+. Na aba *Storage*, selecione um StorageClass que inclua campos relacionados à criptografia. 
++
+{harvester-product-name} passa os campos necessários para o Longhorn.
++
+image::vm/select-encryption-storage-class.png[]
++
+. Clique em *Criar*.
+
+== Descriptografar uma Imagem de Máquina Virtual
+
+. Na interface do {harvester-product-name}, vá para *Images*.
++
+. Clique em *Criar*.
++
+. Especifique um namespace e um nome.
++
+. Na aba *Basics*, selecione *Decrypt* e, em seguida, selecione uma imagem de origem.
++
+image::vm/create-decrypted-image.png[]
++
+. Na aba *Storage*, selecione *harvester-longhorn (Padrão)* ou outro StorageClass comumente usado.
++
+{harvester-product-name} utiliza o StorageClass da imagem de origem que você deseja descriptografar.
++
+image::vm/select-normal-storage-class.png[]
++
+. Clique em *Criar*.
+
+== Use uma Imagem com Volumes Criptografados
+
+Você deve selecionar a imagem que deseja usar ao criar uma máquina virtual.
+
+image::vm/create.png[]
+
+A tela *Virtual Machines* exibe os seguintes ícones e mensagens quando os volumes usados por máquinas virtuais estão criptografados.
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+Para determinar quais volumes estão criptografados, verifique a aba *Volumes* na tela de detalhes da *Virtual Machine*.
+
+image::vm/volume-detail.png[]
+
+== Uso avançado com integração {rancher-product-name}
+
+O segredo é uma string codificada em Base64 não criptografada. Para manter o segredo seguro, você pode usar projetos e namespaces para isolar permissões. Para mais informações, consulte xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== Limitações
+
+Você não pode executar as seguintes ações:
+
+* Exportar uma nova imagem a partir de uma imagem criptografada
+* Baixar uma imagem criptografada
+* Enviar uma imagem criptografada

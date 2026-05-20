@@ -1,0 +1,92 @@
+= Criando um Cluster K3s Kubernetes
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Agora você pode provisionar clusters K3s Kubernetes em cima do cluster Harvester no Rancher usando o driver de nó Harvester incorporado.
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* O driver de nó K3s do Harvester está em *Prévia Técnica*.
+* Provisionar clusters K3s Kubernetes envolve configurar o endereço IP das máquinas virtuais subjacentes. Você pode fazer isso usando um servidor DHCP na rede VLAN à qual as máquinas virtuais estão conectadas. Se tal servidor não existir na rede, você pode usar o recurso xref:../../../add-ons/vm-dhcp-controller.adoc[DHCP Gerenciado] para configurar o endereço IP.
+* xref:../../../networking/vm-network.adoc#_vlan_network[Rede VLAN] é necessária para o driver de nó Harvester.
+* O driver de nó Harvester suporta apenas imagens de nuvem.
+* Para os requisitos de porta dos clusters convidados implantados dentro do Harvester, consulte os xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[requisitos de porta para clusters convidados].
+====
+
+== Crie suas credenciais de nuvem
+
+. Clique em *☰ > Gerenciamento de Cluster*.
+. Clique em *Credenciais de Nuvem*.
+. Clique em *Criar*.
+. Clique em *Harvester*.
+. Digite o nome da sua credencial de nuvem
+. Selecione "Cluster Harvester Importado".
+. Clique em *Criar*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Criar cluster K3s Kubernetes
+
+Você pode criar um cluster K3s Kubernetes a partir da página *Gerenciamento de Cluster* via o driver de nó K3s.
+
+. Selecione o menu *Clusters*.
+. Clique no botão *Criar*.
+. Alterne o interruptor para *RKE2/K3s*.
+. Selecione o driver de nó do Harvester.
+. Selecione uma *Credencial de Nuvem*.
+. Digite *Nome do Cluster* (obrigatório).
+. Digite *Namespace* (obrigatório).
+. Digite *Imagem* (obrigatório).
+. Digite *Nome da Rede* (obrigatório).
+. Digite *Usuário SSH* (obrigatório).
+. Clique em *Criar*.
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== Adicionar afinidade de nó
+
+O driver de nó do Harvester agora suporta o agendamento de um grupo de máquinas em nós específicos através das regras de afinidade de nó. Isso proporciona alta disponibilidade e melhor utilização de recursos.
+
+A afinidade de nó pode ser adicionada aos pools de máquinas durante a criação do cluster:
+
+. Clique no botão `Show Advanced` e clique no `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[afinidade-adicionar-seletor-de-nó]
+. Defina a prioridade para `Required` se desejar que o agendador agende as máquinas apenas quando as regras forem atendidas.
+. Clique em `Add Rule` para especificar as regras de afinidade de nó, por exemplo, para o caso de uso xref:./node-driver.adoc#_topology_spread_constraints[restrições de espalhamento de topologia], você pode adicionar os rótulos `region` e `zone` da seguinte forma:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[afinidade-adicionar-regras]
+
+. Clique em `Create` para salvar o template de nó. Após a instalação do cluster, você pode verificar se os nós das máquinas estão agendados de acordo com as regras de afinidade.
+
+== Usando o driver de nó do Harvester K3s em ambiente air-gapped.
+
+O provisionamento do K3s depende do pacote `qemu-guest-agent` para obter o IP da máquina virtual.
+
+No entanto, pode não ser viável instalar pacotes em um ambiente air-gapped.
+
+Você pode resolver as restrições de instalação com as seguintes opções:
+
+* Opção 1. Use uma imagem de VM pré-configurada com os pacotes necessários (por exemplo, `iptables`, `qemu-guest-agent`).
+* Opção 2. Vá para *Mostrar Avançado* > *Dados do Usuário* para permitir que as VMs instalem os pacotes necessários via um proxy HTTP(S).
+
+Exemplo de `user data` no template de nó do Harvester:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

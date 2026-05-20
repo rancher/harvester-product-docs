@@ -1,0 +1,169 @@
+= CSIドライバーLVM（実験的）
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-csi-driver-lvm*は*実験的*なアドオンです。.isoには含まれていませんが、 https://github.com/harvester/experimental-addons[`experimental-addons`リポジトリ]からダウンロードできます。実験的な機能に関する詳細は、xref:introduction/document-conventions.adoc#_feature_labels[機能ラベル]を参照してください。
+====
+
+{harvester-product-name}を使用すると、ホスト上のローカルストレージを利用して、ワークロードのためにパフォーマンスとレイテンシが向上した永続ボリュームを作成できます。この機能は、Linux上で論理ボリューム管理機能を提供するLVMによって可能になります。
+
+**harvester-csi-driver-lvm**アドオンは、LVMを通じてローカルパスプロビジョニングをサポートするCSIドライバーです。
+
+== アドオンのインストールと有効化
+
+{harvester-product-name} kubeconfigファイルを使用している場合は、次の手順を実行してアドオンをインストールできます：
+
+. 次のコマンドを実行します。
++
+[,shell]
+----
+# kubectl apply -f https://raw.githubusercontent.com/harvester/experimental-addons/main/harvester-csi-driver-lvm/harvester-csi-driver-lvm.yaml
+----
++
+. {harvester-product-name} UIで、*高度な -> アドオン*に移動します。
++
+. *harvester-csi-driver-lvm（実験的）*を選択し、次に*⋮ -> 有効化*を選択します。
++
+image::csi-driver-lvm/enable-lvm-addon.png[]
+
+== LVM用のボリュームグループを作成する
+
+ボリュームグループは、物理ボリュームを組み合わせて、論理ボリュームに分割できる単一のストレージ構造を作成します。
+
+[NOTE]
+====
+{harvester-product-name}は、論理ボリュームを作成した後にボリュームグループの構成（ディスクの追加または削除）を変更することを現在許可していません。この問題は、今後のリリースで対処されます。
+====
+
+. *harvester-csi-driver-lvm*アドオンがインストールされていることを確認してください。
+
+. {harvester-product-name} UIで、*ホスト*画面に移動します。
+
+. ターゲットホストを選択し、次に*⋮ -> 設定を編集*を選択します。
+
+. *ストレージ*タブで、ボリュームグループ用のディスクを追加します。
++
+image::csi-driver-lvm/add-disk-to-vg-01.png[]
++
+選択した各ディスクの以下の設定を構成します：
++
+** *プロビジョナー*:*LVM*を選択してください。
++
+image::csi-driver-lvm/add-disk-to-vg-02.png[]
++
+** *ボリュームグループ*：既存のボリュームグループを選択するか、新しいボリュームグループの名前を指定してください。
++
+image::csi-driver-lvm/add-disk-to-vg-03.png[]
++
+ディスクの追加に関する詳細は、xref:hosts/hosts.adoc#_multi_disk_management[マルチディスク管理]を参照してください。
+
+. ［*保存*］をクリックします。
+
+. ホストの詳細画面で、ディスクが追加され、正しいプロビジョナーが設定されていることを確認してください。
++
+image::csi-driver-lvm/add-disk-to-vg-04.png[]
+
+== LVM用のStorageClassを作成する
+
+[NOTE]
+====
+各ボリュームグループには、1種類のローカルボリュームのみを使用できます。必要に応じて、使用したいボリュームタイプごとに異なるボリュームグループを作成してください。
+====
+
+. {harvester-product-name} UIで、*ストレージ*画面に移動します。
+
+. 新しいStorageClassを作成し、*プロビジョナー*リストで*LVM*を選択してください。
++
+image::csi-driver-lvm/create-lvm-sc-01.png[]
+
+. *パラメータ*タブで、以下の設定を構成してください：
++
+** *ノード*：対象のワークロードのためのノードを選択してください。
++
+image::csi-driver-lvm/create-lvm-sc-02.png[]
++
+** *ボリュームグループ名*：作成したボリュームグループを選択してください。
++
+image::csi-driver-lvm/create-lvm-sc-03.png[]
++
+** *ボリュームグループタイプ*：要件に合ったローカルボリュームのタイプを選択してください。{harvester-product-name}は現在、*ストライプ**と*dm-thin*をサポートしています。
++
+image::csi-driver-lvm/create-lvm-sc-04.png[]
+
+. ［*保存*］をクリックします。
+
+. *ストレージ*画面で、StorageClassが作成され、正しいプロビジョナーが設定されていることを確認してください。
++
+image::csi-driver-lvm/create-lvm-sc-05.png[]
+
+詳細については、xref:storage/storageclass.adoc[StorageClass]を参照してください。
+
+== LVMでボリュームを作成する
+
+. {harvester-product-name} UIで、*ボリューム*画面に移動します。
+
+. 作成したLVMストレージクラスを使用して新しいボリュームを作成します。
++
+image::csi-driver-lvm/create-lvm-volume-01.png[]
++
+[NOTE]
+====
+ステータス*Not Ready*は正常です。なぜなら、{harvester-product-name}は最初のワークロードが作成されたときにのみLVMボリュームを作成するからです。
+====
+
+. *仮想マシン*画面で、対象の仮想マシンを選択し、次に*⋮ -> ボリュームを追加*を選択します。
++
+[NOTE]
+====
+LVMボリュームはローカルボリュームであるため、LVMストレージクラスの対象ノードが仮想マシンがスケジュールされるノードであることを確認する必要があります。
+====
+
+. アタッチしたいボリュームを指定します。
++
+image::csi-driver-lvm/attach-lvm-volume-01.png[]
+
+. *ボリューム*画面で、状態が*使用中*であることを確認します。
++
+image::csi-driver-lvm/attach-lvm-volume-02.png[]
+
+作成したLVMストレージクラスのボリュームを持つ新しい仮想マシンを作成することもできます。この仮想マシンは、ボリュームのためのローカルストレージを持つ対象ノードにスケジュールされます。
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-01.png[]
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-02.png[]
+
+== LVMボリュームのスナップショットを作成する
+
+. {harvester-product-name} UIで、*設定*画面に移動します。
+
+. *csi-driver-config*セクションで、*⋮ -> 設定を編集*を選択します。
++
+image::csi-driver-lvm/update-csi-driver-config-01.png[]
+
+. 次の設定を持つエントリを追加します：
++
+** *プロビジョナー*：*lvm.driver.harvesterhci.io*を選択します。
+** *ボリュームスナップショットクラス名*：*lvm-snapshot*を選択します。
+
+. *仮想マシン*画面で、対象の仮想マシンを選択し、次に*⋮ -> 仮想マシンスナップショットを取得*を選択します。
++
+例:
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-01.png[]
+
+. *仮想マシンスナップショット*画面で、スナップショットが使用可能であることを確認します。
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-02.png[]
+
+== サポートされているLVMボリューム機能
+
+* ボリュームのサイズ変更
+* ボリュームのクローン作成
+* スナップショットの作成
+
+[IMPORTANT]
+====
+バックアップの作成は現在サポートされていません。この制限は、今後のリリースで対処されます。
+====

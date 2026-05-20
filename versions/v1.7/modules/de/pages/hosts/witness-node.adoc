@@ -1,0 +1,97 @@
+= Zeugen-Knoten
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name} Cluster, die in Produktionsumgebungen bereitgestellt werden, benötigen eine Steuerungsebene für die Verwaltung von Knoten und Pods. Ein typischer Cluster mit drei Knoten hat drei Verwaltungsknoten, die jeweils den vollständigen Satz von Komponenten der Steuerungsebene enthalten. Eine Schlüsselkomponente ist etcd, das Kubernetes verwendet, um seine Daten (Konfiguration, Zustand und Metadaten) zu speichern. Die Anzahl der etcd-Knoten muss immer eine ungerade Zahl sein (zum Beispiel ist 3 die Standardanzahl in {harvester-product-name}), um sicherzustellen, dass ein Quorum aufrechterhalten wird.
+
+Einige Situationen können erfordern, dass Sie vermeiden, Arbeitslasten und Benutzerdaten auf Verwaltungsknoten bereitzustellen. In diesen Situationen kann einem Cluster-Knoten die Rolle des _witness_ zugewiesen werden, die ihn darauf beschränkt, als Mitglied des etcd-Clusters zu fungieren. Der Zeugen-Knoten ist verantwortlich für die Festlegung eines Mitgliederquorums (eine Mehrheit der Knoten), das über Aktualisierungen des Clusterzustands einig sein muss.
+
+Zeugen-Knoten speichern keine Daten, aber die https://etcd.io/docs/v3.3/op-guide/hardware/[Hardwareempfehlungen] für etcd-Knoten müssen dennoch berücksichtigt werden. Die Verwendung von Hardware mit begrenzten Ressourcen hat erhebliche Auswirkungen auf die Clusterleistung, wie im Artikel https://www.suse.com/support/kb/doc/?id=000020100[Langsame etcd-Leistung (Leistungstest und Optimierung)] beschrieben.
+
+{harvester-product-name} unterstützt Cluster mit zwei Verwaltungsknoten und einem Zeugen-Knoten (und optional einem oder mehreren Arbeitsknoten). Für weitere Informationen zu Knotenrollen siehe xref:../hosts/hosts.adoc#_role_management[Rollenverwaltung].
+
+[IMPORTANT]
+====
+Einem Knoten kann die Rolle des _witness_ nur zum Zeitpunkt seines Beitritts zu einem Cluster zugewiesen werden. Jeder Cluster kann nur einen Zeugen-Knoten haben.
+====
+
+== Erstellen eines {harvester-product-name} Clusters mit einem Zeugen-Knoten
+
+Sie können einem Knoten die Rolle des _witness_ zuweisen, wenn er einem neu erstellten Cluster beitritt.
+
+Im folgenden Beispiel wurde ein Cluster mit drei Knoten erstellt und der Knoten `harvester-node-1` erhielt die Rolle des _witness_. `harvester-node-1` verbraucht weniger Ressourcen und hat nur etcd-Funktionen.
+
+----
+NAME↑               STATUS   ROLE                         VERSION               PODS     CPU      MEM    %CPU    %MEM    CPU/A    MEM/A AGE
+harvester-node-0    Ready    control-plane,etcd,master    v1.27.10+rke2r1         70    1095    10143      10      63    10000    15976 4d13h
+harvester-node-1    Ready    etcd                         v1.27.10+rke2r1          7     258     2258       2      14    10000    15976 4d13h
+harvester-node-2    Ready    control-plane,etcd,master    v1.27.10+rke2r1         36     840     6905       8      43    10000    15976 4d13h
+----
+
+Da der Cluster drei Knoten haben muss, wird der Beförderungscontroller die anderen beiden Knoten befördern. Danach wird der Cluster zwei Steuerungsebene-Knoten und einen Zeugen-Knoten haben.
+
+== Arbeitslasten auf dem Zeugen-Knoten
+
+Der Zeugen-Knoten führt nur die folgenden wesentlichen Arbeitslasten aus:
+
+* *harvester-node-manager*
+* *cloud-controller-manager*
+* *etcd*
+* *kube-proxy*
+* *rke2-canal*
+* *rke2-multus*
+
+== Einen Cluster mit einem Zeugen-Knoten upgraden
+
+Die allgemeinen Upgrade-Anforderungen und -Verfahren gelten für Cluster mit einem Zeugen-Knoten. Die Existenz von degradierten Volumes in solchen Clustern kann jedoch dazu führen, dass Upgrade-Vorgänge fehlschlagen.
+
+== Longhorn-Replikate in Clustern mit einem Zeugen-Knoten
+
+{harvester-product-name} verwendet Longhorn, ein verteiltes Blockspeichersystem, zur Verwaltung von Blockspeichergeräten. Longhorn wird für Verwaltungs- und Arbeitsknoten bereitgestellt, jedoch nicht für Zeugen-Knoten, die keine Daten speichern.
+
+Longhorn erstellt Replikate jedes Volumens, um die Verfügbarkeit zu erhöhen. Replikate enthalten eine Kette von Snapshots des Volumens, wobei jeder Snapshot die Änderungen von einem vorherigen Snapshot speichert. In {harvester-product-name} hat die Standard-StorageClass `harvester-longhorn` einen Replikatzählerwert von `3`.
+
+== Nutzungsbeschränkungen
+
+Zeugen-Knoten speichern keine Daten. Das bedeutet, dass in Clustern mit drei Knoten (keine Arbeitsknoten) nur zwei Replikate für jedes Longhorn Volume erstellt werden. Die Standard-StorageClass `harvester-longhorn` hat jedoch einen Replikatzählerwert von `3` für hohe Verfügbarkeit. Wenn Sie diese StorageClass verwenden, um Volumes zu erstellen, kann Longhorn die konfigurierte Anzahl von Replikaten nicht erstellen. Dies führt dazu, dass Volumes in der Longhorn-Benutzeroberfläche als *Degraded* markiert werden.
+
+Zusammenfassend müssen Sie eine StorageClass verwenden, die mit der Clusterkonfiguration übereinstimmt.
+
+* 2 Verwaltungs-Knoten + 1 Zeugen-Knoten: Erstellen Sie eine neue Standard-StorageClass mit dem *Anzahl der Replikate* Parameter, der auf *2* gesetzt ist. Dies stellt sicher, dass für jedes Longhorn Volume nur zwei Replikate erstellt werden.
+* 2 Verwaltungs-Knoten + 1 Zeugen-Knoten + 1 oder mehr Arbeitsknoten: Sie können die vorhandene Standard-StorageClass verwenden.
+
+image::advanced/new-storageclass-rep-2.png[neue StorageClass Replica 2]
+
+image::advanced/set-to-default-sc.png[als Standard festgelegt]
+
+Wenn Sie bereits Volumes mit der ursprünglichen Standard-StorageClass erstellt haben, können Sie die Replikazahl auf dem *Volume* Bildschirm der xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[eingebetteten Longhorn-Benutzeroberfläche] ändern.
+
+image::advanced/redirect-to-longhorn-vol-page.png[redirect-to-longhorn-volume-page]
+
+image::advanced/update-replica-2.png[update-replica-count-to-2]
+
+== Bekannte Probleme
+
+=== 1. Beim Erstellen eines Clusters mit einem Zeugen-Knoten lautet die *Netzwerkkonfiguration: Der Erstellen* Bildschirm in der {harvester-product-name} Benutzeroberfläche kann keine NICs identifizieren, die mit allen Knoten verwendet werden können.
+
+image::advanced/create-policy-with-all-nodes.png[netzwerkkonfiguration-mit-allen-knoten-erstellen]
+
+image::advanced/no-uplink.png[kein uplink]
+
+Der Workaround besteht darin, einen Nicht-Zeugen-Knoten auszuwählen und dann eine NIC auszuwählen, die mit diesem spezifischen Knoten verwendet werden kann.
+
+image::advanced/create-policy-with-specific-node.png[netzwerkkonfiguration-mit-spezifischem-knoten-erstellen]
+
+image::advanced/get-uplink.png[uplink-erhalten]
+
+Sie müssen dieses Verfahren für jeden Nicht-Zeugen-Knoten im Cluster wiederholen. Die gleichen Uplink-Einstellungen können über Knoten hinweg verwendet werden.
+
+Verwandtes Problem: https://github.com/harvester/harvester/issues/5325[[BUG\] NIC-Auswahl zur Erstellung der Netzwerkkonfiguration nicht möglich, wenn der Cluster einen Zeugen-Knoten enthält]
+
+=== 2. Bei der Auswahl eines Zielknotens für die VM-Migration enthält die Zielauflistung den Zeugen-Knoten.
+
+image::advanced/vm-migration-witness-node.png[vm-Migrationsziel Zeugen-Knoten]
+
+Wählen Sie den Zeugen-Knoten nicht als Migrationsziel aus. Wenn Sie dies tun, wird die VM-Migration fehlschlagen.
+
+Zugehöriges Problem: https://github.com/harvester/harvester/issues/5338[[BUG\] Der Zeugen-Knoten sollte nicht als Migrationsziel ausgewählt werden]

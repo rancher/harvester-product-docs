@@ -1,0 +1,312 @@
+= ネットワーキングのベストプラクティス
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+== イーサネットNICの交換
+
+さまざまな理由から、{harvester-product-name} クラスターのベアメタルノードのイーサネットNICを交換することを検討する場合があります。
+
+* 故障または損傷
+* ハードウェア容量不足
+* 機能の欠如
+
+以下の手順に従い、各ノードで順番に実行できます。
+
+=== 交換前のチェック
+
+. インストールされている {harvester-product-name} バージョンが新しいNICをサポートしていることを確認してください。
+. 非生産環境で新しいNICをテストしてください。
+. {harvester-product-name} UIの xref:/virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[*仮想マシン* 画面] で、すべてのVMのステータスが __実行中__ または __停止__ のいずれかであることを確認してください。
+. xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[組み込み {longhorn-product-name} UI] で、すべての {longhorn-product-name} ボリュームのステータスが __正常__ であることを確認してください。
+. （オプション）*Harvester Support* 画面で、比較目的のために xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[サポートバンドル] を生成します。
+
+=== 情報収集
+
+何らかのアクションを取る前に、現在のネットワーク情報とステータスを収集することが重要です。
+
+* ネットワーク構成：デフォルトでは、{harvester-product-name} は管理ネットワーク用に `mgmt-bo` という名前のボンドインタフェースを作成します。その上に、VLANをオプションで使用することができる `mgmt-br` という名前のブリッジインターフェースがあります。各クラスターのネットワークには、新しいボンドインタフェースが1つあります。`nmcli` ツールを使用して、現在の接続詳細を表示できます。
++
+例:
++
+----
+$ nmcli
+mgmt-br.2017: connected to vlan-mgmt
+        "mgmt-br.2017"
+        vlan, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        ip4 default
+        inet4 10.115.55.20/21
+        route4 10.115.48.0/21 metric 400
+        route4 default via 10.115.55.254 metric 400
+...
+mgmt-bo: connected to bond-mgmt
+        "mgmt-bo"
+        bond, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        master mgmt-br
+mgmt-br: connected to bridge-mgmt
+        "mgmt-br"
+        bridge, 5C:B9:01:89:C2:F5, sw, mtu 1500
+eno50: connected to bond-slave-eno50
+        "Intel 82599ES SFI/SFP+"
+        ethernet (ixgbe), 5C:B9:01:89:C2:F5, hw, sriov, mtu 1500
+        master mgmt-bo
+...
+----
+
+* 物理NIC:コマンド`ip link`を使用して、各NICの状態や対応するマスター（該当する場合）を含む関連情報を取得できます。
++
+例:
++
+----
+  $ ip link | grep master -1
+
+  2: ens3: <BROADCAST,MULTICAST,SLAVE,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master mgmt-bo state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+  --
+
+  4: mgmt-bo: <BROADCAST,MULTICAST,MASTER,UP,LOWER_UP> mtu 1500 qdisc noqueue master mgmt-br state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+----
+
+* PCIデバイス:コマンド`lspci`を使用してデバイスのリストを取得でき、ネットワークNICを迅速に特定できます。各デバイスの詳細情報を取得するには、コマンド`lspci -v`を使用してください。
++
+例 (`lspci`):
++
+----
+  $ lspci
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+----
++
+例 (`lspci -v`):
++
+----
+  $ lspci -v
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    Subsystem: Red Hat, Inc. QEMU Virtual Machine
+    Physical Slot: 3
+    Flags: bus master, fast devsel, latency 0, IRQ 11
+    Memory at fc080000 (32-bit, non-prefetchable) [size=128K]
+    I/O ports at c000 [size=64]
+    Expansion ROM at fc000000 [disabled] [size=512K]
+    Kernel driver in use: e1000
+    Kernel modules: e1000
+----
+
+* Linuxカーネルログ:コマンド`dmesg`を使用してカーネルメッセージを表示できます。これには必要な情報のほとんどが含まれています。メッセージを`kernel.log`に保存すると、ドライバーとリンクの状態を確認できます。
++
+{harvester-product-name}はサブNICをボンドインタフェースに配置します。次の例では、クラスター内に`data-bo`という名前の追加ボンドインタフェースが作成されます。
++
+----
+  $ grep "(slave" kernel.log  (or: dmesg | grep "(slave")
+
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave eno5): Enslaving as a backup interface with an up link
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave ens4f0): Enslaving as a backup interface with an up link
+  Jan 08 00:37:34 localhost kernel: data-bo: (slave eno6): Enslaving as a backup interface with an up link
+  Jan 08 00:37:35 localhost kernel: data-bo: (slave ens4f1): Enslaving as a backup interface with an up link
+----
++
+NICが名前変更されます。
++
+----
+  $ grep "renamed" kernel.log
+
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.0 eno1: renamed from eth2 // eth2 / eno1 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.3 eno4: renamed from eth6 // eth6 / eno4 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.2 eno3: renamed from eth5 // eth5 / eno3 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.1 eno2: renamed from eth3 // eth3 / eno2 is not used by Harvester
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.0 ens4f0: renamed from eth4
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.1 eno6: renamed from eth1
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 ens4f1: renamed from eth2
+----
++
+`eno5(0000:5d:00.0)`のNICドライバーは`(intel) i40e 10Gbps Full Duplex`です。
++
+----
+  $ grep "0000:5d:00.0" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: fw 8.71.63306 api 1.11 nvm 10.54.7 [8086:1572] [103c:22fc]
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: MAC address: 48:df:37:24:c2:00
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: FW LLDP is enabled
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: PCI-Express: Speed 8.0GT/s Width x8
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: Features: PF-id[0] VFs: 64 VSIs: 66 QP: 112 RSS FD_ATR FD_SB NTUPLE DCB VxLAN Geneve PTP VEPA
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+----
++
+有効なNICが検出されます。
++
+----
+  $ grep "is Up" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:5d:00.1 eth1: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:af:00.0 eth4: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 eth2: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+----
+
+=== メンテナンスモードを有効にする
+
+. （オプション）移行できない、または移行すべきでないVMを停止します。
+. ターゲットノードでxref:/hosts/hosts.adoc#_node_maintenance[メンテナンスモードを有効にする]と、すべてのVMが他のノードに自動的に移行します。
+
+* すべてが準備完了になるまで待ち、その後<<Pre-Replacement Checks,事前チェック>>セクションの手順を繰り返します。
+* 次の状況でVMを手動で停止します:
+ ** VMが移行に失敗しました。
+ ** VMには、他のノードに移行するのを防ぐセレクタがあります。
+ ** VMには、他のノードに移行するのを防ぐ特別なハードウェア（例えば、PCIパススルーやvGPU）が備わっています。
+
+=== （オプション）ネットワーク構成を更新する
+
+{harvester-product-name}のすべてのxref:./cluster-network.adoc#_cluster_network[クラスター ネットワーク]の下に、1つ以上のxref:./cluster-network.adoc#_create_a_new_cluster_network[ネットワーク構成]があります。各`Network Config`は、`VlanConfig` CRDオブジェクトによってバックアップされています。
+
+[IMPORTANT]
+====
+新しいNICが異なる物理スロットに配置される場合や異なるアップリンクパラメータを持つ場合、`Network Config`の更新は*必須*です。
+====
+
+. ノードを確認してください。
++
+{harvester-product-name}クラスター ノードが`Network Config`に属している場合、`Node`オブジェクトにはキー`network.harvesterhci.io/vlanconfig`のラベルがあります。
++
+例:
++
+----
+ apiVersion: v1
+ kind: Node
+ metadata:
+   labels:
+     ...
+     network.harvesterhci.io/vlanconfig: vlan123
+----
+
+. このノードを`Network Config`から削除してください。
++
+新しいNICが異なるスロットに配置される場合、このノードを除外するために`Network Config`を変更する必要があります。`Network Config`オブジェクトが`nodeSelector`からこのノードのみを選択する場合、VlanConfigを削除できます。
++
+例:
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanConfig
+ spec:
+   clusterNetwork: data
+   nodeSelector:
+     kubernetes.io/hostname: node123  // select one or more nodes
+   uplink:
+     bondOptions:
+       miimon: 100
+       mode: 802.3ad
+     linkAttributes:
+       mtu: 1500
+       txQLen: -1
+     nics:
+     - enp0s1
+     - enp0s2
+----
++
+影響を受けたノードでVMがまだ実行中の場合、ネットワークWebhookはエラーを返します。
+
+. `Node`オブジェクトを確認してください。
++
+状況に応じて、ラベル`network.harvesterhci.io/vlanconfig`が変更されるか削除されます。
+
+. `VlanStatus`オブジェクトを確認してください。
++
+状況に応じて、`VlanStatus`オブジェクトの`ready`条件のステータスが`"True"`に変更されるか、オブジェクトが削除されます。
++
+例:
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanStatus
+ metadata:
+ ...
+ status:
+   clusterNetwork: data
+   conditions:
+   - lastUpdateTime: "2024-02-03T18:32:41Z"
+     status: "True"
+     type: ready
+   linkMonitor: public
+   localAreas:
+   - cidr: 10.190.186.0/24
+     vlanID: 2013
+   node: node123
+   vlanConfig: vlan123
+----
+
+=== （オプション）ノードをドレインする
+
+以前に概説した手順を完了した後でも、いくつかの{longhorn-product-name}レプリカがノード上でアクティブなままであることがわかるかもしれません。
+
+. ノードをドレインしてください。（これは{harvester-product-name}ではオプションです。）
+ ** シナリオ1:すべてのボリュームの`numReplicas`値は`3`であり、各{longhorn-product-name}ボリュームには3つのアクティブなレプリカがあります。
++
+Longhorn Engineは、ドレインされたノード上のレプリカと通信できなくなったことを認識し、そのレプリカを失敗としてマークします。レプリカのいずれも{longhorn-product-name}に特別な重要性を持たないため、少なくとも1つのレプリカと通信できる限り機能します。
+
+ ** シナリオ2:一部の{longhorn-product-name}ボリュームには、_3つ未満_のアクティブなレプリカがあり、または{harvester-product-name} UIまたは{longhorn-product-name} UIを使用して手動でボリュームを接続しました。
++
+レプリカを手動で切り離すか、他のノードに移動し、その後 https://documentation.suse.com/cloudnative/storage/1.8/en/troubleshooting-maintenance/maintenance.html#_updating_the_node_os_or_container_runtime[ノードをドレインする]ためにコマンド`kubectl drain --ignore-daemonsets <node name>`を使用する必要があります。オプション`--ignore-daemonsets`は、{longhorn-product-name}がLonghorn Manager、Longhorn CSIプラグイン、Longhorn Engineイメージなどのデーモンセットをデプロイするために必要です。
++
+ノード上で実行されているレプリカは停止され、`Failed`としてマークされます。ノード上で実行されているLonghorn Engineプロセスは、ポッドと共に他のノードに移行されます。ノードが完全にドレインされると、ノード上でレプリカやエンジンプロセスが実行されているべきではありません。
+. レプリカを補充します。
++
+ノードがシャットダウンされた後、{longhorn-product-name}は`replica-replenishment-wait-interval`（デフォルト値：600秒）が経過するまで、他のノードでレプリカの再構築を開始しません。待機間隔の値に達する前にノードがオンラインに戻った場合、{longhorn-product-name}はレプリカを再利用します。そうでない場合、{longhorn-product-name}は別のノードでレプリカを再構築します。
++
+システムメンテナンス中に、 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_replenishment_wait_interval[`replica-replenishment-wait-interval`]の値をxref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[組み込み {longhorn-product-name} UI]を使用して変更し、レプリカの再構築を迅速化できます。
+
+=== NICを交換します。
+
+. ノードをシャットダウンします。
+. NICを交換します。
+. ノードを再起動します。
+. <<Collect Information>>現在のネットワーク構成と状態について。
+
+異常を観察した場合は、トラブルシューティングの目的でxref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[サポートバンドル]を生成してください。
+
+=== （オプション）ネットワーク構成を再度更新する
+
+[IMPORTANT]
+====
+新しいNICが異なる物理スロットに配置される場合、`Network Config`の更新は*必須*です。
+====
+
+. ノードを`Network Config`に追加します。
++
+新しい`Network Config`を作成するか、`Network Config`を変更してこのノードを含める必要があります。
+
+. `Node`オブジェクトを確認してください。
++
+ラベル`network.harvesterhci.io/vlanconfig`は使用される特定の`Network Config`を反映しています。
+
+. `VlanStatus`オブジェクトを確認してください。
++
+`VlanStatus`オブジェクトの`ready`状態のステータスが`"True"`に変更されます。
+
+=== メンテナンスモードを無効にする
+
+. ノードがクラスターに戻るのを待ちます。
+. メンテナンスモードを無効にします。
+. （オプション）手動で停止したVMを起動します。
+. （オプション）手動でxref:/virtual-machines/live-migration.adoc#_starting_a_migration[VMを移行する]。
+
+=== トラブルシューティング
+
+{harvester-product-name}は複数のネットワーク関連のポッドとCRDを使用します。トラブルシューティングの際は、ポッドのログとCRDオブジェクトのステータスを確認してください。
+
+ポッド:
+
+ $ kubectl get pods -n harvester-system
+ NAME                                                    READY   STATUS    RESTARTS      AGE
+ harvester-network-controller-cnf22                      1/1     Running   2 (60m ago)   3d22h  // Network controller agent daemonSet, deployed in each node
+ harvester-network-controller-manager-859c4bd874-xcllf   1/1     Running   2 (60m ago)   3d22h  // Network controller
+ harvester-network-webhook-56b877d5d5-z42dp              1/1     Running   2 (60m ago)   3d22h
+
+CRD:
+
+----
+clusternetworks.network.harvesterhci.io
+linkmonitors.network.harvesterhci.io
+vlanconfigs.network.harvesterhci.io
+vlanstatuses.network.harvesterhci.io
+----

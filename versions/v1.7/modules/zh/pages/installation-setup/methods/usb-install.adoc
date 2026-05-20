@@ -1,0 +1,104 @@
+= USB安装
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== 创建可启动的USB U 盘
+
+有几种方法可以创建USB安装U 盘。
+
+[CAUTION]
+====
+*已知问题:*对于v1.2.0 ISO 映像，存在一个已知 https://github.com/harvester/harvester/issues/4510[问题]，即使用USB方法时交互式ISO安装会卡住。
+
+为了解决此问题，您可以使用打补丁后的 https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso[ISO]。此补丁版本仅修正了分区标签，没有其他更改。您还可以使用相关的sha512 https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso.sha512sum[文件]来验证ISO。
+
+请参阅<<Interactive ISO hangs with the USB installation method>>以获取详细信息和解决方法。
+
+无论您使用哪个工具，创建可启动设备都会擦除您的USB设备数据。请在制作可启动设备之前备份USB设备上的所有数据。
+====
+
+=== Rufus
+
+https://rufus.ie/[Rufus]允许您在Windows计算机上在USB U 盘上创建ISO 映像。
+
+. 打开Rufus并将一个干净的USB U 盘插入计算机。
+. Rufus会自动检测到您的USB。从*设备*下拉菜单中选择您要使用的USB设备。
+. 对于*启动选择*，请选择*选择*并找到您想要刻录到USB U 盘上的ISO 映像。
++
+image::install/rufus.png[rufus.png]
++
+[IMPORTANT]
+====
+如果使用旧版本的Rufus，`DD mode`和`ISO mode`都可以使用。`DD mode`的工作方式与Linux中的`dd`命令相同，创建可启动设备后您无法浏览分区。`ISO mode`会自动在您的设备上创建分区并将文件复制到这些分区，即使在创建可启动设备后您也可以浏览这些分区。
+====
+
+=== balenaEtcher
+
+https://www.balena.io/etcher/[balenaEtcher]支持在大多数Linux发行版、macOS和Windows上将镜像写入USB U 盘。它具有GUI，易于使用。
+
+. 选择 ISO 映像。
+. 选择目标USB U 盘以创建USB安装U 盘。
++
+image::install/balena-etcher.png[balena-etcher.png]
+
+=== `dd` 命令
+
+您可以在 Linux 或其他平台上使用 'dd' 命令来创建 USB 安装U 盘。确保选择正确的设备；以下命令会擦除所选设备上的数据。
+
+[,sh]
+----
+# sudo dd if=<path_to_iso> of=<path_to_usb_device> bs=64k
+----
+
+== 已知问题
+
+=== 显示 `GRUB _` 文本，但从 USB 安装U 盘启动时没有任何反应。
+
+如果您使用 UEFI 模式，请尝试从 USB U 盘上的 UEFI 启动分区启动，而不是直接从 USB U 盘启动。例如，选择 `UEFI: USB disk 3.0 PMAP, Partition 1` 进行启动。表示方式因系统而异。
+
+image::install/usb-install-select-correct-partition.png[]
+
+=== 图形问题
+
+某些显卡的固件未包含在 `v0.3.0` 中。
+
+您可以按 `e` 编辑 GRUB 菜单项，并将 `nomodeset` 附加到启动参数。按 `Ctrl + x` 启动。
+
+image::install/usb-install-nomodeset.png[]
+
+=== 安装程序未显示。
+
+如果 U 盘启动，但您看不到安装程序，请尝试以下解决方法：
+
+* 将 U 盘插入 USB 2.0 插槽。
+* 对于版本 `v0.3.0` 或更高版本，启动时请去除 `console=ttyS0` 参数。按 `e` 编辑 GRUB 菜单项并去除 `console=ttyS0` 参数。
+
+=== 使用 USB 安装方法时，交互式 ISO 卡住。
+
+在使用 v1.2.0 ISO 映像（由 `balenaEtcher`、`dd` 等工具创建）从 U 盘安装时，安装过程可能会在初始映像加载过程中卡住，因为启动分区缺少所需的标签。因此，安装无法正确挂载数据分区，导致 `dracut` 中的一些检查被阻塞。
+
+如果您遇到此问题，您将观察到以下类似的输出，并且该过程将至少卡住 50 分钟（来自 `dracut` 的默认超时值）。
+
+image::install/usb-install-hang.png[]
+
+==== 解决方法
+
+要解决此问题，您可以手动修改根分区，如下所示：
+
+[,text]
+----
+# Replace the `CDLABEL=COS_LIVE` with your USB data partition. Usually, your USB data partition is the first partition with the device name `sdx` that hangs on your screen.
+# Original
+$linux ($root)/boot/kernel cdroot root=live:CDLABEL=COS_LIVE rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+# Modified
+$linux ($root)/boot/kernel cdroot root=live:/dev/sda1 rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+----
+
+修改后的参数应如下所示：
+
+image::install/grub-parameter-modified.png[]
+
+进行此调整后，按 `Ctrl + x` 启动。您现在应该像往常一样进入安装程序。
+
+* 相关问题：
+ ** https://github.com/harvester/harvester/issues/4510[[BUG\] v1.2.0 交互式 ISO 在某些裸机上无法安装]

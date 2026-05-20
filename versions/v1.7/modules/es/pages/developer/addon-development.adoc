@@ -1,0 +1,60 @@
+= Guía de desarrollo de complementos
+:revdate: 2025-06-17
+:page-revdate: {revdate}
+
+Los complementos {harvester-product-name} te permiten habilitar y deshabilitar componentes específicos del producto y de terceros según tus requisitos. Los complementos funcionan como un wrapper para la https://documentation.suse.com/cloudnative/rke2/latest/en/helm.html#_using_the_helm_crd[{rke2-product-name} definición de recurso HelmChart (CRD)].
+
+== Requisitos previos
+
+* Un clúster {harvester-product-name} existente
+
+== Especificaciones de complementos
+
+El CRD `Addon` admite los siguientes campos:
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Addon
+metadata:
+  name: example-add-on           # Name of add-on
+  namespace: example-namespace  # Namespace where the add-on CRD is deployed and where the associated Kubernetes components will be deployed
+  labels:                       # Optional add-on labels
+    Add-on.harvesterhci.io/experimental: "true" # Predefined label used on the UI to identify add-ons with the "experimental" maturity level
+spec:
+  enabled: false                # Boolean indicating if an add-on should be enabled or disabled on definition
+  repo: https://chartsrepo.com  # Helm chart repository containing the Helm chart managed by the add-on
+  version: "v0.19.0"            # Version of the Helm chart to be installed
+  chart: mychart                # Name of the Helm chart in the Helm chart repository
+  valuesContent: |-             # File (values.yaml) that must be passed to the Helm chart
+    contents of values.yaml
+    that need to be passed
+    to the chart
+----
+
+[NOTE]
+====
+Los complementos experimentales no están empaquetados directamente en {harvester-product-name}. Un ejemplo es el complemento https://github.com/harvester/experimental-addons/blob/main/rancher-vcluster/rancher-vcluster.yaml[`rancher-vcluster`].
+====
+
+== Instalación
+
+[,bash]
+----
+kubectl apply -f /path/to/add-on.yaml
+----
+
+== Uso
+
+Después de crear un CRD `Addon`, puedes alternar el campo `enabled` para habilitar y deshabilitar el gráfico de Helm asociado.
+
+== Actualización
+
+Los cambios en los campos `repo`, `version`, `chart` o `valueContent` desencadenarán un `helm upgrade`, lo que obliga a actualizar la versión del gráfico de Helm existente.
+
+== Desinstalación
+
+[,bash]
+----
+kubectl delete -f /path/to/Add-on.yaml
+----

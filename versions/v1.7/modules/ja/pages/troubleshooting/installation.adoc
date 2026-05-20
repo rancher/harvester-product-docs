@@ -1,0 +1,599 @@
+= インストールに関する問題
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+以下のセクションには、インストールの失敗に関するトラブルシューティングや支援を得るためのヒントが含まれています。
+
+== インストーラー（ライブOS）にログインする
+
+ユーザーは、別のTTYに切り替えて次の資格情報でログインするために、キーの組み合わせ`CTRL + ALT + F2`を押すことができます。
+
+* ユーザー: `rancher`
+* パスワード: `rancher`
+
+== ハードウェア要件を満たす
+
+* インストールを完了するために、ハードウェアがxref:/installation-setup/requirements.adoc#_hardware_requirements[最小要件]を満たしていることを確認してください。
+
+== `Loading images. This may take a few minutes...`にハングしている
+
+システムにデフォルトルートがないため、インストーラーがこの状態で「ハング」する可能性があります。次のコマンドを実行して、ルートの状態を確認できます:
+
+[,shell]
+----
+$ ip route
+default via 10.10.0.10 dev mgmt-br proto dhcp        <-- Does a default route exist?
+10.10.0.0/24 dev mgmt-br proto kernel scope link src 10.10.0.15
+----
+
+DHCPサーバーがデフォルトルートオプションを提供していることを確認してください。`/run/cos/target/rke2.log`からのコンテンツを添付することも役立ちます。
+
+詳細については、xref:/installation-setup/methods/pxe-boot-install.adoc#_dhcp_server_configuration[DHCPサーバーの設定]を参照してください。
+
+== エージェントノードでのクラスタートークンの変更
+
+エージェントノードがクラスターに参加できない場合、クラスターのトークンがサーバーノードのトークンと一致していないことが原因である可能性があります。
+問題を確認するために、エージェントノードに接続し（つまり、xref:./operating-system.adoc#_how_to_log_in_to_a_harvester_node[SSH]を使用して）、次のコマンドで`rancherd`サービスログを確認してください:
+
+[,shell]
+----
+sudo journalctl -b -u rancherd
+----
+
+エージェントノードに設定されたクラスターのトークンがサーバーノードのトークンと一致しない場合、次のメッセージのいくつかのエントリが見つかります:
+
+[,sh]
+----
+msg="Bootstrapping Rancher (v2.7.5/v1.25.9+rke2r1)"
+msg="failed to bootstrap system, will retry: generating plan: response 502: 502  Bad Gateway getting cacerts: <html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\r\n<center><h1>502 Bad Gateway</h1></center>\r\n<hr><center>nginx</center>\r\n</body>\r\n</html>\r\n"
+----
+
+{rancher-short-name}のバージョンとIPアドレスは環境によって異なる場合があり、上記のメッセージとは異なることに注意してください。
+
+問題を修正するには、`rancherd`設定ファイル`/etc/rancher/rancherd/config.yaml`内のトークン値を更新する必要があります。
+
+たとえば、サーバーノードに設定されたクラスターのトークンが`ThisIsTheCorrectOne`の場合、トークン値を次のように更新します:
+
+[,yaml]
+----
+token: 'ThisIsTheCorrectOne'
+----
+
+再起動後も変更が持続するように、`token`OSの設定ファイル`/oem/90_custom.yaml`の値を更新してください。
+
+[,yaml]
+----
+name: Harvester Configuration
+stages:
+  ...
+  initramfs:
+  - commands:
+    - ...
+    files:
+    - path: /etc/rancher/rancherd/config.yaml
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+        server: https://$cluster-vip:443
+        role: agent
+        token: "ThisIsTheCorrectOne"
+        kubernetesVersion: v1.25.9+rke2r1
+        rancherVersion: v2.7.5
+        rancherInstallerImage: rancher/system-agent-installer-rancher:v2.7.5
+        labels:
+         - harvesterhci.io/managed=true
+        extraConfig:
+          disable:
+          - rke2-snapshot-controller
+          - rke2-snapshot-controller-crd
+          - rke2-snapshot-validation-webhook
+      encoding: ""
+      ownerstring: ""
+----
+
+[NOTE]
+====
+現在のクラスターのトークン値を確認するには、サーバーノードにログインし（例：SSHを使用）、ファイル`/etc/rancher/rancherd/config.yaml`を確認してください。例えば、トークンの値のみを表示するには、次のコマンドを実行できます。
+
+[,bash]
+----
+$ sudo yq eval .token /etc/rancher/rancherd/config.yaml
+----
+====
+
+== コンポーネントの状態を確認する
+
+{harvester-product-name}コンポーネントの状態を確認する前に、次のいずれかの方法でクラスターのkubeconfigファイルのコピーを取得してください。
+
+* {harvester-product-name} UIで、*サポート*画面に移動し、次に*Download KubeConfig*をクリックします。
+
+* 管理ノードのいずれかで次のコマンドを実行してください。
++
+[,shell]
+----
+$ sudo su
+$ cat /etc/rancher/rke2/rke2.yaml
+----
+
+kubeconfigファイルのコピーを取得した後、クラスターに対して次のスクリプトを実行して、各コンポーネントの準備状況を確認します。
+
+* {harvester-product-name}コンポーネント
++
+[,shell]
+----
+  #!/bin/bash
+  cluster_ready() {
+    namespaces=("cattle-system" "kube-system" "harvester-system" "longhorn-system")
+    for ns in "${namespaces[@]}"; do
+      pod_statuses=($(kubectl -n "${ns}" get pods \
+        --field-selector=status.phase!=Succeeded \
+        -ojsonpath='{range .items[*]}{.metadata.namespace}/{.metadata.name},{.status.conditions[?(@.type=="Ready")].status}{"\n"}{end}'))
+      for status in "${pod_statuses[@]}"; do
+        name=$(echo "${status}" | cut -d ',' -f1)
+        ready=$(echo "${status}" | cut -d ',' -f2)
+        if [ "${ready}" != "True" ]; then
+          echo "pod ${name} is not ready"
+          false
+          return
+        fi
+      done
+    done
+  }
+  if cluster_ready; then
+    echo "cluster is ready"
+  else
+    echo "cluster is not ready"
+  fi
+----
+
+* API
++
+[,shell]
+----
+$ curl -fk https://<VIP>/version
+----
++
+[NOTE]
+====
+`<VIP>`をxref:installation-setup/management-address.adoc#_how_to_get_the_vip_mac_address[実際のVIP]に置き換える必要があります。これは`kube-vip.io/requestedIP`の値です。
+====
+
+== トラブルシューティング情報の収集
+
+インストール失敗を報告する際は、バグレポートに以下の情報を含めてください。
+
+* インストール失敗のスクリーンショット。
+* システム情報とログ。
+
++
+<<Logging into the Installer (a live OS)>>のガイドに従ってログインしてください。トラブルシューティング情報を含むtarballを生成するコマンドを実行してください。
++
+[,sh]
+----
+  supportconfig -k -c
+----
++
+コマンドの出力メッセージには、生成されたtarballのパスが含まれています。例えば、以下の例ではパスは`/var/loq/scc_aaa_220520_1021 804d65d-c9ba-4c54-b12d-859631f892c5.txz`です。
++
+image::troubleshooting/installation-support-config-example.png[]
++
+[NOTE]
+====
+失敗したPXEブートインストールは、設定ファイルのxref:/installation-setup/config/configuration-file.adoc#_install_debug[`install.debug`]フィールドが`true`に設定されている場合、自動的にtarballを生成します。
+====
+
+== チャートの状態を確認する
+
+{harvester-product-name}は次のチャートCRDを使用します。
+
+* `HelmChart`:RKE2チャートを維持します。
++
+** `rke2-runtimeclasses`
+** `rke2-multus`
+** `rke2-metrics-server`
+** `rke2-ingress-nginx`
+** `rke2-coredns`
+** `rke2-cannal`
+
+* `ManagedChart`:{rancher-short-name}および{harvester-product-name}チャートを管理します。
++
+** `rancher-monitoring-crd`
+** `rancher-logging-crd`
+** `kubeovn-operator-crd`
+** `harvester-crd`
+** `harvester`
+
+インストールされたチャートのリストを取得するには、`helm list -A`コマンドを使用できます。
+
+出力の例：
+
+[,shell]
+----
+NAME                                           NAMESPACE                          REVISION    UPDATED                                    STATUS      CHART                                                                                       APP VERSION
+fleet                                          cattle-fleet-system                4           2025-09-24 09:07:10.801764068 +0000 UTC    deployed    fleet-107.0.0+up0.13.0                                                                      0.13.0
+fleet-agent-local                              cattle-fleet-local-system          1           2025-09-24 08:59:28.686781982 +0000 UTC    deployed    fleet-agent-local-v0.0.0+s-d4f65a6f642cca930c78e6e2f0d3f9bbb7d3ba47cf1cce34ac3d6b8770ce5
+fleet-crd                                      cattle-fleet-system                1           2025-09-24 08:58:28.396419747 +0000 UTC    deployed    fleet-crd-107.0.0+up0.13.0                                                                  0.13.0
+harvester                                      harvester-system                   1           2025-09-24 08:59:37.718646669 +0000 UTC    deployed    harvester-0.0.0-master-ac070598                                                             master-ac070598
+harvester-crd                                  harvester-system                   1           2025-09-24 08:59:35.341316526 +0000 UTC    deployed    harvester-crd-0.0.0-master-ac070598                                                         master-ac070598
+kubeovn-operator-crd                           kube-system                        1           2025-09-24 08:59:34.783356576 +0000 UTC    deployed    kubeovn-operator-crd-1.13.13                                                                v1.13.13
+mcc-local-managed-system-upgrade-controller    cattle-system                      1           2025-09-24 08:59:10.656784284 +0000 UTC    deployed    system-upgrade-controller-107.0.0                                                           v0.16.0
+rancher                                        cattle-system                      1           2025-09-24 08:57:20.690330683 +0000 UTC    deployed    rancher-2.12.0                                                                              8815e66-dirty
+rancher-logging-crd                            cattle-logging-system              1           2025-09-24 08:59:36.262080367 +0000 UTC    deployed    rancher-logging-crd-107.0.1+up4.10.0-rancher.10
+rancher-monitoring-crd                         cattle-monitoring-system           1           2025-09-24 08:59:35.287099045 +0000 UTC    deployed    rancher-monitoring-crd-107.1.0+up69.8.2-rancher.15
+rancher-provisioning-capi                      cattle-provisioning-capi-system    1           2025-09-24 08:59:00.561162307 +0000 UTC    deployed    rancher-provisioning-capi-107.0.0+up0.8.0                                                   1.10.2
+rancher-webhook                                cattle-system                      2           2025-09-24 09:02:38.774660489 +0000 UTC    deployed    rancher-webhook-107.0.0+up0.8.0                                                             0.8.0
+rke2-canal                                     kube-system                        1           2025-09-24 08:57:25.248839867 +0000 UTC    deployed    rke2-canal-v3.30.2-build2025071100                                                          v3.30.2
+rke2-coredns                                   kube-system                        1           2025-09-24 08:57:25.341016864 +0000 UTC    deployed    rke2-coredns-1.42.302                                                                       1.12.2
+rke2-ingress-nginx                             kube-system                        3           2025-09-24 09:01:31.331647555 +0000 UTC    deployed    rke2-ingress-nginx-4.12.401                                                                 1.12.4
+rke2-metrics-server                            kube-system                        1           2025-09-24 08:57:42.162046899 +0000 UTC    deployed    rke2-metrics-server-3.12.203                                                                0.7.2
+rke2-multus                                    kube-system                        1           2025-09-24 08:57:25.341560394 +0000 UTC    deployed    rke2-multus-v4.2.106                                                                        4.2.1
+rke2-runtimeclasses                            kube-system                        1           2025-09-24 08:57:40.137168056 +0000 UTC    deployed    rke2-runtimeclasses-0.1.000                                                                 0.1.0
+----
+
+=== HelmChart CRD
+
+`HelmChart`アイテムはジョブによってインストールされます。{harvester-product-name}ノードで次のコマンドを実行することで、各ジョブの名前とステータスを確認できます：
+
+[,shell]
+----
+$ kubectl get helmcharts -A -o jsonpath='{range .items[*]}{"Namespace: "}{.metadata.namespace}{"\nName: "}{.metadata.name}{"\nStatus:\n"}{range .status.conditions[*]}{"  - Type: "}{.type}{"\n    Status: "}{.status}{"\n    Reason: "}{.reason}{"\n    Message: "}{.message}{"\n"}{end}{"JobName: "}{.status.jobName}{"\n\n"}{end}'
+----
+
+出力の例：
+
+[,shell]
+----
+Namespace: kube-system
+Name: rke2-canal
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-canal
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-canal
+Namespace: kube-system
+Name: rke2-coredns
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-coredns
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-coredns
+Namespace: kube-system
+Name: rke2-ingress-nginx
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-ingress-nginx
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-ingress-nginx
+Namespace: kube-system
+Name: rke2-metrics-server
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-metrics-server
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-metrics-server
+Namespace: kube-system
+Name: rke2-multus
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-multus
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-multus
+Namespace: kube-system
+Name: rke2-runtimeclasses
+Status:
+  - Type: JobCreated
+    Status: True
+    Reason: Job created
+    Message: Applying HelmChart using Job kube-system/helm-install-rke2-runtimeclasses
+  - Type: Failed
+    Status: False
+    Reason:
+    Message:
+JobName: helm-install-rke2-runtimeclasses
+----
+
+次の方法で情報を使用できます：
+
+* 失敗したジョブの原因を特定します：`Failed`条件の`Reason`および`Message`の値を確認します。
+* ジョブを再実行します：その特定のジョブの`Status`フィールドを`HelmChart` CRDから削除します。コントローラーが新しいジョブをデプロイします。
+
+=== ManagedChart CRD
+
+{rancher-short-name}は https://documentation.suse.com/en-us/cloudnative/continuous-delivery/[{fleet-product-name}]を使用してターゲットクラスターにチャートをインストールします。{harvester-product-name}にはターゲットクラスターが1つだけあります（`fleet-local/local`）。
+
+{fleet-product-name}は`helm install`を介して各ターゲットクラスターにエージェントをデプロイするため、`helm list -A`コマンドを使用して`fleet-agent-local`チャートを見つけることができます。`cluster.fleet.cattle.io` CRDにはエージェントのステータスが含まれています。
+
+[,yaml]
+----
+apiVersion: fleet.cattle.io/v1alpha1
+kind: Cluster
+metadata:
+  name: local
+  namespace: fleet-local
+spec:
+  agentAffinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - preference:
+          matchExpressions:
+          - key: fleet.cattle.io/agent
+            operator: In
+            values:
+            - "true"
+        weight: 1
+  agentNamespace: cattle-fleet-local-system
+  clientID: xd8cgpm2gq5w25qf46r8ml6qxvhsg858g64s5k7wj5h947vs5sxbwd
+  kubeConfigSecret: local-kubeconfig
+  kubeConfigSecretNamespace: fleet-local
+  redeployAgentGeneration: 1
+status:
+  agent:
+    lastSeen: "2025-09-01T07:09:28Z"
+    namespace: cattle-fleet-local-system
+  agentAffinityHash: f50425c0999a8e18c2d104cdb8cb063762763f232f538b5a7c8bdb61
+  agentDeployedGeneration: 1
+  agentMigrated: true
+  agentNamespaceMigrated: true
+  agentTLSMode: system-store
+  apiServerCAHash: 158866807fdf372a1f1946bb72d0fbcdd66e0e63c4799f9d4df0e18b
+  apiServerURL: https://10.53.0.1:443
+  cattleNamespaceMigrated: true
+  conditions:
+  - lastUpdateTime: "2025-08-28T04:43:02Z"
+    status: "True"
+    type: Processed
+  - lastUpdateTime: "2025-08-28T10:08:31Z"
+    status: "True"
+    type: Imported
+  - lastUpdateTime: "2025-08-28T10:08:30Z"
+    status: "True"
+    type: Reconciled
+  - lastUpdateTime: "2025-08-28T10:09:30Z"
+    status: "True"
+    type: Ready
+----
+
+{rancher-short-name}は`ManagedChart` CRDを`Bundle`リソースに`mcc-`プレフィックスを付けて変換します。{fleet-product-name}エージェントは`Bundle`リソースを監視し、それらをターゲットクラスターにデプロイします。`BundleDeployment`リソースにはデプロイメントのステータスが含まれています。
+
+{fleet-product-name}コントローラーはエージェントにデータをプッシュしません。代わりに、エージェントは`Bundle`リソースデータを{fleet-product-name}コントローラーがインストールされているクラスターからポーリングします。{harvester-product-name}では、{fleet-product-name}コントローラーとエージェントは同じクラスターにあるため、ネットワークの問題は心配ありません。
+
+[,shell]
+----
+$ kubectl get bundledeployments -A -o jsonpath='{range .items[*]}{"Namespace: "}{.metadata.namespace}{"\nName: "}{.metadata.name}{"\nStatus:\n"}{range .status.conditions[*]}{"  - Type: "}{.type}{"\n    Status: "}{.status}{"\n    Reason: "}{.reason}{"\n    Message: "}{.message}{"\n"}{end}{"\n"}{end}'
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: fleet-agent-local
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: mcc-harvester
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: mcc-harvester-crd
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: mcc-kubeovn-operator-crd
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: mcc-rancher-logging-crd
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+Namespace: cluster-fleet-local-local-1a3d67d0a899
+Name: mcc-rancher-monitoring-crd
+Status:
+  - Type: Installed
+    Status: True
+    Reason:
+    Message:
+  - Type: Deployed
+    Status: True
+    Reason:
+    Message:
+  - Type: Ready
+    Status: True
+    Reason:
+    Message:
+  - Type: Monitored
+    Status: True
+    Reason:
+    Message:
+----
+
+`harvester-system/harvester`デプロイメントイメージを変更すると、{fleet-product-name}エージェントは変更を検出し、`BundleDeployment`リソース内の対応するステータスを更新します。
+
+例:
+
+[,yaml]
+----
+status:
+  appliedDeploymentID: s-89f9ce3f33c069befb4ebdceaa103af7b71db0e70a39760cb6653366964e5:1cd9188211e318033f89b77acf7b996
+e5bb3d9a25319528c47dc052528056f78
+  conditions:
+  - lastUpdateTime: "2025-08-28T04:44:18Z"
+    status: "True"
+    type: Installed
+  - lastUpdateTime: "2025-08-28T04:44:18Z"
+    status: "True"
+    type: Deployed
+  - lastUpdateTime: "2025-09-01T07:40:28Z"
+    message: deployment.apps harvester-system/harvester modified {"spec":{"template":{"spec":{"containers":[{"env":[{"
+name":"HARVESTER_SERVER_HTTPS_PORT","value":"8443"},{"name":"HARVESTER_DEBUG","value":"false"},{"name":"HARVESTER_SERV
+ER_HTTP_PORT","value":"0"},{"name":"HCI_MODE","value":"true"},{"name":"RANCHER_EMBEDDED","value":"true"},{"name":"HARV
+ESTER_SUPPORT_BUNDLE_IMAGE_DEFAULT_VALUE","value":"{\"repository\":\"rancher/support-bundle-kit\",\"tag\":\"master-hea
+d\",\"imagePullPolicy\":\"IfNotPresent\"}"},{"name":"NAMESPACE","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath"
+:"metadata.namespace"}}}],"image":"frankyang/harvester:fix-renovate-head","imagePullPolicy":"IfNotPresent","name":"api
+server","ports":[{"containerPort":8443,"name":"https","protocol":"TCP"},{"containerPort":6060,"name":"profile","protoc
+ol":"TCP"}],"resources":{"requests":{"cpu":"250m","memory":"256Mi"}},"securityContext":{"appArmorProfile":{"type":"Unc
+onfined"},"capabilities":{"add":["SYS_ADMIN"]}},"terminationMessagePath":"/dev/termination-log","terminationMessagePol
+icy":"File"}]}}}}
+----
+
+== コンソールは、日0のインストール後に`Setting up Harvester`を表示します。
+
+=== 問題の説明
+
+成功したインストールの後、コンソールは`Setting up Harvester`を持続的に表示します。ほとんどのUIおよびCLI操作には影響がありませんが、xref:upgrades/upgrades.adoc#_start_an_upgrade[アップグレードを開始する]試行はブロックされます。
+
+コマンド`kubectl get managedchart -n fleet-local harvester -oyaml`を実行した後に表示される情報は次のとおりです：
+
+[,yaml]
+----
+...
+status:
+  conditions:
+  - lastUpdateTime: "2025-10-22T08:01:18Z"
+    message: 'NotReady(1) [Cluster fleet-local/local]; daemonset.apps harvester-system/harvester-network-controller
+      modified {"spec":{"template":{"spec":{"containers":[{"args":["agent"],"command":["harvester-network-controller"],
+      "env":[{"name":"NODENAME","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"spec.nodeName"}}},
+      {"name":"NAMESPACE","valueFrom":{"fieldRef":{"apiVersion":"v1","fieldPath":"metadata.namespace"}}}],
+      "image":"rancher/harvester-network-controller:master-head","imagePullPolicy":"IfNotPresent","name":"harvester-network",
+      "resources":{"limits":{"cpu":"100m","memory":"128Mi"},"requests":{"cpu":"10m","memory":"64Mi"}},
+      "securityContext":{"privileged":true},"terminationMessagePath":"/dev/termination-log","terminationMessagePolicy":"File",
+      "volumeMounts":[{"mountPath":"/dev","name":"dev"},{"mountPath":"/lib/modules","name":"modules"}]}]}}}};'
+    status: "False"
+    type: Ready
+----
+
+=== 根本原因
+
+コンソールは、`harvester` ManagedChart（`fleet-local`ネームスペース内）のステータスが`Ready`であるかどうかを判断するために、次のコマンドを実行します。
+
+[,console]
+----
+cmd := exec.Command("/bin/sh", "-c", kubectl -n fleet-local get ManagedChart harvester -o jsonpath='{.status.conditions}' | 
+jq 'map(select(.type == "Ready" and .status == "True")) | length')
+----
+
+`ManagedChart` CRDは、 https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}]がGitOpsを介してリソースを管理するために使用されます。これらのリソースのいずれかが直接変更されると、`ManagedChart`は偏差を記録し、フラグを立てます。上記の例では、カスタムイメージタグが`harvester-system/harvester-network-controller` DaemonSetに直接適用されたため、エラーが発生しました。
+
+`ManagedChart`リソースの完全なリストを取得するには、コマンド`kubectl get bundle -n fleet-local mcc-harvester -oyaml`を実行します。
+
+[,yaml]
+----
+apiVersion: fleet.cattle.io/v1alpha1
+kind: Bundle
+metadata:
+  name: mcc-harvester
+  namespace: fleet-local
+spec:
+  resources:
+  - content: H4s...===
+    encoding: base64+gz
+    charts/harvester-network-controller/templates/daemonset.yaml
+  - content: ...
+----
+
+=== 解決策
+
+次のいずれかのアクションを実行できます：
+
+* 影響を受けたリソースに対して行われた直接の変更を元に戻します。
+
+* を使用して、希望するカスタム設定で`ManagedChart` CRDを更新します。`kubectl edit managedchart -n fleet-local harvester`
+
+=== 関連する問題
+
+https://github.com/harvester/harvester/issues/8655[#8655]

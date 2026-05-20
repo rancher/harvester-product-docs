@@ -1,0 +1,112 @@
+= ボリュームセキュリティ
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Harvesterは、仮想マシンイメージを暗号化および復号化することを可能にします。暗号化メカニズムは、Linuxカーネルモジュールdm_cryptとコマンドラインユーティリティcryptsetupを利用します。
+
+== 前提条件
+
+次のリソースを準備してください：
+
+* 部外者秘:Kubernetesのシークレットは、dm_cryptのパスフレーズとして使用されます。`CRYPTO_KEY_VALUE`フィールドの値を指定する必要があります。その他のフィールドは固定されています。
++
+image::vm/create-encryption-used-secret.png[]
++
+シークレットの例：
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+この例には、KubernetesシークレットのデフォルトYAMLコードが含まれています。これに加えて、 https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[暗号化オプション（LUKSモード用）]を使用することができます。Harvester v1.4.1以降のバージョンはこれらのオプションをサポートしていますが、各ノードがそれらをサポートしていることを確認する必要があります。
+
+|===
+| オプション | 有効値
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain、aes-xts-plain64、aes-cbc-plain、aes-cbc-plain64、aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256、sha384、sha512
+
+| CRYPTO_KEY_SIZE
+| 256、384、512
+
+| CRYPTO_PBKDF
+| argon2i、argon2id、pbkdf2
+|===
+
+kubectlまたはHarvester UI（*Edit as YAML*機能）を使用して、システムネームスペースにシークレットを作成できます。システムネームスペースのリソースは、Harvester UIの*Secrets*画面に表示されません。
+====
++
+* ストレージクラス：イメージはLonghornを使用して暗号化されるため、必要なフィールドはLonghorn CSIドライバーに渡す必要があります。ストレージクラスを作成する際に暗号化シークレットを指定できます。詳細については、xref:/virtual-machines/vm-images/upload-image.adoc#_image_storageclass[イメージストレージクラス]を参照してください。
++
+image::vm/create-storage-class.png[]
++
+ストレージクラスの例：
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Harvester UIの*Edit as YAML*機能とkubectlを使用して、システムネームスペースにシークレットを作成できます。システムネームスペースのリソースは、Harvester UIの*Secrets*画面に表示されません。
+====
+
+== 暗号化されたボリューム
+
+以下のUIの場所で暗号化されたストレージクラスを使用して暗号化ボリュームを作成できます：
+
+* *ボリューム：作成*画面
++
+image::volume/volume-security-create-empty-volume.png[create-empty-volume]
++
+* *ボリューム*タブの*仮想マシン：作成*画面
++
+image::volume/volume-security-create-empty-volume-in-vm.png[create-empty-volume-in-vm]
+
+== Rancher統合を使用した高度な使用法
+
+シークレットは暗号化されていないBase64エンコードされた文字列です。シークレットを安全に保つために、プロジェクトとネームスペースを使用して権限を分離できます。詳細については、xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[マルチテナンシー]を参照してください。
+
+== 制限
+
+次のアクションを実行することはできません：
+
+* 暗号化されたボリュームから新しいボリュームをエクスポートする
+* 暗号化されたボリュームを暗号化されていないボリュームに復元する
+* 暗号化されていないボリュームを暗号化されたボリュームに復元する

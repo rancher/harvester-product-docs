@@ -1,0 +1,430 @@
+= Rede de Armazenamento
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+{harvester-product-name} utiliza {longhorn-product-name} para fornecer volumes de dispositivos de bloco para máquinas virtuais e pods. Se você deseja isolar o tráfego de replicação de {longhorn-product-name} da `mgmt` (a rede de cluster incorporada) ou de outras cargas de trabalho em todo o cluster, pode usar uma rede de armazenamento dedicada para melhor largura de banda e desempenho da rede.
+
+Para mais informações, consulte https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/networking/storage-network.html[Rede de Armazenamento] na documentação de {longhorn-product-name}.
+
+[NOTE]
+====
+Evite configurar as configurações de {longhorn-product-name} diretamente, pois isso pode resultar em comportamento inesperado ou indesejado do sistema.
+====
+
+== Pré-requisitos
+
+Antes de começar a configurar a rede de armazenamento, certifique-se de que os seguintes requisitos sejam atendidos:
+
+* Os switches de rede estão configurados corretamente e um ID de VLAN dedicado é atribuído à rede de armazenamento.
+
+* A xref:networking/cluster-network.adoc[rede de cluster] e a xref:networking/vm-network.adoc#_vlan_network[rede VLAN] estão configuradas corretamente. Certifique-se de que ambas as redes cobrem todos os nós e são acessíveis.
+
+* O intervalo de IP da rede de armazenamento possui as seguintes características:
++
+** Utiliza o formato CIDR IPv4
++
+** Não conflita ou se sobrepõe às redes de cluster do Kubernetes
++
+Os seguintes endereços estão reservados: `10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16` e `10.53.0.0/16`.
++
+** Atende aos requisitos do cluster
++
+O número necessário de endereços IP é calculado usando a seguinte fórmula: `Required number of IPs = (Number of nodes * 2) + (Number of disks * 2) + Number of images to be downloaded or uploaded`
++
+Exemplo: Se um cluster tem cinco nós com dois discos cada, e dez imagens devem ser carregadas simultaneamente, o intervalo de IP deve ser maior ou igual a `/26` (cálculo: (5 x 2) + (5 x 2) + 10 = 30).
++
+** Exclui endereços IP que {longhorn-product-name} pods e a rede de armazenamento não devem usar, como endereços reservados para xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[volumes RWX], o gateway e outros componentes.
+
+* O CNI Whereabouts está instalado corretamente.
++
+Você pode verificar se o `ippools.whereabouts.cni.cncf.io` CRD existe no cluster usando o comando `kubectl get crd ippools.whereabouts.cni.cncf.io`.
++
+Se uma string vazia for retornada, adicione os CRDs em https://github.com/harvester/harvester/tree/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds[este diretório] usando os seguintes comandos:
++
+[,console]
+----
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_ippools.yaml
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+----
++
+[NOTE]
+====
+O CNI Whereabouts não está instalado corretamente em certos https://github.com/harvester/harvester/issues/3168[cenários de fazer upgrade].
+====
+
+* Todas as máquinas virtuais estão paradas.
++
+Você pode verificar o status das máquinas virtuais usando o comando `kubectl get -A vmi`, que deve retornar uma string vazia.
++
+[CAUTION]
+====
+{harvester-product-name} envia um sinal de desligamento gracioso para as máquinas virtuais que estão paradas usando a interface {harvester-product-name}. No entanto, as cargas de trabalho são interrompidas e permanecem indisponíveis até que você inicie manualmente as máquinas virtuais após confirmar que a configuração da rede de armazenamento foi aplicada com sucesso.
+====
+
+* Todos os pods que estão anexados a {longhorn-product-name} volumes estão parados.
+
+* Todos os uploads e downloads de imagens em andamento estão completos ou foram excluídos.
+
+== {longhorn-product-name} Roteamento de tráfego de replicação
+
+O roteamento do {longhorn-product-name} tráfego de replicação depende de se o tráfego VLAN da máquina virtual e a {longhorn-product-name} rede de armazenamento compartilham as mesmas interfaces físicas ou usam interfaces diferentes.
+
+* *Mesmas interfaces físicas*: No exemplo a seguir, tanto `eth2` quanto `eth3` são usados para o tráfego VLAN da máquina virtual e a {longhorn-product-name} rede de armazenamento. A linha vermelha indica que {longhorn-product-name} envia tráfego de replicação através de `eth3`.
++
+image::storagenetwork/storagenetwork-same.png[storagenetwork-same.png]
++
+[NOTE]
+====
+Você deve incluir `eth2` e `eth3` na configuração da rede do cluster e da rede VLAN.
+====
+
+* *Interfaces físicas diferentes*: No exemplo a seguir, `eth2` e `eth3` são usados para o tráfego VLAN da máquina virtual, enquanto `eth4` e `eth5` são usados para a rede de armazenamento {longhorn-product-name}. A linha vermelha indica que {longhorn-product-name} envia tráfego de replicação através de `eth4`.
++
+image::storagenetwork/storagenetwork-diff.png[storagenetwork-diff.png]
++
+[NOTE]
+====
+Você deve incluir `eth4` e `eth5` na configuração da rede do cluster e da rede VLAN.
+====
+
+== `storage-network` Configuração
+
+A configuração xref:../installation-setup/config/settings.adoc#_storage_network[`storage-network`] permite que você configure a rede usada para isolar o tráfego de armazenamento em cluster quando a segregação é necessária.
+
+Você pode habilitar e desabilitar a rede de armazenamento usando a interface ou a CLI. Quando a configuração está habilitada, você deve construir um CRD Multus `NetworkAttachmentDefinition` configurando certos campos.
+
+Uma vez que a configuração `storage-network` é aplicada, {harvester-product-name} realiza as seguintes ações:
+
+* Interrompe todos os pods relacionados a {longhorn-product-name} volumes, Prometheus, Grafana, Alertmanager e o Controlador de Importação de VM.
+* Cria um novo `NetworkAttachmentDefinition` e atualiza a {longhorn-product-name} configuração de rede de armazenamento.
+* Reinicia todos os pods `instance-manager` e `backing-image-manager` para aplicar a nova configuração de rede.
+
+=== Passos de configuração
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+É fortemente recomendado usar a {harvester-product-name} interface para configurar o `storage-network`.
+====
+
+==== Habilitar a rede de armazenamento
+
+. Vá para *Configurações Avançadas -> -> rede-de-armazenamento*.
+
+. Selecione *Habilitado*.
+
+. Configure os campos *VLAN ID*, *Rede do Cluster*, *Faixa de IP* e *Excluir* para construir um CRD Multus `NetworkAttachmentDefinition`.
+
+. Clique em *Salvar*.
+
+image::storagenetwork/storage-network-enabled.png[Rede de armazenamento habilitada]
+
+==== Desabilitar a rede de armazenamento
+
+. Vá para *Configurações Avançadas -> -> rede-de-armazenamento*.
+
+. Selecione *Desabilitar*.
+
+. Clique em *Salvar*.
+
+Uma vez que a rede de armazenamento é desabilitada, {longhorn-product-name} começa a usar a rede de pods para operações relacionadas ao armazenamento.
+
+image::storagenetwork/storage-network-disabled.png[Rede de armazenamento desabilitada]
+--
+
+CLI::
++
+--
+Você pode usar o seguinte comando para configurar o xref:../installation-setup/config/settings.adoc#_storage_network[`storage-network`].
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io storage-network
+----
+
+A rede de armazenamento é automaticamente habilitada nas seguintes situações:
+
+* O campo `value` contém uma string JSON válida.
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+value: '{"vlan":100,"clusterNetwork":"storage","range":"192.168.0.0/24", "exclude":["192.168.0.100/32"]}'
+----
+
+* O campo `value` está vazio.
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+value: ''
+----
+
+A rede de armazenamento é desabilitada quando você remover o campo `value`.
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+----
+
+[CAUTION]
+====
+{harvester-product-name} considera caracteres insignificantes extras em uma string JSON como uma configuração diferente.
+====
+--
+
+======
+
+==== Altere o MTU da rede de armazenamento
+
+Veja xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[Altere o MTU de uma configuração de rede com uma rede de armazenamento anexada].
+
+=== Etapas pós-configuração
+
+[IMPORTANT]
+====
+{harvester-product-name} não inicia máquinas virtuais automaticamente. Você deve garantir que a configuração esteja correta e aplicada com sucesso, e então iniciar as máquinas virtuais quando necessário.
+====
+
+. Verifique se o status da configuração `storage-network` é `True` e se o tipo é `configured` usando o seguinte comando:
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io storage-network -o yaml
+----
++
+Exemplo:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  annotations:
+    storage-network.settings.harvesterhci.io/hash: da39a3ee5e6b4b0d3255bfef95601890afd80709
+    storage-network.settings.harvesterhci.io/net-attach-def: ""
+    storage-network.settings.harvesterhci.io/old-net-attach-def: ""
+  creationTimestamp: "2022-10-13T06:36:39Z"
+  generation: 51
+  name: storage-network
+  resourceVersion: "154638"
+  uid: 2233ad63-ee52-45f6-a79c-147e48fc88db
+status:
+  conditions:
+  - lastUpdateTime: "2022-10-13T13:05:17Z"
+    reason: Completed
+    status: "True"
+    type: configured
+----
+
+. Verifique se os {longhorn-product-name} pods (`instance-manager` e `backing-image-manager`) estão prontos e se suas redes estão configuradas corretamente.
++
+Você pode inspecionar cada pod usando o seguinte comando:
++
+[,bash]
+----
+kubectl -n longhorn-system describe pod <pod-name>
+----
++
+Erros semelhantes aos seguintes indicam que a rede de armazenamento esgotou seus endereços IP disponíveis. Você deve reconfigurar a rede de armazenamento com um intervalo de IP suficiente.
++
+[,bash]
+----
+Events:
+Type     Reason                  Age    From     Message
+----     ------                  ----   ----     -------
+....
+Warning  FailedCreatePodSandBox  2m58s  kubelet  Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "04e9bc160c4f1da612e2bb52dadc86702817ac557e641a3b07b7c4a340c9fc48": plugin type="multus" name="multus-cni-network" failed (add): [longhorn-system/backing-image-ds-default-image-lxq7r/7d6995ee-60a6-4f67-b9ea-246a73a4df54:storagenetwork-sdfg8]: error adding container to network "storagenetwork-sdfg8": error at storage engine: Could not allocate IP in range: ip: 172.16.0.1 / - 172.16.0.6 / range: net.IPNet{IP:net.IP{0xac, 0x10, 0x0, 0x0}, Mask:net.IPMask{0xff, 0xff, 0xff, 0xf8}}
+....
+----
++
+[NOTE]
+====
+Se a rede de armazenamento esgotou seus endereços IP disponíveis, você pode encontrar erros semelhantes ao fazer upload ou download de imagens. Você deve excluir as imagens afetadas e reconfigurar a rede de armazenamento com um intervalo de IP suficiente.
+====
+
+. Verifique se existe uma interface chamada `lhnet1` nas anotações `k8s.v1.cni.cncf.io/network-status`. O endereço IP desta interface deve estar dentro do intervalo de IP designado.
++
+Você pode recuperar uma lista de {longhorn-product-name} `instance-manager` pods usando o seguinte comando:
++
+[,bash]
+----
+kubectl get pods -n longhorn-system -l longhorn.io/component=instance-manager -o yaml
+----
++
+Exemplo:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 2518b0696f6635896645b5546417447843e14208525d3c19d7ec6d7296cc13cd
+    cni.projectcalico.org/podIP: 10.52.2.122/32
+    cni.projectcalico.org/podIPs: 10.52.2.122/32
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+          "name": "k8s-pod-network",
+          "ips": [
+              "10.52.2.122"
+          ],
+          "default": true,
+          "dns": {}
+      },{
+          "name": "harvester-system/storagenetwork-95bj4",
+          "interface": "lhnet1",
+          "ips": [
+              "192.168.0.3"
+          ],
+          "mac": "2e:51:e6:31:96:40",
+          "dns": {}
+      }]
+    k8s.v1.cni.cncf.io/networks: '[{"namespace": "harvester-system", "name": "storagenetwork-95bj4",
+      "interface": "lhnet1"}]'
+    k8s.v1.cni.cncf.io/networks-status: |-
+      [{
+          "name": "k8s-pod-network",
+          "ips": [
+              "10.52.2.122"
+          ],
+          "default": true,
+          "dns": {}
+      },{
+          "name": "harvester-system/storagenetwork-95bj4",
+          "interface": "lhnet1",
+          "ips": [
+              "192.168.0.3"
+          ],
+          "mac": "2e:51:e6:31:96:40",
+          "dns": {}
+      }]
+    kubernetes.io/psp: global-unrestricted-psp
+    longhorn.io/last-applied-tolerations: '[{"key":"kubevirt.io/drain","operator":"Exists","effect":"NoSchedule"}]'
+
+Omitted...
+----
+
+. Teste a comunicação entre os {longhorn-product-name} pods.
++
+A rede de armazenamento é dedicada à comunicação interna entre os {longhorn-product-name} pods, resultando em alto desempenho e confiabilidade. No entanto, a rede de armazenamento ainda depende da xref:./deep-dive.adoc#_external_networking[infraestrutura de rede externa] para conectividade (semelhante a como a xref:./vm-network.adoc#_create_a_vm_with_vlan_network[rede VLAN de VM] funciona). Quando a rede externa não está conectada e configurada corretamente, você pode encontrar os seguintes problemas:
++
+* A máquina virtual recém-criada fica presa no `Not-Ready` estado.
+* Os logs do `longhorn-manager` pod incluem mensagens de erro.
++
+Exemplo:
++
+[,console]
+----
+longhorn-manager-j6dhh/longhorn-manager.log:2024-03-20T16:25:24.662251001Z time="2024-03-20T16:25:24Z" level=error msg="Failed rebuilding of replica 10.0.16.26:10000" controller=longhorn-engine engine=pvc-0a151c59-ffa9-4938-9c86-59ebb296bc88-e-c2a7fe77 error="proxyServer=10.52.6.33:8501 destination=10.0.16.23:10000: failed to add replica tcp://10.0.16.26:10000 for volume: rpc error: code = Unknown desc = failed to get replica 10.0.16.26:10000: rpc error: code = Unavailable desc = all SubConns are in TransientFailure, latest connection error: connection error: desc = \"transport: Error while dialing dial tcp 10.0.16.26:10000: connect: no route to host\"" node=oml-harvester-9 volume=pvc-0a151c59-ffa9-4938-9c86-59ebb296bc88
+----
++
+Para testar a comunicação entre os {longhorn-product-name} pods, execute os seguintes passos:
++
+.. Obtenha o IP da rede de armazenamento de cada pod do Gerenciador de Instâncias (um por nó) identificado na etapa anterior.
++
+Exemplo:
++
+[,console]
+----
+instance-manager-43f1624d14076e1d95cd72371f0316e2
+storage network IP: 10.0.16.8
+
+instance-manager-ba38771e483008ce61249acf9948322f
+storage network IP: 10.0.16.14
+----
++
+.. Faça login nesses pods.
++
+Quando você executa o comando `ip addr`, a saída inclui IPs que são idênticos aos IPs nas anotações do pod. No exemplo a seguir, um IP é para a rede do pod, enquanto o outro é para a rede de armazenamento.
++
+Exemplo:
++
+[,console]
+----
+$ kubectl exec -i -t -n longhorn-system instance-manager-ba38771e483008ce61249acf9948322f -- /bin/sh
+
+$ ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+...
+3: eth0@if2277: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default // pod network link
+    link/ether 0e:7c:d6:77:44:72 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.52.6.146/32 scope global eth0
+...
+4: lhnet1@if2278: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default // storage network link, note the MTU value
+    link/ether fe:92:4f:fb:dd:20 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.0.16.14/20 brd 10.0.31.255 scope global lhnet1
+...
+
+$ ip route
+default via 169.254.1.1 dev eth0
+10.0.16.0/20 dev lhnet1 proto kernel scope link src 10.0.16.14
+169.254.1.1 dev eth0 scope link
+----
++
+[NOTE]
+====
+O link da rede de armazenamento sempre herda o valor de MTU da xref:./cluster-network.adoc#_cluster_network[rede de cluster] anexada, independentemente do xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[valor de MTU] configurado.
+====
++
+.. Inicie um servidor HTTP simples em um pod.
++
+Você deve vincular explicitamente este servidor HTTP ao IP da rede de armazenamento.
++
+Exemplo:
++
+[,console]
+----
+$ python3 -m http.server 8000 --bind 10.0.16.14 (replace with your pod storage network IP)
+----
++
+.. Teste o servidor HTTP em outro pod.
++
+Exemplo:
++
+[,console]
+----
+From instance-manager-43f1624d14076e1d95cd72371f0316e2 (IP 10.0.16.8)
+
+$ curl http://10.0.16.14:8000
+----
++
+Quando a rede de armazenamento está funcionando corretamente, o comando `curl` retorna uma lista de arquivos no servidor HTTP.
++
+.. (Opcional) Solucione problemas.
++
+A rede de armazenamento pode falhar devido a problemas com a rede externa, como os seguintes:
++
+** NICs físicas (instaladas em {harvester-product-name} nós) que estão associadas à rede de armazenamento não foram adicionadas à mesma VLAN nos switches externos.
+** Os switches externos não estão conectados e configurados corretamente.
+
+Uma vez que a configuração é verificada, você pode iniciar máquinas virtuais manualmente quando necessário.
+
+== Melhores práticas
+
+* Ao configurar um intervalo de IP para a rede de armazenamento, certifique-se de que os endereços IP alocados possam atender às necessidades futuras do cluster. Isso é importante porque os {longhorn-product-name} pods (`instance-manager` e `backing-image-manager`) param de funcionar quando novos nós são adicionados ao cluster ou mais discos são adicionados a um nó após a configuração da rede de armazenamento, e quando o número necessário de IPs excede os IPs alocados. Resolver o problema envolve reconfigurar a rede de armazenamento com o intervalo de IP correto.
++
+{longhorn-product-name} pods usam a rede de armazenamento da seguinte forma:
++
+** `instance-manager` pods: Os componentes do Instance Manager foram https://longhorn.io/docs/1.5.0/deploy/important-notes/#instance-managers-consolidated[consolidados na {longhorn-product-name} v1.5.0]. Cada nó requer um endereço IP. Durante o fazer upgrade, tanto as versões antigas quanto as novas desses pods existem, e a versão antiga é excluída assim que o fazer upgrade é concluído.
++
+** `backing-image-ds` pods: Esses pods processam uploads e downloads de fontes de dados de imagem em tempo real e são removidos assim que os uploads e downloads de imagem são concluídos.
++
+** `backing-image-manager` pods: Cada disco requer um endereço IP. Durante o fazer upgrade, tanto as versões antigas quanto as novas desses pods existem, e a versão antiga é excluída assim que o fazer upgrade é concluído.
+
+* Configure a rede de armazenamento em uma rede de cluster não-`mgmt` para garantir a separação completa do tráfego de replicação {longhorn-product-name} do tráfego do plano de controle do Kubernetes. Usar `mgmt` é possível, mas não recomendado devido ao impacto negativo (conflito de recursos e largura de banda) no desempenho da rede do plano de controle. Use `mgmt` apenas se seu cluster tiver restrições relacionadas a NIC e se você puder segregar completamente o tráfego.

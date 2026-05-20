@@ -1,0 +1,83 @@
+= Support des disques externes
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== Présentation
+
+{harvester-product-name} peut être installé et démarré à partir de disques externes. Ceci est particulièrement utile dans des environnements où les hôtes disposent de cartes NIC ou HBA qui prennent en charge le démarrage à partir de dispositifs iSCSI externes ou de matrices de stockage SAN. De tels systèmes sans disque sont courants dans les grands centres de données.
+
+Les sections suivantes fournissent des informations sur l'installation de {harvester-product-name} sur un dispositif iSCSI externe. Le flux de travail pour les matrices SAN est similaire, mais un ensemble différent d'arguments du noyau Linux peut être nécessaire pour permettre à {harvester-product-name} de démarrer avec succès à partir d'une matrice SAN.
+
+== Installation basée sur iSCSI
+
+=== Configurer la cible iSCSI
+
+[NOTE]
+====
+Les modifications nécessaires au BIOS ou au firmware dépendront du matériel que vous utilisez.
+====
+
+Lorsque le périphérique de destination de l'installation s'allume ou se réinitialise, vous devez entrer dans le menu de configuration du firmware pour modifier les paramètres de démarrage et activer le démarrage via iSCSI. Les paramètres varient d'un système à l'autre.
+
+Entrer dans le menu de configuration du firmware nécessite généralement d'appuyer sur une touche désignée (par exemple, F2, F7 ou ESC). Le système affichera probablement une liste de touches disponibles pour des fonctions spécifiques du firmware. Cependant, cette liste est affichée pendant un très court laps de temps, donc vous devez sélectionner une option de menu avant que la liste ne disparaisse et que le système ne commence à démarrer.
+
+image::install/target-details.png[détails de la cible]
+
+Les tâches de configuration que vous devez effectuer incluent les suivantes{nbsp}:
+
+* Activer le démarrage UEFI
++
+* Configurer les paramètres de l'initiateur et de la cible iSCSI
++
+* Activer le dispositif iSCSI dans le menu de démarrage
++
+* Définir l'ordre de démarrage afin que votre système démarre à partir du dispositif iSCSI
+
+Consultez la documentation de votre fournisseur de système pour plus d'informations sur les paramètres de démarrage et les fonctions du firmware.
+
+=== Installez {harvester-product-name}
+
+Vous pouvez charger l'ISO {harvester-product-name} en utilisant l'une des méthodes standard. L'installateur devrait détecter automatiquement le périphérique iSCSI. Sélectionnez ce périphérique lorsque vous êtes invité à spécifier le disque d'installation.
+
+Les informations affichées sur l'installateur diffèrent légèrement lorsque vous sélectionnez une cible iSCSI.
+
+* Écran de configuration réseau{nbsp}: Ne montre pas les interfaces réseau utilisées pour monter les volumes iSCSI.
++
+* Écran de configuration du disque{nbsp}: Affiche le premier chemin vers un disque distant multipath. Cependant, après l'installation (en supposant que `os.externalStorageConfig` soit fourni), le système d'exploitation démarre à partir du périphérique multipath.
+
+Lors de l'installation, vous devez fournir un fichier de configuration (`config.yaml`) qui contient des arguments multipath et des arguments supplémentaires pour le noyau Linux. Les informations sont ajoutées au système d'exploitation installé pour permettre des démarrages ultérieurs à partir d'une cible iSCSI.
+
+Exemple (`config.yaml`){nbsp}:
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+La configuration de test utilise plusieurs VLAN tagués, tels que le VLAN 2017 (utilisé pour se connecter au volume iSCSI) et le VLAN 2011 (utilisé pour l'interface de gestion {harvester-product-name}).
+
+L'argument du noyau Linux `vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none` est nécessaire uniquement si le volume iSCSI est accessible via une interface sur un VLAN tagué. Les arguments garantissent qu'une interface taguée supplémentaire est créée lors du démarrage et qu'une adresse statique est attribuée à l'interface. Consultez https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline] pour plus d'informations sur la configuration des arguments du noyau Linux pour correspondre à votre cas d'utilisation.
+
+La directive `write_files` est nécessaire pour garantir que l'interface de gestion est utilisée comme passerelle par défaut. C'est essentiel car RKE2 utilise l'interface avec la passerelle par défaut comme adresse du nœud.

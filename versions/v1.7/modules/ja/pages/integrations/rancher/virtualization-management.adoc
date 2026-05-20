@@ -1,0 +1,185 @@
+= 仮想化管理
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{rancher-short-name}の仮想化管理機能を使用すると、複数の{harvester-product-name}クラスターをインポートおよび管理できます。これは、単一の画面から仮想化とコンテナ管理を統合するソリューションを提供します。
+
+さらに、{harvester-product-name}は{rancher-short-name}の既存の機能を活用し、 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/authn-and-authz.html[認証]や https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/manage-role-based-access-control-rbac.html[RBAC制御]を使用してxref:./virtualization-management.adoc#_multi_tenancy[マルチテナンシー]をサポートします。
+
+{rancher-short-name}をデプロイし、さまざまなクラウドプロバイダーを使用してKubernetesクラスターをプロビジョニングする方法については、 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/quick-start/deploy-rancher/deploy-rancher.html[サーバー{rancher-product-name}のデプロイ]を参照してください。
+
+== {harvester-product-name}クラスターのインポート
+
+[tabs]
+======
+UI::
++
+--
+. コンテナイメージを確認し、準備します。
++
+インポート作業を円滑に進めるために、`cattle-cluster-agent-***`という名前の新しいポッドが{harvester-product-name}クラスターに作成されます。このポッドで使用されるコンテナイメージは、{rancher-short-name}サーバーのバージョンに依存します（例えば、{rancher-short-name} v2.7.9を実行している場合は、イメージ`rancher/rancher-agent:v2.7.9`が使用されます）。さらに、この動的イメージは{harvester-product-name} ISOにパッケージ化されておらず、インポート中にリポジトリからプルされます。
++
+もしあなたの{harvester-product-name}クラスターがインターネットから直接アクセスできない場合は、次のいずれかのアクションを実行してください：
+
+ ** クラスター用にxref:/installation-setup/config/settings.adoc#_containerd_registry[プライベートレジストリ]を構成し、イメージを追加します。Harvesterはこのレジストリから自動的にイメージをプルします。
+ ** 外部サービスにアクセスするためにxref:/installation-setup/airgap.adoc#_configure_an_http_proxy_during_installation[HTTPプロキシ]を構成した場合は、それが期待通りに動作していることを確認してください。Harvester設定で指定したxref:/installation-setup/config/update-configuration.adoc#_dns_servers[DNSサーバー]は、ドメイン名`docker.io`を解決できる必要があります。
+ ** コマンド`docker pull rancher/rancher-agent:v2.7.9 && docker save -o rancher-agent.tar rancher/rancher-agent:v2.7.9`を使用してイメージをダウンロードします。次に、ダウンロードしたイメージのコピーを各クラスターノードに作成し、コマンド`sudo -i ctr --namespace k8s.io image import rancher-agent.tar`を使用してcontainerdにイメージをインポートします。最後に、各ノードで`sudo -i crictl image ls | grep "rancher-agent"`を実行して、イメージが準備完了であることを確認します。
+
+. {rancher-short-name}サーバーが起動している場合は、ログインしてハンバーガーメニューをクリックし、*仮想化管理*タブを選択します。*既存のインポート*を選択して、ダウンストリームの{harvester-product-name}クラスターを{rancher-short-name}サーバーにインポートします。image:rancher/vm-menu.png[]
+. `Cluster Name`を指定し、*作成*をクリックします。登録ガイドが表示されますので、対象の{harvester-product-name}クラスターのダッシュボードを開き、ガイドに従ってください。
+image:rancher/harv-importing.png[]
+. エージェントノードの準備が整ったら、{harvester-product-name}クラスターを{rancher-short-name}サーバーから表示およびアクセスできるようになり、VMを適切に管理できます。 +
+image:rancher/harv-cluster-view.png[]
++
+エージェントノードが固まった場合は、{harvester-product-name}クラスターでコマンド`kubectl get pod cattle-cluster-agent-*** -n cattle-system -oyaml`を実行してください。次のメッセージが表示された場合は、ステップ1の情報を確認し、このポッドを削除してから、新しいポッドが自動的に作成されてインポート処理が再起動されます。
++
+[,yaml]
+----
+  ...
+  state:
+    waiting:
+      message: Back-off pulling image "rancher/rancher-agent:v2.7.9"
+      reason: ImagePullBackOff
+  ...
+----
++
+. {harvester-product-name} UIから、ハンバーガーメニューをクリックして{rancher-short-name}マルチクラスター管理ページに戻ることができます。
++
+image:rancher/harv-go-back.png[]
+--
+
+API::
++
+--
+. {rancher-short-name} Kubernetesクラスターで、新しい`Cluster`リソースを作成します。
++
+例:
++
+[,yaml]
+----
+  apiVersion: provisioning.cattle.io/v1
+  kind: Cluster
+  metadata:
+    name: harvester-cluster-name
+    namespace: fleet-default
+    labels:
+      provider.cattle.io: harvester
+    annotations:
+      field.cattle.io/description: Human readable cluster description
+  spec:
+    agentEnvVars: []
+----
++
+. `Cluster`リソースのステータスが更新されたら、`.status.clusterName`プロパティからクラスターID（形式：`c-m-foobar`）を取得します。
+. クラスターIDを持つ名前空間で、クラスターIDを使用して`ClusterRegistrationToken`を作成します。トークンの`.spec.clusterName`フィールドにクラスターIDを指定する必要があります。
++
+例:
++
+[,yaml]
+----
+  apiVersion: management.cattle.io/v3
+  kind: ClusterRegistrationToken
+  metadata:
+    name: default-token
+    namespace: c-m-foobar
+  spec:
+    clusterName: c-m-foobar
+----
++
+. `ClusterRegistrationToken`のステータスが更新されたら、トークンの`.status.manifestUrl`プロパティの値を取得します。
+. {harvester-product-name}クラスターで、設定`cluster-registration-url`をパッチし、クラスター登録トークンの`.status.manifestUrl`プロパティから取得したURLを`value`フィールドに指定します。
++
+例:
++
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: cluster-registration-url
+  value: https://rancher.example.com/v3/import/abcdefghijkl1234567890-c-m-foobar.yaml
+----
+--
+======
+
+=== アップグレード
+
+インポートされた{harvester-product-name}クラスターをアップグレードするには、{rancher-short-name}、Harvester UI拡張機能、および{harvester-product-name}を特定の順序でアップグレードする必要があります。xref:./harvester-ui-extension.adoc[Harvester UI拡張機能]は、{rancher-short-name} v2.10.x以降のバージョンで{harvester-product-name} UIにアクセスするために必要です。
+
+. xref:./harvester-ui-extension.adoc#_support_matrix[サポートマトリックス]を確認して、{harvester-product-name}クラスターに一致する{rancher-short-name}およびHarvester UI拡張機能のバージョンを確認してください。
+
+. https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/upgrades.html[{rancher-short-name}]をアップグレードします。
+
+. xref:./harvester-ui-extension.adoc#_upgrades[Harvester UI拡張機能]をアップグレードします。
++
+エアギャップ環境での拡張機能のアップグレードに関する情報は、xref://installation-setup/airgap.adoc#_harvester_ui_extension_with_rancher_integration[Harvester UI拡張機能と{rancher-short-name}統合]を参照してください。
+
+. xref://upgrades/upgrades.adoc[{harvester-product-name}]をアップグレードします。
++
+[CAUTION]
+====
+{harvester-product-name} v1.5.0以降のバージョンの機能は、Harvester UI拡張機能に実装されています。{rancher-short-name}とHarvester UI拡張機能をアップグレードしない場合、これらの機能は利用できない可能性があります。
+====
+
+=== トラブルシューティング
+
+xref:/troubleshooting/rancher.adoc#_importing_of_harvester_clusters_into_rancher[HarvesterクラスターのRancherへのインポート]を参照してください。
+
+== マルチテナンシー
+
+{harvester-product-name}は既存の{rancher-short-name} https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/manage-role-based-access-control-rbac.html[RBAC認可]を活用し、ユーザーがクラスタとプロジェクトの役割に基づいてリソースのセットを表示および管理できるようにします。
+
+{rancher-short-name}内では、各人がユーザーとして認証され、これは{rancher-short-name}へのアクセスを許可するログインです。 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/authn-and-authz.html[認証]で述べたように、ユーザーはローカルまたは外部のいずれかです。
+
+ユーザーが{rancher-short-name}にログインすると、その認可、つまりアクセス権はグローバルパーミッションおよびクラスタとプロジェクトの役割によって決定されます。
+
+* https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/global-permissions.html[*グローバルパーミッション*]：特定のクラスタの範囲外におけるユーザー認可を定義します。
+* https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/cluster-and-project-roles.html[*クラスタとプロジェクトの役割*]：ユーザーが役割を割り当てられた特定のクラスタまたはプロジェクト内のユーザー認可を定義します。
+
+グローバルパーミッションとクラスタおよびプロジェクトの役割は、 https://kubernetes.io/docs/reference/access-authn-authz/rbac/[Kubernetes RBAC]の上に実装されています。したがって、パーミッションと役割の強制はKubernetesによって行われます。
+
+* クラスタの所有者は、クラスタおよびその内部のすべてのリソース（例：ホスト、VM、ボリューム、イメージ、ネットワーク、バックアップ、設定）に対して完全な制御を持っています。
+* プロジェクトユーザーは、プロジェクト内のリソースを管理する権限を持つ特定のプロジェクトに割り当てられることがあります。
+
+[IMPORTANT]
+====
+ビルトインの役割テンプレートとプロジェクトスコープのRBACを使用してユーザーアクセスを管理することを強く推奨します。
+
+{harvester-product-name}はKubernetesおよびKubeVirtの上に独自のRBACモデルを実装し、{rancher-short-name}スタイルのプロジェクトおよびマルチテナンシーロジックと統合しています。アップグレードや再構成中に、カスタム`RoleBindings`が`kubevirt.io`役割のみを参照している場合、失われたり、リセットされたり、{harvester-product-name}の内部状態と不整合になる可能性があります。
+====
+
+=== マルチテナンシーの例
+
+以下の例は、マルチテナント機能がどのように機能するかを良く説明しています：
+
+. まず、{rancher-short-name} `Users & Authentication`ページを介して新しいユーザーを追加します。次に、`Create`をクリックして、`project-owner`と`project-readonly`という2人の新しいユーザーを追加します。
+ ** `project-owner`は、特定のプロジェクトのリソースリストを管理する権限を持つユーザーです。例えば、デフォルトプロジェクトです。
+ ** `project-readonly`は、特定のプロジェクトの読み取り専用権限を持つユーザーです。例えば、デフォルトプロジェクトです。image:rancher/create-user.png[]
+. {harvester-product-name} UIに移動した後、インポートされた{harvester-product-name}クラスターのいずれかをクリックします。
+ ** `Projects/Namespaces`タブをクリックします。
+ ** `default`のようなプロジェクトを選択し、`Edit Config`メニューをクリックして、適切な権限でこのプロジェクトにユーザーを割り当てます。例えば、`project-owner`ユーザーにはプロジェクトオーナーの役割が割り当てられます。image:rancher/add-member.png[]
+. 同じプロジェクトに読み取り専用権限で`project-readonly`ユーザーを追加し続け、*保存*をクリックします。image:rancher/added-user.png[]
+. シークレットブラウザを開き、`project-owner`としてログインします。
+. `project-owner`ユーザーとしてログインした後、*仮想化管理*タブをクリックします。そこで、あなたが割り当てられたクラスターとプロジェクトを表示できるはずです。
+. *イメージ*タブをクリックして、以前に`harvester-public`ネームスペースにアップロードされたイメージのリストを表示します。必要に応じて、自分のイメージをアップロードすることもできます。
+. アップロードしたイメージの1つを使用してVMを作成します。
+. 別のユーザー、例えば`project-readonly`でログインすると、このユーザーは割り当てられたプロジェクトの読み取り権限のみを持ちます。
+
+[NOTE]
+====
+`harvester-public`ネームスペースは、このクラスターに割り当てられたすべてのユーザーがアクセスできる事前定義されたネームスペースです。
+====
+
+== インポートされた{harvester-product-name}クラスターを削除します。
+
+ユーザーは、{rancher-short-name} UIの仮想化管理画面からインポートされた{harvester-product-name}クラスターを削除できます。削除したいクラスターを選択し、*削除する*ボタンをクリックして、インポートされた{harvester-product-name}クラスターを削除します。
+
+関連する{harvester-product-name}クラスターの`cluster-registration-url`設定をリセットして、{rancher-short-name}クラスターエージェントをクリーンアップする必要があります。
+
+image::rancher/delete-harvester-cluster.png[delete-cluster]
+
+[CAUTION]
+====
+インポートされた{harvester-product-name}クラスターを削除するために`kubectl delete -f ...`コマンドを実行しないでください。そうすると、{harvester-product-name}クラスターに必要な`cattle-system`ネームスペース全体が削除されます。
+====
+

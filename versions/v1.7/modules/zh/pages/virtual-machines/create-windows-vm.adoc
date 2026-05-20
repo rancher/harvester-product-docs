@@ -1,0 +1,231 @@
+= 创建一个 Windows 虚拟机
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+从 *虚拟机* 页面创建一个或多个虚拟机。
+
+[NOTE]
+====
+有关创建 Linux 虚拟机的信息，请参考 xref:./create-vm.adoc[此页面]。
+====
+
+== 如何创建 Windows 虚拟机
+
+=== 标题部分
+
+. 创建一个虚拟机实例或多个虚拟机实例。
+. 设置虚拟机名称。
+. （可选）为虚拟机提供描述。
+. （可选）选择虚拟机模板 `windows-iso-image-base-template`。此模板将添加一个包含 `virtio` 驱动程序的卷，以支持 Windows。
+
+=== 基础选项卡
+
+. 配置分配给虚拟机的 `CPU` 内核数量。
+. 配置分配给虚拟机的 `Memory` 数量。
+
+image::vm/create-windows-vm.png[create-windows-vm]
+
+[NOTE]
+====
+如上所述，建议您使用 Windows 虚拟机模板。`Volumes` 部分将描述 Windows 虚拟机模板自动创建的选项。
+====
+
+[CAUTION]
+====
+`bootOrder` 值需要先与安装映像一起设置。如果您更改它，您的虚拟机可能无法启动到安装盘。
+====
+
+=== 卷选项卡
+
+. *第一个卷* 是一个 `Image Volume`，其值如下：
+ .. `Name`：该值 `cdrom-disk` 默认设置。您可以保留它或更改它。
+ .. `Type`：选择 `cd-rom`。
+ .. `Image`：选择要安装的 Windows 镜像。请参见 xref:../virtual-machines/vm-images/upload-image.adoc[上传镜像] 以获取有关如何创建新镜像的完整说明。
+ .. `Size`：该值 `20` 默认设置。如果您的镜像大小更大，您可以更改它。
+ .. `Bus`：该值 `SATA` 默认设置。建议您不要更改它。
+. *第二卷* 是一个 `Volume`，具有以下值：
+ .. `Name`：该值 `rootdisk` 默认设置。您可以保留它或更改它。
+ .. `Type`：选择 `disk`。
+ .. `StorageClass`：您可以使用默认的 StorageClass `harvester-longhorn` 或指定一个自定义的。
+ .. `Size`：该值 `32` 默认设置。在更改此值之前，请查看 https://docs.microsoft.com/en-us/windows-server/get-started/hardware-requirements#storage-controller-and-disk-space-requirements[Windows Server] 和 https://docs.microsoft.com/en-us/windows/whats-new/windows-11-requirements#hardware-requirements[Windows 11] 的磁盘空间要求。
+ .. `Bus`：该值 `VirtIO` 默认设置。您可以保留它或更改为其他可用选项 `SATA` 或 `SCSI`。
+. *第三卷* 是一个 `Container`，具有以下值：
+ .. `Name`：该值 `virtio-container-disk` 默认设置。您可以保留它或更改它。
+ .. `Type`：选择 `cd-rom`。
+ .. `Docker Image`：该值 `registry.suse.com/suse/vmdp/vmdp:2.5.4.2` 默认设置。我们建议不要更改此值。
+ .. `Bus`：该值 `SATA` 默认设置。我们建议不要更改此值。
+. 您可以使用按钮 `Add Volume`、`Add Existing Volume`、`Add VM Image` 或 `Add Container` 添加额外的磁盘。
+
+image::vm/create-windows-vm-volumes.png[create-windows-vm-volumes]
+
+=== 网络选项卡
+
+. 默认添加的 *管理网络* 具有以下值：
+ .. `Name`： 该值 `default` 默认设置。您可以保留它或更改它。
+ .. `Model`：该值 `e1000` 默认设置。您可以保留它或从下拉菜单中更改为其他可用选项。
+ .. `Network`：默认情况下，`management Network` 的值已设置。如果没有创建其他网络，则无法更改此选项。请参见 xref:../networking/vm-network.adoc[虚拟机网络] 以获取有关如何创建新网络的完整说明。
+ .. `Type`：默认情况下，`masquerade` 的值已设置。您可以保留它或更改为其他可用选项 `bridge`。
+. 您可以通过单击 `Add Network` 添加额外的网络。
+
+image::vm/create-windows-vm-networks.png[create-windows-vm-networks]
+
+[CAUTION]
+====
+更改 `Node Scheduling` 设置可能会影响 {harvester-product-name} 功能，例如禁用 `Live migration`。
+====
+
+=== 节点调度选项卡
+
+. 默认情况下，`Node Scheduling` 设置为 `Run VM on any available node`。您可以保留它或从下拉菜单中更改为其他可用选项。
+
+image::vm/create-windows-vm-scheduling.png[create-windows-vm-scheduling]
+
+=== 高级选项卡
+
+. `OS Type`：默认情况下，`Windows` 的值已设置。建议您不要更改它。
+. `Machine Type`：默认情况下，`None` 的值已设置。建议您不要更改它。在更改此值之前，请查看 https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#machine-type[KubeVirt 机器类型] 文档。
+. （可选）`Hostname`：设置虚拟机主机名。
+. （可选）`Cloud Config`：`User Data` 和 `Network Data` 的值均设置为默认值。目前，这些配置未应用于基于 Windows 的虚拟机。
+. （可选）`Enable TPM`、`Booting in EFI mode`、`Secure Boot`：TPM 2.0 设备和带有安全启动的 UEFI 固件是 Windows 11 的硬性要求。
+
+[NOTE]
+====
+目前，仅支持非持久性 vTPM，并且它们的状态在每次虚拟机关闭后会被清除。因此， https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker] 不应启用。
+====
+
+image::vm/create-windows-vm-advanced.png[create-windows-vm-advanced]
+
+=== 页脚部分
+
+所有设置完成后，单击 `Create`。
+
+[NOTE]
+====
+如果您需要添加高级设置，可以通过单击 `Edit as YAML` 直接编辑虚拟机配置。
+如果您想取消所做的所有更改，请单击 `Cancel`。
+====
+
+== Windows 安装
+
+. 选择您刚创建的虚拟机，然后单击 `Start`。
+. 启动安装程序，并按照安装程序给出的说明进行操作。
+. （可选）如果您使用的是`virtio`基础的卷，您需要加载特定的驱动程序以允许安装程序检测它们。如果您使用的是虚拟机模板 `windows-iso-image-base-template`，说明如下：
+ .. 点击 `Load driver`，然后在对话框中点击 `Browse`，找到带有 `VMDP-WIN` 前缀的 CD-ROM 驱动器。接下来，根据您要安装的 Windows 版本找到目录；例如，Windows Server 2012r2 应展开 `win8.1-2012r2` 并选择其中的 `pvvx` 目录。image:vm/find-virtio-driver-directory.png[find-virtio-driver-directory]
+ .. 点击 `OK` 以允许安装程序扫描此目录，选择 `SUSE Block Driver for Windows`，然后点击 `Next` 以加载驱动程序。image:vm/select-virtio-block-driver.png[select-virtio-block-driver]
+ .. 等待安装程序加载驱动程序。如果您选择了正确的驱动程序版本，`virtio` 卷将在驱动程序加载后被检测到。image:vm/installer-found-virtio-drive.png[installer-found-virtio-drive]
+. （可选）如果您使用其他 `virtio` 基础的硬件，如网络适配器，您需要在完成安装后手动安装这些驱动程序。要安装驱动程序，请打开VMDP驱动程序光盘，并根据您的平台使用安装程序。
+
+VMDP驱动程序包对Windows的支持矩阵如下（假设VMDP CD-ROM驱动器路径为E）：
+
+|===
+| 版本 | 支持 | 驱动程序路径
+
+| Windows 7
+| 否
+| `N/A`
+
+| Windows Server 2008
+| 否
+| `N/A`
+
+| Windows Server 2008r2
+| 否
+| `N/A`
+
+| Windows 8 x86(x64)
+| 是
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows Server 2012 x86(x64)
+| 是
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows 8.1 x86(x64)
+| 是
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows Server 2012r2 x86(x64)
+| 是
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows 10 x86(x64)
+| 是
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2016 x86(x64)
+| 是
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows Server 2019 x86(x64)
+| 是
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows 11 x86(x64)
+| 是
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2022 x86(x64)
+| 是
+| `E:\win10-11-server22\x86(x64)\pvvx`
+|===
+
+[NOTE]
+====
+如果您没有使用 `windows-iso-image-base-template` 模板，并且仍然需要 `virtio` 设备，请确保添加您的自定义 Windows virtio 驱动程序，以便正确检测硬件。
+====
+
+[NOTE]
+====
+有关如何安装 VMDP 客户机驱动程序和工具的完整说明，请参见文档 https://documentation.suse.com/sle-vmdp/2.5/html/vmdp/index.html。
+====
+
+== 已知问题
+
+=== 使用EFI模式时，Windows ISO无法启动。
+
+在使用EFI模式的Windows时，您可能会发现系统与其他设备（如HDD或UEFI外壳）一起启动，如下所示：
+
+image::vm/efi-shell.png[efi-shell]
+
+这是因为 Windows 会提示 `Press any key to boot from CD or DVD...`，让用户决定是否从安装程序 ISO 启动，并且需要人工干预以允许系统从 CD 或 DVD 启动。
+
+image::vm/boot-from-cd.png[boot-from-cd]
+
+或者，如果系统已经启动到 UEFI shell，您可以输入 `reset` 强制系统重新启动。一旦提示出现，您可以按任意键让系统从Windows ISO启动。
+
+=== 当保留内存不足时，虚拟机崩溃。
+
+已知Windows虚拟机在分配超过8GiB而未配置足够的保留内存时存在问题。虚拟机会在没有警告的情况下崩溃。
+
+通过在高级选项选项卡上为模板分配至少256MiB的保留内存可以解决此问题。如果 `256MiB` 无效，请尝试 `512MiB`。
+
+image::vm/reserved-memory-config.png[reserved-memory-config]
+
+=== Windows首次启动时出现BSoD（蓝屏死机）。
+
+已知Windows虚拟机在使用Windows Server 2016及以上版本时，首次启动Windows时可能会出现错误代码为`KMODE_EXCEPTION_NOT_HANDLED`的BSoD。我们仍在调查此问题，并将在未来的版本中修复此问题。
+
+作为一种解决方法，您可以通过更新 `/oem/99_custom.yaml` 来创建或修改 `/etc/modprobe.d/kvm.conf`{harvester-product-name} 文件，方法如下：
+
+[,YAML]
+----
+name: Harvester Configuration
+stages:
+  initramfs:
+  - commands: # ...
+    files:
+    - path: /etc/modprobe.d/kvm.conf
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+          options kvm ignore_msrs=1
+      encoding: ""
+      ownerstring: ""
+      # ...
+----
+
+[NOTE]
+====
+这仍然是一个实验性解决方案。如需更多信息，请参考 https://github.com/harvester/harvester/issues/276[该问题]，并请告知我们在应用此解决方法后是否遇到任何问题。
+====

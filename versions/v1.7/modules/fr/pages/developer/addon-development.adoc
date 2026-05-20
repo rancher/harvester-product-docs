@@ -1,0 +1,60 @@
+= Guide de développement de produits complémentaires
+:revdate: 2025-06-17
+:page-revdate: {revdate}
+
+{harvester-product-name} les produits complémentaires vous permettent d'activer et de désactiver des composants spécifiques du produit et de tiers en fonction de vos besoins. Les produits complémentaires fonctionnent comme un wrapper pour la définition de la ressource https://documentation.suse.com/cloudnative/rke2/latest/en/helm.html#_using_the_helm_crd[{rke2-product-name} HelmChart (CRD)].
+
+== Conditions préalables
+
+* Un cluster existant {harvester-product-name}
+
+== Spécifications des produits complémentaires
+
+Le `Addon` CRD prend en charge les champs suivants{nbsp}:
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Addon
+metadata:
+  name: example-add-on           # Name of add-on
+  namespace: example-namespace  # Namespace where the add-on CRD is deployed and where the associated Kubernetes components will be deployed
+  labels:                       # Optional add-on labels
+    Add-on.harvesterhci.io/experimental: "true" # Predefined label used on the UI to identify add-ons with the "experimental" maturity level
+spec:
+  enabled: false                # Boolean indicating if an add-on should be enabled or disabled on definition
+  repo: https://chartsrepo.com  # Helm chart repository containing the Helm chart managed by the add-on
+  version: "v0.19.0"            # Version of the Helm chart to be installed
+  chart: mychart                # Name of the Helm chart in the Helm chart repository
+  valuesContent: |-             # File (values.yaml) that must be passed to the Helm chart
+    contents of values.yaml
+    that need to be passed
+    to the chart
+----
+
+[NOTE]
+====
+Les produits complémentaires expérimentaux ne sont pas directement emballés dans {harvester-product-name}. Un exemple est le produit complémentaire https://github.com/harvester/experimental-addons/blob/main/rancher-vcluster/rancher-vcluster.yaml[`rancher-vcluster`].
+====
+
+== Installation
+
+[,bash]
+----
+kubectl apply -f /path/to/add-on.yaml
+----
+
+== Syntaxe
+
+Après avoir créé un `Addon` CRD, vous pouvez basculer le champ `enabled` pour activer et désactiver le chart Helm associé.
+
+== Mise à niveau
+
+Les modifications des champs `repo`, `version`, `chart` ou `valueContent` déclencheront un `helm upgrade`, ce qui forcera une mise à niveau du chart Helm existant.
+
+== Désinstallation
+
+[,bash]
+----
+kubectl delete -f /path/to/Add-on.yaml
+----

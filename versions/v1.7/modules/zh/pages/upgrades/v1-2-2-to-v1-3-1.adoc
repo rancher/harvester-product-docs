@@ -1,0 +1,89 @@
+= 从 v1.2.2/v1.3.0 升级到 v1.3.1
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的 {harvester-product-name} 版本可供升级时，*仪表板* 屏幕上会出现一个 *升级* 按钮。有关更多信息，请参见 xref:./upgrades.adoc#_start_an_upgrade[开始升级]。
+
+对于隔离的环境，请参见 xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离的升级]。
+
+== 已知问题
+
+=== 1.集群升级在第一个节点升级后卡住
+
+[TIP]
+====
+为防止此问题发生，在开始升级过程之前标记 `local-kubeconfig` 秘密。
+`kubectl label secret local-kubeconfig -n fleet-local cluster.x-k8s.io/cluster-name=local`
+====
+
+当将 Harvester 集群从 v1.2.2 或 v1.3.0 升级到 v1.3.1 时，升级过程在第一个节点升级后会卡住。
+
+示例：
+
+image::upgrade/known_issues/6041-stuck-on-first-node.png[]
+
+要解决此问题，请执行以下步骤：
+
+. 识别集群状态：
++
+[,sh]
+----
+ kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+输出示例：
++
+[,console]
+----
+...
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Updated
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Provisioned
+----
++
+如果输出包含消息 `waiting for kubelet`，请继续下一步。
++
+. 检查 capi-controller-manager pod 的日志：
++
+[,sh]
+----
+kubectl logs -n cattle-provisioning-capi-system deployment/capi-controller-manager
+----
++
+如果输出类似于以下示例，则问题可能存在于集群中。
++
+[,console]
+----
+2024-06-19T08:54:22.407423986Z W0619 08:54:22.407257       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:54:22.407470069Z E0619 08:54:22.407283       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153396619Z W0619 08:55:05.153190       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153438978Z E0619 08:55:05.153217       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+----
++
+. 应用以下解决方法以恢复升级：
++
+杀死并重启 capi-controller-manager pod。
++
+示例：
++
+[,sh]
+----
+kubectl rollout restart deployment/capi-controller-manager -n cattle-provisioning-capi-system
+----
+
+相关问题： https://github.com/harvester/harvester/issues/6041[#6041]
+
+'''
+
+=== 2.自动镜像清理未正常工作
+
+由于发布的 Harvester .iso 映像包含不完整的镜像列表，因此在从 v1.2.2 升级到 v1.3.1 时无法执行自动镜像清理。此问题不会阻止升级，您可以在升级完成后使用 https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[此脚本] 手动清理容器镜像。有关更多信息，请参见 https://github.com/harvester/harvester/issues/6620[问题 #6620]。

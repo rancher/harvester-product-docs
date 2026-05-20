@@ -1,0 +1,95 @@
+= 从 v1.4.1 升级到 v1.4.2
+:revdate: 2025-11-10
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的 {harvester-product-name} 版本可供升级时，*升级* 按钮会出现在 *仪表板* 屏幕上。有关更多信息，请参见 xref:./upgrades.adoc#_start_an_upgrade[开始升级]。
+
+对于隔离的环境，请参见 xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离的升级]。
+
+=== 在 {rancher-product-name} v2.10.1 上更新 Harvester UI 扩展
+
+要在 {rancher-short-name} v2.10.1 上导入 {harvester-product-name} v1.4.2 集群，您必须使用 **v1.0.3** 的 {rancher-short-name} UI 扩展。
+
+. 在 {rancher-short-name} UI 上，转到 *本地 -> APP -> 储存库*。
+
+. 找到名为 *harvester* 的储存库，然后选择 *⋮ -> 刷新*。
++
+该储存库具有以下属性：
++
+* URL: **https://github.com/harvester/harvester-ui-extension**
+* 分支: **gh-pages**
++
+image::upgrade/rancher-2.10.1-repository-page.png[]
+
+. 转到 *扩展* 屏幕。
+
+. 找到名为 *Harvester* 的扩展，然后单击 *更新*。
+
+. 选择版本 *1.0.3*，然后单击 *更新*。
++
+image::upgrade/update-harvester-ui-extension-modal.png[]
+
+. 请稍等，等待扩展更新完成，然后刷新屏幕。
+
+[IMPORTANT]
+====
+在扩展更新后，{rancher-short-name} UI 显示错误消息。刷新屏幕后，错误消息消失。
+
+此问题在 {rancher-short-name} v2.10.0 和 v2.10.1 中存在，将在 v2.10.2 中修复。
+====
+
+相关问题: https://github.com/harvester/harvester/issues/7234[#7234], https://github.com/rancher/capi-ui-extension/issues/107[#107]
+
+== 虚拟机备份兼容性
+
+在创建和恢复涉及外部存储的备份时，您可能会遇到某些限制。
+
+== 已知问题
+
+=== 高处理器使用率
+
+高处理器使用率可能是由于 `backup-target` 设置的 `refreshIntervalInSeconds` 字段造成的。如果该字段为空或设置为 `0`，{harvester-product-name} 会不断刷新备份目标，导致高处理器使用率。
+
+要解决此问题，请使用命令 将 `refreshIntervalInSeconds` 的值更新为更大的数字（例如，`60`）`kubectl edit setting backup-target`。
+
+示例：
+
+[,shell]
+----
+value: '{"type":"nfs","endpoint":"nfs://longhorn-test-nfs-svc.default:/opt/backupstore", "refreshIntervalInSeconds": 60}'
+----
+
+相关问题： https://github.com/harvester/harvester/issues/7885[#7885]
+
+=== 在点击 "忽略" 按钮后，升级意外重启
+
+当您使用 {rancher-short-name} 升级 {harvester-product-name} 时，{rancher-short-name} UI 会显示一个带有 "忽略" 按钮的对话框。点击此按钮可能会导致以下问题：
+
+* `status` CR 的 `harvesterhci.io/v1beta1/upgrade` 部分被清空，导致所有关于升级的重要信息丢失。
+* 升级过程意外重启。
+
+此问题影响 {rancher-short-name} v2.10.x，使用 xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[Harvester UI 扩展] 的 v1.0.2、v1.0.3 和 v1.0.4。所有 {harvester-product-name} UI 版本均不受影响。该问题在 Harvester UI 扩展 v1.0.5 和 v1.5.0 中已修复。
+
+为避免此问题，请执行以下任一操作：
+
+* 使用 {harvester-product-name} UI 进行升级。在 {harvester-product-name} UI 上点击 "忽略" 按钮不会导致意外行为。
+* 不要在 {rancher-short-name} UI 上点击按钮，而是针对集群运行以下命令：
++
+[,shell]
+----
+kubectl -n harvester-system label upgrades -l harvesterhci.io/latestUpgrade=true harvesterhci.io/read-message=true
+----
+
+相关问题： https://github.com/harvester/harvester/issues/7791[#7791]
+
+=== 使用可迁移 RWX 卷的虚拟机意外重启。
+
+使用可迁移的 xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX 卷] 的虚拟机在 CSI 插件 Pod 被重启时会意外重启。此问题影响 {harvester-product-name} v1.4.x、v1.5.0 和 v1.5.1。
+
+解决方法是在升级之前，在 {longhorn-product-name} UI 上禁用设置 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[意外分离卷时自动删除工作负载 Pod]。升级完成后，您必须再次启用该设置。
+
+该问题将在 {longhorn-product-name} v1.8.3、v1.9.1 及更高版本中修复。{harvester-product-name} v1.6.0 将包含 {longhorn-product-name} v1.9.1。
+
+相关问题： https://github.com/harvester/harvester/issues/8534[#8534] 和 https://github.com/longhorn/longhorn/issues/11158[#11158]

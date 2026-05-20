@@ -1,0 +1,234 @@
+= Crea una máquina virtual de Windows
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Crea una o más máquinas virtuales desde la página de *Máquinas Virtuales*.
+
+[NOTE]
+====
+Para crear máquinas virtuales de Linux, consulta xref:./create-vm.adoc[esta página].
+====
+
+== Instrucciones para crear una máquina virtual de Windows
+
+=== Sección de encabezado
+
+. Crea una instancia de máquina virtual única o múltiples instancias de máquinas virtuales.
+. Establece el nombre de la máquina virtual.
+. (Opcional) Proporciona una descripción para la máquina virtual.
+. (Opcional) Selecciona la plantilla de máquina virtual `windows-iso-image-base-template`. Esta plantilla añadirá un volumen con los controladores `virtio` para Windows.
+
+=== Pestaña de básicos
+
+. Configura el número de `CPU` núcleos asignados a la máquina virtual.
+. Configura la cantidad de `Memory` asignada a la máquina virtual.
+
+image::vm/create-windows-vm.png[create-windows-vm]
+
+[NOTE]
+====
+Como se mencionó anteriormente, se recomienda que utilices la plantilla de máquina virtual de Windows. La sección `Volumes` describirá las opciones que la plantilla de máquina virtual de Windows creó automáticamente.
+====
+
+[CAUTION]
+====
+Los valores `bootOrder` deben configurarse primero con la imagen de instalación. Si lo cambias, tu máquina virtual podría no arrancar desde el disco de instalación.
+====
+
+=== Pestaña de Volúmenes
+
+. El *primer volumen* es un `Image Volume` con los siguientes valores:
+ .. `Name`: El valor `cdrom-disk` se establece por defecto. Puedes mantenerlo o cambiarlo.
+ .. `Type`: Seleccione `cd-rom`.
+ .. `Image`: Selecciona la imagen de Windows que se va a instalar. Consulta xref:../virtual-machines/vm-images/upload-image.adoc[Subir Imágenes] para la descripción completa sobre cómo crear nuevas imágenes.
+ .. `Size`: El valor `20` se establece por defecto. Puedes cambiarlo si tu imagen tiene un tamaño mayor.
+ .. `Bus`: El valor `SATA` se establece por defecto. Se recomienda que no lo cambies.
+. El *segundo volumen* es un `Volume` con los siguientes valores:
+ .. `Name`: El valor `rootdisk` se establece por defecto. Puedes mantenerlo o cambiarlo.
+ .. `Type`: Seleccione `disk`.
+ .. `StorageClass`: Puedes usar la StorageClass por defecto `harvester-longhorn` o especificar una personalizada.
+ .. `Size`: El valor `32` se establece por defecto. Consulta los requisitos de espacio en disco para https://docs.microsoft.com/en-us/windows-server/get-started/hardware-requirements#storage-controller-and-disk-space-requirements[Windows Server] y https://docs.microsoft.com/en-us/windows/whats-new/windows-11-requirements#hardware-requirements[Windows 11] antes de cambiar este valor.
+ .. `Bus`: El valor `VirtIO` se establece por defecto. Puedes mantenerlo o cambiarlo por las otras opciones disponibles, `SATA` o `SCSI`.
+. El *tercer volumen* es un `Container` con los siguientes valores:
+ .. `Name`: El valor `virtio-container-disk` se establece por defecto. Puedes mantenerlo o cambiarlo.
+ .. `Type`: Seleccione `cd-rom`.
+ .. `Docker Image`: El valor `registry.suse.com/suse/vmdp/vmdp:2.5.4.2` se establece por defecto. Recomendamos no cambiar este valor.
+ .. `Bus`: El valor `SATA` se establece por defecto. Recomendamos no cambiar este valor.
+. Puedes añadir discos adicionales utilizando los botones `Add Volume`, `Add Existing Volume`, `Add VM Image` o `Add Container`.
+
+image::vm/create-windows-vm-volumes.png[create-windows-vm-volumes]
+
+=== Pestaña de Redes
+
+. La *Red de Gestión* se añade por defecto con los siguientes valores:
+ .. `Name`:  El valor `default` se establece por defecto. Puedes mantenerlo o cambiarlo.
+ .. `Model`: El valor `e1000` se establece por defecto. Puedes mantenerlo o cambiarlo por las otras opciones disponibles del menú desplegable.
+ .. `Network`: El valor `management Network` se establece por defecto. No puedes cambiar esta opción si no se ha creado ninguna otra red. Consulta xref:../networking/vm-network.adoc[Red de VM] para la descripción completa sobre cómo crear nuevas redes.
+ .. `Type`: El valor `masquerade` se establece por defecto. Puedes mantenerlo o cambiarlo por la otra opción disponible, `bridge`.
+. Puedes añadir redes adicionales haciendo clic en `Add Network`.
+
+image::vm/create-windows-vm-networks.png[create-windows-vm-networks]
+
+[CAUTION]
+====
+Cambiar la configuración de `Node Scheduling` puede afectar a las características de {harvester-product-name}, como deshabilitar `Live migration`.
+====
+
+=== Pestaña de programación de nodos
+
+. `Node Scheduling` está configurado por defecto en `Run VM on any available node`. Puedes mantenerlo o cambiarlo por las otras opciones disponibles del menú desplegable.
+
+image::vm/create-windows-vm-scheduling.png[create-windows-vm-scheduling]
+
+=== Pestaña de opciones avanzadas
+
+. `OS Type`: El valor `Windows` se establece por defecto. Se recomienda que no lo cambies.
+. `Machine Type`: El valor `None` se establece por defecto. Se recomienda que no lo cambies. Consulta la documentación de https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#machine-type[Tipo de máquina KubeVirt] antes de cambiar este valor.
+. (Opcional) `Hostname`: Establece el nombre de host de la máquina virtual.
+. (Opcional) `Cloud Config`: Tanto los valores `User Data` como `Network Data` se establecen por defecto. Actualmente, estas configuraciones no se aplican a máquinas virtuales basadas en Windows.
+. (Opcional) `Enable TPM`, `Booting in EFI mode`, `Secure Boot`: Tanto el dispositivo TPM 2.0 como el firmware UEFI con arranque seguro son requisitos imprescindibles para Windows 11.
+
+[NOTE]
+====
+Actualmente, solo se admiten vTPMs no persistentes, y su estado se borra después de cada apagado de la máquina virtual. Por lo tanto, https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker] no debe estar habilitado.
+====
+
+image::vm/create-windows-vm-advanced.png[create-windows-vm-advanced]
+
+=== Sección de pie de página
+
+Una vez que todas las configuraciones estén en su lugar, haz clic en `Create`.
+
+[NOTE]
+====
+Si necesitas añadir configuraciones avanzadas, puedes editar la configuración de la máquina virtual directamente haciendo clic en `Edit as YAML`.
+Y si deseas cancelar todos los cambios realizados, haz clic en `Cancel`.
+====
+
+== Instalación de Windows
+
+. Selecciona la máquina virtual que acabas de crear y haz clic en `Start`.
+. Arranca en el instalador y sigue las instrucciones proporcionadas por el instalador.
+. (Opcional) Si estás utilizando volúmenes basados en `virtio`, necesitarás cargar el controlador específico para permitir que el instalador los detecte. Si estás utilizando la plantilla de máquina virtual `windows-iso-image-base-template`, la instrucción es la siguiente:
+ .. Haz clic en `Load driver`, y luego haz clic en `Browse` en el cuadro de diálogo, y busca una unidad de CD-ROM con un prefijo `VMDP-WIN`. A continuación, encuentra el directorio del controlador según la versión de Windows que estás instalando; por ejemplo, Windows Server 2012r2 debería expandir `win8.1-2012r2` y elegir el directorio `pvvx` dentro.
+ image:vm/find-virtio-driver-directory.png[find-virtio-driver-directory]
+ .. Haz clic en `OK` para permitir que el instalador escanee este directorio en busca de controladores, elige `SUSE Block Driver for Windows` y haz clic en `Next` para cargar el controlador.
+ image:vm/select-virtio-block-driver.png[select-virtio-block-driver]
+ .. Espera a que el instalador cargue el controlador. Si eliges la versión correcta del controlador, los volúmenes `virtio` serán detectados una vez que el controlador esté cargado.
+ image:vm/installer-found-virtio-drive.png[installer-found-virtio-drive]
+. (Opcional) Si estás utilizando otro hardware basado en `virtio` como un adaptador de red, necesitarás instalar esos controladores manualmente después de completar la instalación. Para instalar controladores, abre el disco de controladores VMDP y utiliza el instalador según tu plataforma.
+
+La matriz de soporte del paquete de controladores VMDP para Windows es la siguiente (supón que la ruta de la unidad CD-ROM de VMDP es E):
+
+|===
+| Versión | Admitido | Vía del controlador
+
+| Windows 7
+| No
+| `N/A`
+
+| Windows Server 2008
+| No
+| `N/A`
+
+| Windows Server 2008r2
+| No
+| `N/A`
+
+| Windows 8 x86(x64)
+| Sí
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows Server 2012 x86(x64)
+| Sí
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows 8.1 x86(x64)
+| Sí
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows Server 2012r2 x86(x64)
+| Sí
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows 10 x86(x64)
+| Sí
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2016 x86(x64)
+| Sí
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows Server 2019 x86(x64)
+| Sí
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows 11 x86(x64)
+| Sí
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2022 x86(x64)
+| Sí
+| `E:\win10-11-server22\x86(x64)\pvvx`
+|===
+
+[NOTE]
+====
+Si no utilizaste la plantilla `windows-iso-image-base-template`, y aún necesitas `virtio` dispositivos, asegúrate de añadir tu controlador virtio de Windows personalizado para permitir que detecte el hardware correctamente.
+====
+
+[NOTE]
+====
+Para obtener instrucciones completas sobre cómo instalar el controlador y las herramientas VMDP, consulta la documentación en https://documentation.suse.com/sle-vmdp/2.5/html/vmdp/index.html
+====
+
+== Problemas conocidos
+
+=== ISO de Windows incapaz de arrancar al usar el modo EFI
+
+Al usar el modo EFI con Windows, puedes encontrar que el sistema arranca con otros dispositivos como HDD o la shell UEFI como la que se muestra a continuación:
+
+image::vm/efi-shell.png[efi-shell]
+
+Eso es porque Windows mostrará un `Press any key to boot from CD or DVD...` para permitir que el usuario decida si arrancar desde la ISO del instalador o no, y necesita intervención humana para permitir que el sistema arranque desde CD o DVD.
+
+image::vm/boot-from-cd.png[boot-from-cd]
+
+Alternativamente, si el sistema ya ha arrancado en la shell UEFI, puedes escribir `reset` para forzar al sistema a reiniciarse de nuevo. Una vez que aparezca el aviso, puedes presionar cualquier tecla para permitir que el sistema arranque desde la ISO de Windows.
+
+=== La VM se bloquea cuando la memoria reservada no es suficiente
+
+Hay un problema conocido con la máquina virtual de Windows cuando se le asigna más de 8GiB sin suficiente memoria reservada configurada. La máquina virtual se bloquea sin previo aviso.
+
+Esto se puede solucionar asignando al menos 256MiB de memoria reservada a la plantilla en la pestaña de Opciones Avanzadas. Si `256MiB` no funciona, prueba `512MiB`.
+
+image::vm/reserved-memory-config.png[reserved-memory-config]
+
+=== BSoD (Pantalla Azul de la Muerte) en el primer arranque de Windows
+
+Hay un problema conocido con la máquina virtual de Windows que utiliza Windows Server 2016 y versiones posteriores, un BSoD con el código de error `KMODE_EXCEPTION_NOT_HANDLED` puede aparecer en el primer arranque de Windows. Todavía estamos investigando y solucionaremos este problema en la próxima versión.
+
+Como solución alternativa, puedes crear o modificar el archivo `/etc/modprobe.d/kvm.conf` dentro de la instalación de {harvester-product-name} actualizando `/oem/99_custom.yaml` como se indica a continuación:
+
+[,YAML]
+----
+name: Harvester Configuration
+stages:
+  initramfs:
+  - commands: # ...
+    files:
+    - path: /etc/modprobe.d/kvm.conf
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+          options kvm ignore_msrs=1
+      encoding: ""
+      ownerstring: ""
+      # ...
+----
+
+[NOTE]
+====
+Esta sigue siendo una solución experimental. Para más información, por favor consulta https://github.com/harvester/harvester/issues/276[este problema] y haznos saber si has encontrado algún problema después de aplicar esta solución alternativa.
+====

@@ -1,0 +1,88 @@
+= Endereço de Gerenciamento
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} fornece um IP virtual fixo (VIP) como o endereço de gerenciamento; o VIP deve ser diferente de qualquer IP de nó. Você pode encontrar o endereço de gerenciamento no painel do console após a instalação.
+
+[NOTE]
+====
+
+Se você selecionou que o endereço IP seja configurado via DHCP, precisará configurar o mapeamento estático de endereços MAC para endereços IP em seu servidor DHCP para ter um IP virtual persistente.
+====
+
+image::install/iso-installed.png[]
+
+== Requisitos
+
+* O VIP e as interfaces de gerenciamento do nó devem pertencer à mesma sub-rede.
+* Todas as interfaces de gerenciamento do nó {harvester-product-name} devem estar no mesmo segmento de rede de camada 2.
+
+Ambos são necessários porque o VIP depende do Protocolo de Resolução de Endereços (ARP), que é um protocolo de camada 2.
+
+O VIP pode ser atribuído a qualquer interface de gerenciamento do nó {harvester-product-name} e pode mudar a qualquer momento (não apenas quando ocorre uma falha no nó). Quando o VIP muda de hosts, _ARPs gratuitos_ são enviados para que outros hosts na rede saibam para onde direcionar o tráfego destinado ao endereço IP de gerenciamento do cluster {harvester-product-name} (o VIP).
+
+[CAUTION]
+====
+
+Se você planeja hospedar um cluster {harvester-product-name} em um data center bare metal, o provedor de serviços provavelmente designará um endereço IP "flutuante" ou "reservado" como o VIP que você pode atribuir a um de seus servidores. Atualizar essa atribuição faz com que o tráfego comece a fluir instantaneamente para o novo nó ao qual está atribuído. Nessas situações, {harvester-product-name} não consegue atualizar a atribuição de IP flutuante/reservado nos sistemas do seu provedor quando o VIP muda de hosts.
+
+Além disso, os "ARPs gratuitos" do VIP também podem ser ineficazes dependendo da configuração de rede do seu provedor entre seus nós {harvester-product-name} (por exemplo, se seus hosts {harvester-product-name} não estiverem na mesma rede de camada 2). Você deve atualizar manualmente a atribuição de IP flutuante/reservado quando o VIP muda de hosts para garantir que o cluster funcione corretamente. Para mais informações, veja <<Identifying the node the VIP is assigned to,Identificando o nó ao qual o VIP está atribuído>>.
+====
+
+== Como obter o endereço MAC do VIP
+
+Para obter o endereço MAC do VIP, você pode executar o seguinte comando no nó de gerenciamento:
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+Exemplo de saída:
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== Identificando o nó ao qual o VIP está atribuído
+
+Você pode usar kubectl (seja em sua máquina local com o arquivo kubeconfig {harvester-product-name}, ou ao usar SSH para se conectar a qualquer nó de gerenciamento {harvester-product-name} como um usuário root).
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+Saída de exemplo:
+
+[,console]
+----
+harvester-xzj76
+----
+
+Alternativamente, você pode usar SSH para se conectar a cada nó de gerenciamento {harvester-product-name} e, em seguida, executar o comando `ip address show mgmt-br`.
+
+Exemplo:
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+Quando a saída inclui tanto o VIP quanto o endereço do nó, o VIP é atribuído ao nó ao qual você está conectado.
+
+== Usos
+
+O endereço de gerenciamento:
+
+* Permite o acesso à {harvester-product-name} API/UI via protocolo `HTTPS`.
+* Permite que outros nós se juntem ao cluster.
++
+image:install/configure-management-address.png[]

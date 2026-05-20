@@ -1,0 +1,209 @@
+= v1.4.1またはv1.4.2からv1.4.3にアップグレードします。
+:revdate: 2025-07-07
+:page-revdate: {revdate}
+
+== 一般情報
+
+新しい{harvester-product-name}バージョンが利用可能になると、*ダッシュボード*画面に*アップグレード*ボタンが表示されます。詳細については、xref:./upgrades.adoc#_start_an_upgrade[アップグレードを開始する]を参照してください。
+
+{harvester-product-name} v1.4.2とv1.4.3は、{rke2-product-name}の同じマイナーバージョン(v1.31)を使用しています。これにより、v1.4.1からv1.4.3に直接アップグレードできます。
+
+エアギャップ(された)環境については、xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[エアギャップ(された)アップグレードの準備]を参照してください。
+
+== 当バージョンの注意事項
+
+=== 1.FluentdおよびFluent Bitポッドで`ImagePullBackOff`エラーが発生し、エアギャップ(された)アップグレードが停止しました。
+
+アップグレードは、プロセスの最初の段階で停止する可能性があり、0%の進行状況と*アップグレード*ダイアログの*保留中*としてマークされた項目が表示されます。
+
+image::upgrade/upgrade-dialog-with-empty-status.png[]
+
+具体的には、FluentdおよびFluent Bitポッドが`ImagePullBackOff`ステータスで停止する可能性があります。ポッドのステータスを確認するには、次のコマンドを実行してください。
+
+[,bash]
+----
+$ kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-x2hz8   7m14s
+
+$ kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=hvst-upgrade-x2hz8
+NAME                            UPGRADE
+hvst-upgrade-x2hz8-upgradelog   hvst-upgrade-x2hz8
+
+$ kubectl -n harvester-system get pods -l harvesterhci.io/upgradeLog=hvst-upgrade-x2hz8-upgradelog
+NAME                                                        READY   STATUS             RESTARTS   AGE
+hvst-upgrade-x2hz8-upgradelog-downloader-6cdb864dd9-6bw98   1/1     Running            0          7m7s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-2nq7q         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-697wf         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-kd8kl         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentd-0               0/2     ImagePullBackOff   0          7m42s
+----
+
+これは、次のコンテナイメージがクラスターのノードに事前にロードされていないか、インターネットからプルされていないために発生します。
+
+* `ghcr.io/kube-logging/fluentd:v1.15-ruby3`
+* `ghcr.io/kube-logging/config-reloader:v0.0.5`
+* `fluent/fluent-bit:2.1.8`
+
+問題を解決するには、次のいずれかのアクションを実行してください。
+
+* Logging CRを更新して、クラスターのノードにすでに事前にロードされているイメージを使用します。これを行うには、クラスターに対して次のコマンドを実行してください。
++
+[,bash]
+----
+# Get the Logging CR names
+OPERATOR_LOGGING_NAME=$(kubectl get loggings -l app.kubernetes.io/name=rancher-logging -o jsonpath="{.items[0].metadata.name}")
+INFRA_LOGGING_NAME=$(kubectl get loggings -l harvesterhci.io/upgradeLogComponent=infra -o jsonpath="{.items[0].metadata.name}")
+
+# Gather image info from operator's Logging CR
+FLUENTD_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.repository}")
+FLUENTD_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.tag}")
+
+FLUENTBIT_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.repository}")
+FLUENTBIT_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.tag}")
+
+CONFIG_RELOADER_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.repository}")
+CONFIG_RELOADER_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.tag}")
+
+# Patch the Logging CR
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentbit/image\",\"value\":{\"repository\":\"$FLUENTBIT_IMAGE_REPO\",\"tag\":\"$FLUENTBIT_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/image\",\"value\":{\"repository\":\"$FLUENTD_IMAGE_REPO\",\"tag\":\"$FLUENTD_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/configReloaderImage\",\"value\":{\"repository\":\"$CONFIG_RELOADER_IMAGE_REPO\",\"tag\":\"$CONFIG_RELOADER_IMAGE_TAG\"}}]"
+----
++
+FluentdおよびFluent Bitポッドのステータスはすぐに`Running`に変わり、Logging CRが更新された後にアップグレードプロセスが続行されるはずです。Fluentdポッドのステータスがまだ`ImagePullBackOff`の場合、ポッドを削除して再起動を強制できます。
++
+[,bash]
+----
+UPGRADE_NAME=$(kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true -o jsonpath='{.items[0].metadata.name}')
+UPGRADELOG_NAME=$(kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=$UPGRADE_NAME -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n harvester-system delete pods -l harvesterhci.io/upgradeLog=$UPGRADELOG_NAME,harvesterhci.io/upgradeLogComponent=aggregator
+----
+
+* インターネットに接続されたコンピュータで、必要なコンテナイメージをプルし、それをTARファイルにエクスポートします。次に、TARファイルをクラスターのノードに転送し、各ノードで次のコマンドを実行してイメージをインポートします。
++
+[,bash]
+----
+# Pull down the three container images
+docker pull ghcr.io/kube-logging/fluentd:v1.15-ruby3
+docker pull ghcr.io/kube-logging/config-reloader:v0.0.5
+docker pull fluent/fluent-bit:2.1.8
+
+# Export the images to a tar file
+docker save \
+  ghcr.io/kube-logging/fluentd:v1.15-ruby3 \
+  ghcr.io/kube-logging/config-reloader:v0.0.5 \
+  fluent/fluent-bit:2.1.8 > upgradelog-images.tar
+
+# After transferring the tar file to the cluster nodes, import the images (need to be run on each node)
+ctr -n k8s.io images import upgradelog-images.tar
+----
++
+イメージが事前にロードされた後、アップグレードプロセスは続行されるはずです。
+
+- （推奨されません）ログを無効にしてアップグレードプロセスを再起動します。*ログ記録を有効にする* チェックボックスが *アップグレード* ダイアログで選択されていないことを確認してください。
+
+関連する問題: https://github.com/harvester/harvester/issues/7955[#7955]
+
+=== 2.オーバーサイズのボリューム
+
+{harvester-product-name} v1.4.3 では {longhorn-product-name} v1.7.3 を使用しており、オーバーサイズのボリューム（例えば、サイズが 999999 Gi のもの）は _準備完了ではない_ とマークされ、削除できません。
+
+この問題を解決するには、次の手順を実行してください。
+
+. PVC ウェブフックルールを一時的に削除してください。
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. 関連する PVC が削除されるのを待ってください。
+
+. PVC ウェブフックルールを復元して、検証を再度有効にしてください。
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+この問題は {longhorn-product-name} v1.8.2 で対処される予定であり、{harvester-product-name} v1.5.1 に含まれる可能性があります。
+
+関連する問題: https://github.com/harvester/harvester/issues/8096[#8096] と https://github.com/longhorn/longhorn/issues/10741[#10741]
+
+=== 3.ゲストクラスターの非ルートユーザーが RWX ボリュームにアクセスできない
+
+ゲストクラスターの非ルートユーザーは、RWX ボリュームにアクセスする際に予期しない「アクセス承認拒否」エラーに遭遇します。これは https://github.com/nfs-ganesha/nfs-ganesha/issues/1132[回帰問題] に起因しており、`nfs-ganesha` v6.0+ で発生し、`longhorn-share-manager` イメージの v1.7.3 に影響を与えます。
+
+問題を解決するには、`longhorn-share-manager:v1.7.3` をホットフィックスされたイメージ `longhorn-share-manager:v1.7.3-hotfix-1` に置き換えてください。
+
+[CAUTION]
+====
+問題に影響を受けていない場合は、ホットフィックスされたイメージを使用しないでください。
+====
+
+. 次のコマンドを実行して `longhorn-manager` DaemonSet を編集してください:
++
+[,bash]
+----
+  kubectl -n longhorn-system edit daemonset/longhorn-manager
+----
+
+. `spec.containers.command` フィールドで、`--share-manager-image` を `longhornio/longhorn-share-manager:v1.7.3-hotfix-1` に変更してください。
++
+[,yaml]
+----
+  ...
+    spec:
+      containers:
+      - command:
+        - longhorn-manager
+        - -d
+        - daemon
+        - --engine-image
+        - longhornio/longhorn-engine:v1.7.3
+        - --instance-manager-image
+        - longhornio/longhorn-instance-manager:v1.7.3
+        - --share-manager-image
+        - longhornio/longhorn-share-manager:v1.7.3-hotfix-1
+        - --backing-image-manager-image
+        - longhornio/backing-image-manager:v1.7.3
+        - --support-bundle-manager-image
+        - longhornio/support-bundle-kit:v0.0.51
+        - --manager-image
+        - longhornio/longhorn-manager:v1.7.3
+        - --service-account
+        - longhorn-service-account
+        - --upgrade-version-check
+  ...
+----
+
+. 更新が適用されたら、RWX ボリュームを使用しているワークロードを再起動してください。
+
+[IMPORTANT]
+====
+ホットフィックス済みのイメージを使用していて、{harvester-product-name} v1.5.x にアップグレードしたい場合は、`longhorn-manager` DaemonSet を編集し、アップグレードを開始する前に `longhorn-share-manager:v1.7.3` イメージに戻す必要があります。
+====
+
+関連する問題: https://github.com/harvester/harvester/issues/8354[8354] と https://github.com/longhorn/longhorn/issues/10621[10621]
+
+=== 4.移行可能な RWX ボリュームを使用している仮想マシンが予期せず再起動します。
+
+マイグレーション可能なxref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX ボリューム]を使用する仮想マシンは、CSIプラグインポッドが再起動されると予期せず再起動します。この問題は、{harvester-product-name} v1.4.x、v1.5.0、および v1.5.1 に影響します。
+
+回避策は、アップグレードを開始する前に、{longhorn-product-name} UI で設定 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[ボリュームが予期せず切り離されたときにワークロードポッドを自動的に削除する] を無効にすることです。アップグレードが完了したら、再度設定を有効にする必要があります。
+
+この問題は、{longhorn-product-name} v1.8.3、v1.9.1、およびそれ以降のバージョンで修正されます。{harvester-product-name} v1.6.0 には {longhorn-product-name} v1.9.1 が含まれます。
+
+関連する問題: https://github.com/harvester/harvester/issues/8534[#8534] および https://github.com/longhorn/longhorn/issues/11158[#11158]

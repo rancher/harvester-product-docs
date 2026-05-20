@@ -1,0 +1,169 @@
+= CSI 驱动程序 LVM（实验性）
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-csi-driver-lvm* 是一个 *实验性* 附加产品。它不包含在 ISO 中，但您可以从 https://github.com/harvester/experimental-addons[`experimental-addons` 储存库] 下载。有关实验性功能的更多信息，请参见 xref:introduction/document-conventions.adoc#_feature_labels[功能标签]。
+====
+
+{harvester-product-name} 允许您使用主机上的本地存储为工作负载创建持久卷，以获得更好的性能和延迟。此功能得益于 LVM，它在 Linux 上提供逻辑卷管理功能。
+
+**harvester-csi-driver-lvm** 附加产品是一个 CSI 驱动程序，支持通过 LVM 进行本地路径配置。
+
+== 安装和启用附加产品
+
+如果您使用 {harvester-product-name} kubeconfig 文件，可以通过执行以下步骤安装附加产品：
+
+. 运行以下命令：
++
+[,shell]
+----
+# kubectl apply -f https://raw.githubusercontent.com/harvester/experimental-addons/main/harvester-csi-driver-lvm/harvester-csi-driver-lvm.yaml
+----
++
+. 在 {harvester-product-name} 界面上，转到 *高级 -> 附加产品*。
++
+. 选择 *harvester-csi-driver-lvm (实验性)*，然后选择 *⋮ -> 启用*。
++
+image::csi-driver-lvm/enable-lvm-addon.png[]
+
+== 为 LVM 创建卷组
+
+卷组将物理卷组合在一起，创建一个可以划分为逻辑卷的单一存储结构。
+
+[NOTE]
+====
+{harvester-product-name} 目前不允许您在创建逻辑卷后修改卷组的组成（添加或删除磁盘）。这一问题将在将来的版本中解决。
+====
+
+. 验证 *harvester-csi-driver-lvm* 附加产品是否已安装。
+
+. 在 {harvester-product-name} 界面上，转到 *主机* 屏幕。
+
+. 选择目标主机，然后选择 *⋮ -> 编辑配置*。
+
+. 在 *存储* 选项卡上，为卷组添加磁盘。
++
+image::csi-driver-lvm/add-disk-to-vg-01.png[]
++
+为每个选定的磁盘配置以下设置：
++
+** *提供者*:选择*LVM*。
++
+image::csi-driver-lvm/add-disk-to-vg-02.png[]
++
+** *卷组*：选择一个现有的卷组或为新的卷组指定一个名称。
++
+image::csi-driver-lvm/add-disk-to-vg-03.png[]
++
+有关添加磁盘的更多信息，请参见xref:hosts/hosts.adoc#_multi_disk_management[多磁盘管理]。
+
+. 单击*保存*。
+
+. 在主机详细信息屏幕上，验证磁盘是否已添加，并且正确的提供者已设置。
++
+image::csi-driver-lvm/add-disk-to-vg-04.png[]
+
+== 为LVM创建StorageClass
+
+[NOTE]
+====
+每个卷组中只能使用一种类型的本地卷。如有必要，为您想要使用的卷类型创建不同的卷组。
+====
+
+. 在 {harvester-product-name} 界面上，转到 *存储*屏幕。
+
+. 创建一个新的StorageClass，并在*提供者*列表中选择*LVM*。
++
+image::csi-driver-lvm/create-lvm-sc-01.png[]
+
+. 在*参数*选项卡上，配置以下设置：
++
+** *节点*：选择目标节点以进行预期的工作负载。
++
+image::csi-driver-lvm/create-lvm-sc-02.png[]
++
+** *卷组名称*：选择您创建的卷组。
++
+image::csi-driver-lvm/create-lvm-sc-03.png[]
++
+** *卷组类型*：选择符合您要求的本地卷类型。{harvester-product-name}当前支持*条带式**和*dm-thin*。
++
+image::csi-driver-lvm/create-lvm-sc-04.png[]
+
+. 单击*保存*。
+
+. 在*存储*屏幕上，验证StorageClass是否已创建，并且正确的提供者已设置。
++
+image::csi-driver-lvm/create-lvm-sc-05.png[]
+
+有关更多信息，请参见xref:storage/storageclass.adoc[StorageClass]。
+
+== 使用LVM创建卷
+
+. 在 {harvester-product-name} 界面上，转到 *卷*屏幕。
+
+. 使用您创建的LVM StorageClass创建一个新卷。
++
+image::csi-driver-lvm/create-lvm-volume-01.png[]
++
+[NOTE]
+====
+状态*未准备好*是正常的，因为{harvester-product-name}仅在创建第一个工作负载时才会创建LVM卷。
+====
+
+. 在*虚拟机*屏幕上，选择目标虚拟机，然后选择*⋮ -> 添加卷*。
++
+[NOTE]
+====
+由于LVM卷是本地卷，您必须确保LVM StorageClass的目标节点是虚拟机调度的节点。
+====
+
+. 指定您要附加的卷。
++
+image::csi-driver-lvm/attach-lvm-volume-01.png[]
+
+. 在*卷*屏幕上，验证状态为*使用中*。
++
+image::csi-driver-lvm/attach-lvm-volume-02.png[]
+
+您还可以使用您创建的LVM StorageClass的卷创建一个新的虚拟机。该虚拟机将在目标节点上调度，使用本地存储作为卷。
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-01.png[]
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-02.png[]
+
+== 为LVM卷创建快照
+
+. 在 {harvester-product-name} 界面上，转到 *设置*屏幕。
+
+. 在*csi-driver-config*部分，选择*⋮ -> 编辑设置*。
++
+image::csi-driver-lvm/update-csi-driver-config-01.png[]
+
+. 添加一个具有以下设置的条目：
++
+** *提供者*:选择*lvm.driver.harvesterhci.io*。
+** *卷快照类名称*：选择*lvm-snapshot*。
+
+. 在 *虚拟机*屏幕上，选择目标虚拟机，然后选择 *⋮ -> 创建虚拟机快照*。
++
+示例：
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-01.png[]
+
+. 在*虚拟机快照*屏幕上，验证快照已准备好使用。
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-02.png[]
+
+== 支持的LVM卷特性
+
+* 卷扩容
+* 卷克隆
+* 创建快照
+
+[IMPORTANT]
+====
+当前不支持创建备份。此限制将在将来的版本中解决。
+====

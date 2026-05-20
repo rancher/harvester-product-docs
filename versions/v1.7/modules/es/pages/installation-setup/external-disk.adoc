@@ -1,0 +1,83 @@
+= Soporte para discos externos
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== Descripción general
+
+{harvester-product-name} se puede instalar y arrancar desde discos externos. Esto es particularmente útil en entornos donde los hosts tienen NIC o tarjetas HBA que soportan el arranque desde dispositivos iSCSI externos o matrices de almacenamiento SAN. Tales sistemas sin disco son comunes en grandes centros de datos.
+
+Las siguientes secciones proporcionan información sobre la instalación de {harvester-product-name} en un dispositivo iSCSI externo. El flujo de trabajo para las matrices SAN es similar, pero puede ser necesario un conjunto diferente de argumentos del núcleo de Linux para permitir que {harvester-product-name} arranque con éxito desde una matriz SAN.
+
+== Instalación basada en iSCSI
+
+=== Configurar el objetivo iSCSI
+
+[NOTE]
+====
+Los cambios necesarios en la BIOS o firmware dependerán del hardware que utilices.
+====
+
+Cuando el destino de instalación se encienda o reinicie, debes entrar en el menú de configuración del firmware para cambiar la configuración de arranque y habilitar el arranque a través de iSCSI. Las configuraciones varían de un sistema a otro.
+
+Entrar en el menú de configuración del firmware generalmente requiere presionar una tecla designada (por ejemplo, F2, F7 o ESC). El sistema probablemente mostrará una lista de teclas que están disponibles para funciones específicas del firmware. Sin embargo, esta lista se muestra durante un tiempo muy corto, por lo que debes seleccionar una opción del menú antes de que la lista desaparezca y el sistema comience a arrancar.
+
+image::install/target-details.png[detalles-del-objetivo]
+
+Las tareas de configuración que debes realizar incluyen las siguientes:
+
+* Habilitar el arranque UEFI
++
+* Configurar los parámetros del iniciador y objetivo iSCSI
++
+* Habilitar el dispositivo iSCSI en el menú de arranque
++
+* Establece el orden de arranque para que tu sistema arranque desde el dispositivo iSCSI
+
+Consulta la documentación de tu proveedor del sistema para obtener más información sobre la configuración de arranque y las funciones del firmware.
+
+=== Instalar {harvester-product-name}
+
+Puedes cargar la ISO de {harvester-product-name} utilizando cualquiera de los métodos estándar. El instalador debería detectar automáticamente el dispositivo iSCSI. Selecciona este dispositivo cuando se te pida especificar el disco de instalación.
+
+La información mostrada en el instalador difiere ligeramente cuando seleccionas un objetivo iSCSI.
+
+* Pantalla de configuración de red: No muestra las interfaces de red que se utilizan para montar los volúmenes iSCSI.
++
+* Pantalla de configuración de discos: Muestra la primera vía a un disco remoto con múltiples rutas. Sin embargo, después de la instalación (suponiendo que se proporciona `os.externalStorageConfig`), el sistema operativo arranca desde el dispositivo con múltiples rutas.
+
+Durante la instalación, debes proporcionar un archivo de configuración (`config.yaml`) que contenga múltiples rutas y argumentos adicionales del núcleo de Linux. La información se añade al sistema operativo instalado para permitir arranques posteriores desde un objetivo iSCSI.
+
+Ejemplo (`config.yaml`):
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+La configuración de prueba utiliza múltiples VLANs etiquetadas, como la VLAN 2017 (utilizada para conectarse con el volumen iSCSI) y la VLAN 2011 (utilizada para la interfaz de gestión de {harvester-product-name}).
+
+El argumento del núcleo de Linux `vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none` es necesario solo si el volumen iSCSI es accesible a través de una interfaz en una VLAN etiquetada. Los argumentos aseguran que se cree una interfaz etiquetada adicional durante el arranque y que se asigne una dirección estática a la interfaz. Consulta https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline] para obtener más información sobre cómo configurar los argumentos del núcleo de Linux para que coincidan con tu caso de uso.
+
+La directiva `write_files` es necesaria para asegurar que la interfaz de gestión se utilice como la puerta de enlace predeterminada. Esto es esencial porque RKE2 utiliza la interfaz con la puerta de enlace predeterminada como la dirección del nodo.

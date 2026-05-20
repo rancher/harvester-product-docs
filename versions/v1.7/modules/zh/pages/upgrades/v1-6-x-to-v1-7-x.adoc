@@ -1,0 +1,239 @@
+= 从 v1.6.x 升级到 v1.7.x
+:revdate: 2026-02-02
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的 {harvester-product-name} 版本可供升级时，*升级* 按钮会出现在 *仪表板* 屏幕上。有关更多信息，请参见 xref:upgrades/upgrades.adoc#_start_an_upgrade[开始升级]。
+
+运行 v1.6.x 的集群可以直接升级到 v1.7.x，因为 {harvester-product-name} 允许对底层组件进行最多一次小版本升级。v1.6.0 和 v1.6.1 使用相同的小版本 RKE2（v1.33），而 {harvester-product-name} v1.7.0 和 v1.7.1 使用下一个小版本（v1.34）。有关更多信息，请参见 xref:upgrades/upgrades.adoc#_upgrade_paths[升级路径]。
+
+有关在隔离环境中升级 {harvester-product-name} 的信息，请参见 xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离升级]。
+
+[CAUTION]
+====
+v1.7.x 使用 NetworkManager，而在早期 {harvester-product-name} 版本中使用的是 wicked。如果您在初始安装后修改了管理接口配置，则必须执行额外的手动步骤以避免在升级过程中出现问题。有关详细信息，请访问 <<Migration from wicked to NetworkManager>>。
+
+此外，某些 Intel 网络接口的 <<Persistent names of certain network interfaces may change during upgrade,持久名称可能会在升级过程中更改>>。这会导致主机的连接中断，并需要手动修复步骤。
+====
+
+[IMPORTANT]
+====
+通过 DHCP 配置的主机 IP 地址在升级过程中可能会更改。这会阻止集群正确启动，并需要手动恢复步骤。有关详细信息，请访问 <<Host IP address may change during upgrade when using DHCP>>。
+====
+
+=== 在 {rancher-product-name} v2.13 上更新 Harvester UI 扩展。
+
+您必须使用兼容版本（v1.7.x）的 Harvester UI 扩展，以便在 {rancher-short-name} v2.13 上导入 {harvester-product-name} v1.7.x 集群。
+
+. 在 {rancher-short-name} UI 上，转到 *本地 -> APP -> 储存库*。
+
+. 找到名为 *harvester* 的储存库，然后选择 *⋮ -> 刷新*。
+
+. 转到 *扩展* 屏幕。
+
+. 找到名为 *Harvester* 的扩展，然后单击 *更新*。
+
+. 选择一个兼容版本，然后单击 *更新*。
+
+. 请稍等一段时间以更新扩展，然后刷新屏幕。
+
+=== 从 wicked 迁移到 NetworkManager
+
+{harvester-product-name} v1.7.x 从 wicked 迁移到 NetworkManager 进行网络管理。由于遗留的 `ifcfg` 文件与 NetworkManager 的连接配置文件之间没有直接的 1:1 映射，因此无法对现有网络配置进行就地迁移。
+
+在升级过程中，{harvester-product-name} 使用存储在 `/oem/harvester.config` 中的原始安装设置生成新的 NetworkManager 连接配置文件。遗留的 `ifcfg` 文件保留在 `/oem/90_custom.yaml` 中，但 NetworkManager 会忽略这些文件，而是将其配置存储在 `/etc/NetworkManager` 下。
+
+|===
+| 情景 | 需要执行的操作
+
+| 您安装了 v1.1 或更高版本，并且从未手动修改管理接口或 DNS 配置。
+| 无
+
+| 您通过编辑 `/oem/90_custom.yaml` 文件或向 `ifcfg` 文件添加 CloudInit 资源手动修改了管理接口配置。
+| **必需**（升级到 v1.7.0 后，自定义配置将被忽略。）
+|===
+
+如果需要采取行动，请选择以下方法之一：
+
+* 升级前（推荐）：在每个节点上编辑 `/oem/harvester.config` 文件。配置相关的网络设置，特别是 `os.dns_nameservers` 和 `install.management_interface`。有关更多信息，请参见 xref:installation-setup/config/configuration-file.adoc[配置文件]。
++
+[NOTE]
+====
+如果您最初安装了 v1.0，请确保 `install.management_interface` 遵循后续 {harvester-product-name} 版本所需的更新架构。
+====
+
+* 升级后：使用 `nmcli` 工具手动将您的自定义配置重新应用到新的 NetworkManager 连接配置文件。
+
+如果在升级过程中遇到任何问题，您可以执行以下解决方法：
+
+|===
+| 情景 | 解决方法 | 结果
+
+| 节点卡在 "等待重启" 状态。
+| 通过控制台登录并使用 `nmcli` 工具验证网络配置。如有必要，手动更正配置，然后重启节点。
+| 升级会自动恢复。
+
+| 手动更改配置时会发生错误。
+| 如果您想恢复到自动生成的 NetworkManager 连接配置文件，请运行命令 `harvester-installer generate-network-config`。
+| `/etc/NetworkManager/system-connections/` 中的 NetworkManager 连接配置文件是根据 `/oem/harvester.config` 中指定的配置重新创建的。
+|===
+
+== 已知问题
+
+=== 在使用 DHCP 时，主机 IP 地址在升级过程中可能会发生变化。
+
+v1.7.x 使用 NetworkManager，而不是早期版本中使用的 wicked。这两个网络栈在生成 DHCP 客户端 ID 时具有不同的默认值。
+
+如果主机 IP 地址是通过 DHCP 配置的，{harvester-product-name} 升级和随后的重启可能会导致 DHCP 服务器分配与主机之前使用的 IP 地址不同的地址。因此，受影响的主机在启动时无法加入集群，因为 IP 地址发生了变化。
+
+此问题通常发生在 DHCP 服务器仅根据 DHCP 客户端 ID 分配 IP 地址时。当 DHCP 服务器配置为根据 MAC 地址分配固定 IP 地址时（如 https://github.com/harvester/ipxe-examples[iPXE 示例] 中所示），您不太可能遇到此问题。
+
+此问题的影响因集群大小而异：
+
+* 单节点集群：重启后 {harvester-product-name} 无法启动，因为 IP 地址已更改。
+* 多节点集群：管理节点会卡在 "等待重启" 状态。
+
+为了解决此问题，请执行以下步骤：
+
+[IMPORTANT]
+====
+您必须在升级完成且 IP 地址已更改后，为每个受影响的节点执行这些步骤。
+====
+
+. 登录到受影响的节点。您可以通过 SSH 访问节点的新 IP 地址，或使用控制台。
+
+. 在 `/var/lib/wicked` 目录中，检查租约 XML 文件（文件名类似于 `/var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml`）。
++
+如果您使用 VLAN，文件名中包含 VLAN ID（例如，`/var/lib/wicked/lease-mgmt-br.2017-dhcp-ipv4.xml`）。
+
+. 查看文件并识别 DHCP 客户端 ID。
++
+[,shell]
+----
+$ cat /var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml
+<lease>
+  ...
+  <ipv4:dhcp>
+    <client-id>ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05</client-id>
+    ...
+  </ipv4:dhcp>
+</lease>
+----
+
+. 使用 `nmcli` 命令为相应的 NetworkManager 连接配置文件设置 DHCP 客户端 ID。
++
+您需要修改的 NetworkManager 连接配置文件取决于您的节点是否使用 VLAN。
++
+* 使用的VLAN：将 DHCP 客户端 ID 添加到 `vlan-mgmt` 连接配置文件中。
+* 没有VLAN：将 DHCP 客户端 ID 添加到 `bridge-mgmt` 连接配置文件中。
++
+示例（无VLAN）：
++
+[,shell]
+----
+$ nmcli con modify bridge-mgmt \
+    ipv4.dhcp-client-id \
+    ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05
+----
++
+您必须用实际的客户端ID替换示例中的客户端ID，该ID来自您的wicked租约文件。
+
+. 重引导该节点。
+
+DHCP服务器应返回原始IP地址，受影响的节点应能够加入集群。
+
+[NOTE]
+====
+从v1.6.x升级到v1.7.1时，DHCP客户端ID从wicked到NetworkManager的传播是自动进行的。此解决方法仅在升级到v1.7.0时需要。
+====
+
+相关问题： https://github.com/harvester/harvester/issues/9260[#9260] 和 https://github.com/harvester/harvester/issues/3418[#3418]
+
+=== 升级卡在“升级系统服务”中
+
+升级过程可能会卡在“升级系统服务”阶段。此问题可能与`apply-manifest`作业以及与{fleet-product-name}升级相关的两个已知问题有关。
+
+您可能会遇到类似以下的日志消息：
+
+[,console]
+----
+...
+Happy Containering!
+Wait for Rancher dependencies helm releases...
+wait helm release cattle-fleet-system fleet fleet-108.0.0+up0.14.0 0.14.0 deployed
+wait helm release cattle-fleet-system fleet-crd fleet-crd-108.0.0+up0.14.0 0.14.0 deployed
+----
+
+检查Helm历史记录以确定原因和相关的解决方法。
+
+* 方案 1:即使在升级完成后，{fleet-product-name}升级状态仍为`pending-upgrade`。
++
+[,console]
+----
+$ helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                   APP VERSION     DESCRIPTION
+6               Tue Nov  4 06:22:34 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+7               Tue Nov  4 06:22:49 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+8               Mon Dec  8 07:10:43 2025        superseded      fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+9               Mon Dec  8 07:26:49 2025        deployed        fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+10              Mon Dec  8 07:27:10 2025        pending-upgrade fleet-106.1.1+up0.12.3  0.12.3          Preparing upgrade
+----
++
+为了解决此问题，请执行以下解决方法：
++
+.. 运行 `$ helm rollback fleet -n cattle-fleet-system` 命令。
++
+.. 等待嵌入式Rancher协调`ClusterRepo` CRD并触发Helm图表升级。为了加快进程，您可以重启嵌入式的Rancher pods。
+
+* 方案 2:升级卡在了发布候选版本（RC）。
++
+除非您是从RC版本升级到稳定版本，否则不应发生这种情况，而这种情况是不被支持的。如需帮助，请创建一个[GitHub问题](https://github.com/harvester/harvester/issues)。
++
+[,console]
+----
+# helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                           APP VERSION     DESCRIPTION
+2               Mon Dec  8 10:43:42 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+3               Mon Dec  8 10:49:51 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+4               Mon Dec  8 10:50:04 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+5               Mon Dec  8 10:56:30 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+6               Mon Dec  8 10:56:42 2025        deployed        fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+----
+
+相关问题： https://github.com/harvester/harvester/issues/9738[#9738] 和 https://github.com/harvester/harvester/issues/9680[#9680]
+
+=== 某些网络接口的持久名称在升级过程中可能会发生变化。
+
+{harvester-product-name} v1.7.x 使用较新版本的 Linux 内核的 `i40e` 和 `ice` 网络驱动程序，导致某些 Intel 网络接口的名称中添加了端口号，例如 X710。例如，在 {harvester-product-name} v1.6.x 上，名为 `enp6s0f0` 的接口在升级到 v1.7.0 时被重命名为 `enp6s0f0np0`。这会破坏主机的连接，因为现有的网络配置仍然引用原始名称。
+
+要解决此问题，请应用内核参数以恢复受影响网络接口的原始名称。
+
+. 检索节点上非默认内核参数的列表（`third_party_kernel_args`）。
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv list
+third_party_kernel_args=multipath=off
+----
+
+. 为节点上的每个网络接口添加`ifname=nicName:macAddress`以恢复原始名称。
++
+确保在添加`third_party_kernel_args`参数时包含`ifname=`。
++
+示例：
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv set \
+    third_party_kernel_args="multipath=off ifname=enp6s0f0:d4:c9:ef:ce:30:68 ifname=enp6s0f1:d4:c9:ef:ce:30:69"
+----
+
+. 重引导该节点。
+
+[NOTE]
+====
+此解决方法仅在升级到v1.7.0时是必要的。在v1.7.1及更高版本中，这些`ifname=`参数会自动添加，以防止在驱动程序更新期间发生网络中断。
+====
+
+相关问题： https://github.com/harvester/harvester/issues/9815[#9815] 和 https://github.com/harvester/harvester/issues/9802[#9802]

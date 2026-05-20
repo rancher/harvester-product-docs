@@ -1,0 +1,104 @@
+= Problemas de Registro
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Falha ao habilitar o complemento `rancher-logging`
+
+=== Descrição do problema
+
+Uma mensagem de erro aparece na interface do usuário {harvester-product-name} quando você tenta habilitar o complemento `rancher-logging`.
+
+image::troubleshooting/failed-to-enable-rancher-logging-addon.png[Falha ao habilitar o complemento rancher-logging]
+
+As mensagens de log do pod `cattle-logging-system/helm-install-rancher-logging` confirmam que ocorreu um erro.
+
+Exemplo:
+
+[,shell]
+----
+...
+ echo 'Installing helm chart'
+...
++ helm install --version ... rancher-logging rancher-logging/rancher-logging ...
+...
+Error: INSTALLATION FAILED: Unable to continue with install: ClusterRole "logging-admin" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata;
+annotation validation error: key "meta.helm.sh/release-name" must equal "rancher-logging":
+current value is "hvst-upgrade-md54b-upgradelog-operator"
+----
+
+image::troubleshooting/logging-installation-failure-due-to-conflict.png[erro de instalação do rancher-logging devido a conflito]
+
+=== Causa raiz
+
+Quando você habilita o complemento `rancher-logging`, {harvester-product-name} tenta instalar o https://kube-logging.dev/docs/#overview[Operador de Log]. A instalação falha quando o operador já existe no cluster, o que pode ser um recurso obsoleto de tentativas de atualização anteriores ou criado pela atualização em andamento.
+
+A tela *Atualizar Software* inclui uma opção *Habilitar Registro* que você deve selecionar para habilitar {harvester-product-name} para registrar eventos de atualização. No entanto, o processo em segundo plano depende do complemento `rancher-logging` estar habilitado.
+
+image::troubleshooting/upgrade-with-enable-logging.png[Registro habilitado durante a atualização]
+
+Quando o complemento está desabilitado, o Upgrade Controller cria os seguintes objetos `logging` e `managedchart`.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-hpfnw   36s
+
+$ kubectl get logging -A
+NAME                                          LOGGINGREF             CONTROLNAMESPACE
+hvst-upgrade-hpfnw-upgradelog-infra           harvester-upgradelog   harvester-system        // newly created by upgrade controller
+hvst-upgrade-hpfnw-upgradelog-operator-root                          cattle-logging-system   // newly created by upgrade controller, acts as logging-operator
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                                     AGE
+fleet-local   hvst-upgrade-hpfnw-upgradelog-operator   18s  // newly created by upgrade controller
+----
+
+Quando o complemento está habilitado, o Upgrade Controller cria o seguinte objeto `logging`.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-9sn4x   14s
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                     AGE
+
+$ kubectl get logging -A
+NAME                                  LOGGINGREF                     CONTROLNAMESPACE
+hvst-upgrade-9sn4x-upgradelog-infra   harvester-upgradelog           harvester-system        // newly created by upgrade controller
+rancher-logging-kube-audit            harvester-kube-audit-log-ref   cattle-logging-system   // originally created by rancher-logging addon
+rancher-logging-root                                                 cattle-logging-system   // originally created by rancher-logging addon, acts as logging-operator
+----
+
+Você pode encontrar o problema nas seguintes situações:
+
+* O complemento `rancher-logging` está inicialmente desabilitado. Você inicia a atualização com a opção *Habilitar Registro* selecionada. Sem esperar a conclusão da atualização, você habilita o complemento `rancher-logging`. A {harvester-product-name} interface exibe uma mensagem de erro.
+
+* O complemento `rancher-logging` está inicialmente desabilitado. Você inicia a atualização com a opção *Habilitar Registro* selecionada e aguarda até que a atualização seja concluída. Os objetos `managedchart` e `logging` não são removidos devido a um https://github.com/harvester/harvester/issues/7654[problema conhecido]. Em seguida, você habilita o complemento `rancher-logging`. A {harvester-product-name} interface exibe uma mensagem de erro.
+
+=== Solução
+
+. Se uma atualização estiver em andamento, aguarde até que seja concluída com sucesso ou removida.
++
+[IMPORTANT]
+====
+Para evitar conflitos de registro, não habilite ou desabilite o complemento `rancher-logging` enquanto uma atualização estiver em andamento. Esta ação é bloqueada na versão {harvester-product-name} v1.7.0 e em versões posteriores.
+====
+
+. Se o complemento `rancher-logging` estiver habilitado, mas em um estado de falha, desabilite-o.
+
+. Verifique os objetos `logging` e `managedchart`. Se os nomes desses objetos começarem com `hvst-upgrade-`, exclua-os manualmente.
+
+. Habilite o complemento `rancher-logging`.
+
+[NOTE]
+====
+Todos os complementos devem estar em um estado saudável antes de iniciar uma atualização. Este pré-requisito é verificado automaticamente na versão {harvester-product-name} v1.7.0 e em versões posteriores.
+====
+
+=== Problemas relacionados
+
+https://github.com/harvester/harvester/issues/9289[#9289] e https://github.com/harvester/harvester/issues/9644[#9644]

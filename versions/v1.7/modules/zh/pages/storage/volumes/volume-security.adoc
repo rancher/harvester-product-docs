@@ -1,0 +1,112 @@
+= 卷安全
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Harvester允许您加密和解密虚拟机镜像。加密机制利用 Linux 内核模块 dm_crypt 和命令行工具 cryptsetup。
+
+== 先决条件
+
+准备以下资源：
+
+* 机密:Kubernetes 密钥用作 dm_crypt 的密码短语。您必须指定`CRYPTO_KEY_VALUE`字段的值。所有其他字段都是固定的。
++
+image::vm/create-encryption-used-secret.png[]
++
+密钥示例：
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+该示例包含Kubernetes密钥的默认YAML代码。除此之外，您可以使用 https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[用于LUKS模式的加密选项]，这是cryptsetup的操作模式。Harvester v1.4.1 及更高版本支持这些选项，但您必须确认您的节点支持这些选项。
+
+|===
+| 选项 | 可能值
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+您可以使用 kubectl 或 Harvester UI（*Edit as YAML* 功能）在系统名称空间中创建密钥。系统名称空间中的资源不会在 Harvester UI *密钥* 屏幕上显示。
+====
++
+* StorageClass：图像使用 Longhorn 加密，因此必须将必需字段传递给 Longhorn CSI 驱动程序。您可以在创建 StorageClass 时指定加密密钥。有关更多信息，请参见 xref:/virtual-machines/vm-images/upload-image.adoc#_image_storageclass[Image StorageClass]。
++
+image::vm/create-storage-class.png[]
++
+StorageClass 示例：
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+您可以使用 Harvester UI（*Edit as YAML* 功能）和 kubectl 在系统名称空间中创建一个密钥。系统名称空间中的资源不会在 Harvester UI *密钥* 屏幕上显示。
+====
+
+== 加密卷
+
+您可以在以下 UI 位置使用加密 StorageClass 创建加密卷：
+
+* *卷：创建*屏幕
++
+image::volume/volume-security-create-empty-volume.png[create-empty-volume]
++
+* *Volumes* 选项卡在 *虚拟机：创建*屏幕
++
+image::volume/volume-security-create-empty-volume-in-vm.png[create-empty-volume-in-vm]
+
+== 与 Rancher 集成的高级用法
+
+该密钥是未加密的 Base64 编码字符串。为了保护密钥安全，您可以使用项目和名称空间来隔离权限。有关更多信息，请参见 xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy]。
+
+== 局限性
+
+您无法执行以下操作：
+
+* 从加密卷导出新卷
+* 将加密卷恢复为未加密卷
+* 将未加密卷恢复为加密卷

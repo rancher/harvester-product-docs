@@ -1,0 +1,92 @@
+= K3s Kubernetes クラスターの作成
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+これで、Rancher の Harvester クラスター上に K3s Kubernetes クラスターをプロビジョニングできるようになりました。ビルトインの Harvester ノードドライバーを使用します。
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* Harvester K3s ノードドライバーは *テクノロジープレビュー* にあります。
+* K3s Kubernetes クラスターのプロビジョニングには、基盤となる仮想マシンの IP アドレスの設定が含まれます。これは、仮想マシンが接続されている VLAN ネットワーク上の DHCP サーバーを使用して行うことができます。そのようなサーバーがネットワーク上に存在しない場合は、xref:../../../add-ons/vm-dhcp-controller.adoc[管理された DHCP] 機能を使用して IP アドレスを設定できます。
+* Harvester ノードドライバーには xref:../../../networking/vm-network.adoc#_vlan_network[VLAN ネットワーク] が必要です。
+* Harvester ノードドライバーはクラウドイメージのみをサポートしています。
+* Harvester 内でデプロイされたゲストクラスターのポート要件については、xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[ゲストクラスターのポート要件] を参照してください。
+====
+
+== クラウド資格情報を作成する
+
+. *☰ > クラスター管理* をクリックします。
+. *クラウド資格情報* をクリックします。
+. ［*作成*］をクリックします。
+. *Harvester* をクリックします。
+. クラウド資格情報の名前を入力してください
+. 「インポートされた Harvester クラスター」を選択します。
+. ［*作成*］をクリックします。
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== K3s Kubernetes クラスターを作成する
+
+K3s ノードドライバーを介して、*クラスター管理* ページから K3s Kubernetes クラスターを作成できます。
+
+. *クラスター* メニューを選択します。
+. ［*Create*］ボタンをクリックします。
+. *RKE2/K3s* に切り替えます。
+. Harvester ノードドライバーを選択してください。
+. *クラウド資格情報*を選択してください。
+. *クラスター名*を入力してください（必須）。
+. *ネームスペース*を入力してください（必須）。
+. *イメージ*を入力してください（必須）。
+. *ネットワーク名*を入力してください（必須）。
+. *SSHユーザー*を入力してください（必須）。
+. ［*作成*］をクリックします。
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== ノードアフィニティを追加する
+
+Harvester ノードドライバーは、ノードアフィニティルールを通じて、特定のノードにマシンのグループをスケジュールすることをサポートしています。これにより、高可用性とより良いリソース利用が提供されます。
+
+ノードアフィニティは、クラスター作成中にマシンプールに追加できます：
+
+. `Show Advanced`ボタンをクリックし、`Add Node Selector`をクリックしてください
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. ルールが満たされた場合にのみスケジューラーが機械をスケジュールするようにしたい場合は、優先度を`Required`に設定してください。
+. ノードアフィニティルールを指定するには`Add Rule`をクリックしてください。例えば、xref:./node-driver.adoc#_topology_spread_constraints[トポロジースプレッド制約]のユースケースでは、`region`と`zone`のラベルを次のように追加できます：
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+. ノードテンプレートを保存するには`Create`をクリックしてください。クラスターがインストールされた後、機械ノードがアフィニティルールに従ってスケジュールされているかどうかを確認できます。
+
+== エアギャップ環境でのHarvester K3sノードドライバーの使用
+
+K3sのプロビジョニングは、仮想マシンのIPを取得するために`qemu-guest-agent`パッケージに依存しています。
+
+ただし、エアギャップ環境でパッケージをインストールすることは実現可能ではないかもしれません。
+
+インストールの制約に対処するためのオプションは次のとおりです：
+
+* オプション1。必要なパッケージ（例：`iptables`、`qemu-guest-agent`）で事前に構成されたVMイメージを使用します。
+* オプション2。VMがHTTP(S)プロキシを介して必要なパッケージをインストールできるようにするには、*詳細を表示* > *ユーザーデータ*に移動します。
+
+Harvester ノードテンプレートにおける`user data`の例：
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

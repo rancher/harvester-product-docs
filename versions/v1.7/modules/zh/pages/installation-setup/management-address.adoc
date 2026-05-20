@@ -1,0 +1,88 @@
+= 管理地址
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} 提供一个固定的虚拟 IP (VIP) 作为管理地址，VIP 必须与任何节点 IP 不同。安装后，您可以在控制台仪表板上找到管理地址。
+
+[NOTE]
+====
+
+如果您选择通过 DHCP 配置 IP 地址，则需要在 DHCP 服务器上配置静态 MAC 到 IP 地址的映射，以便拥有持久的虚拟 IP。
+====
+
+image::install/iso-installed.png[]
+
+== 要求
+
+* VIP 和节点管理接口必须属于同一子网。
+* 所有 {harvester-product-name} 节点管理接口必须在同一层-2 网络段上。
+
+两者都是必需的，因为 VIP 依赖于地址解析协议 (ARP)，这是一个层-2 协议。
+
+VIP 可以分配给任何 {harvester-product-name} 节点管理接口，并且可以随时更改（不仅仅是在节点故障发生时）。当 VIP 更改主机时，会发送 _无偿 ARP_，以便网络上的其他主机知道将流量定向到 {harvester-product-name} 集群的管理 IP 地址（VIP）。
+
+[CAUTION]
+====
+
+如果您计划在裸机数据中心托管 {harvester-product-name} 集群，服务提供商可能会指定一个 "浮动" 或 "保留" 的 IP 地址作为 VIP，您可以将其分配给您的服务器之一。更新此分配会导致流量立即开始流向其分配的新节点。在这些情况下，{harvester-product-name} 无法在 VIP 更改主机时更新您提供商的系统中的浮动/保留 IP 分配。
+
+此外，VIP 的 "无偿 ARP" 可能也会无效，具体取决于您提供商的网络设置 {harvester-product-name}（例如，如果您的 {harvester-product-name} 主机不在同一层-2 网络上）。当 VIP 更改主机时，您必须手动更新浮动/保留 IP 分配，以确保集群正常运行。有关更多信息，请参见 <<Identifying the node the VIP is assigned to,识别 VIP 分配到的节点>>。
+====
+
+== 如何获取 VIP MAC 地址
+
+要获取 VIP MAC 地址，您可以在管理节点上运行以下命令：
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+输出示例：
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== 识别 VIP 分配到的节点
+
+您可以使用 kubectl（无论是在本地计算机上使用 {harvester-product-name} kubeconfig 文件，还是通过 SSH 连接到任何 {harvester-product-name} 管理节点作为 root 用户）。
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+示例输出：
+
+[,console]
+----
+harvester-xzj76
+----
+
+或者，您可以使用 SSH 连接到每个 {harvester-product-name} 管理节点，然后运行命令 `ip address show mgmt-br`。
+
+示例：
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+当输出同时包含 VIP 和节点地址时，VIP 被分配给您所连接的节点。
+
+== 用法
+
+管理地址：
+
+* 允许通过 `HTTPS` 协议访问 {harvester-product-name} API/UI。
+* 允许其他节点加入集群。
++
+image:install/configure-management-address.png[]

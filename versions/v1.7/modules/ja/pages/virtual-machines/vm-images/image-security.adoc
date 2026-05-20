@@ -1,0 +1,168 @@
+= イメージセキュリティ
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{harvester-product-name}を使用すると、仮想マシン画像を暗号化および復号化できます。暗号化メカニズムは、Linuxカーネルモジュールdm_cryptとコマンドラインユーティリティcryptsetupを利用します。
+
+[NOTE]
+====
+この機能は、Longhorn V1 Data Engineのみをサポートしています。他のストレージソリューションに保存されている画像を暗号化および復号化することはできません。
+====
+
+== 前提条件
+
+次のリソースを準備してください：
+
+* サポートされている方法のいずれかを使用して、ソース仮想マシンimage: You can xref:./upload-image.adoc[イメージをアップロードまたは作成]します。
++
+[CAUTION]
+====
+暗号化されたイメージをアップロードしないでください。
+====
++
+* 部外者秘:Kubernetesシークレットは、dm_cryptのパスフレーズとして使用されます。`CRYPTO_KEY_VALUE`フィールドの値を指定する必要があります。他のすべてのフィールドは固定されています。
++
+image::vm/create-encryption-used-secret.png[]
++
+シークレットの例：
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+この例には、KubernetesシークレットのデフォルトYAMLコードが含まれています。これに加えて、 https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[LUKSモードの暗号化オプション]を使用することもできます。これはcryptsetupの動作モードです。Harvester v1.4.1以降のバージョンはこれらのオプションをサポートしていますが、ノードがこれらをサポートしていることを確認する必要があります。
+
+|===
+| オプション | 有効値
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain、aes-xts-plain64、aes-cbc-plain、aes-cbc-plain64、aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256、sha384、sha512
+
+| CRYPTO_KEY_SIZE
+| 256、384、512
+
+| CRYPTO_PBKDF
+| argon2i、argon2id、pbkdf2
+|===
+
+kubectlと{harvester-product-name} UIを使用してシステムネームスペースにシークレットを作成できます（*Edit as YAML*機能）。システムネームスペースのリソースは、*Secrets*画面に表示されません。
+====
++
+* ストレージクラス：仮想マシン画像はLonghornを使用して暗号化されるため、必要なフィールドはLonghorn CSI Driverに渡す必要があります。ストレージクラスを作成する際に暗号化シークレットを指定できます。詳細については、xref:./upload-image.adoc#_image_storageclass[Image StorageClass]を参照してください。
++ 
+image::vm/create-storage-class.png[]
++
+ストレージクラスの例：
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+kubectlと{harvester-product-name} UIを使用してシステムネームスペースにシークレットを作成できます（*Edit as YAML*機能）。システムネームスペースのリソースは、*Secrets*画面に表示されません。
+====
+
+== 仮想マシン画像を暗号化する
+
+. {harvester-product-name} UIで、*Images*に移動します。
++
+. ［*作成*］をクリックします。
++
+. ネームスペースと名前を指定します。
++
+. *Basics*タブで、*Encrypt*を選択し、ソース画像を選択します。
++
+image::vm/create-encrypted-image.png[]
++
+. *Storage*タブで、暗号化関連のフィールドを含むストレージクラスを選択します。
++
+{harvester-product-name}は、必要なフィールドをLonghornに渡します。
++
+image::vm/select-encryption-storage-class.png[]
++
+. ［*作成*］をクリックします。
+
+== 仮想マシン画像を復号化する
+
+. {harvester-product-name} UIで、*Images*に移動します。
++
+. ［*作成*］をクリックします。
++
+. ネームスペースと名前を指定します。
++
+. *Basics*タブで、*Decrypt*を選択し、ソース画像を選択します。
++
+image::vm/create-decrypted-image.png[]
++
+. *Storage*タブで、*harvester-longhorn (Default)*または他の一般的に使用されるストレージクラスを選択します。
++
+{harvester-product-name}は、復号化したいソース画像のストレージクラスを使用します。
++
+image::vm/select-normal-storage-class.png[]
++
+. ［*作成*］をクリックします。
+
+== 暗号化されたボリュームを持つ画像を使用する
+
+仮想マシンを作成する際に使用したい画像を選択する必要があります。
+
+image::vm/create.png[]
+
+*仮想マシン*画面は、仮想マシンによって使用されるボリュームが暗号化されている場合に、次のアイコンとメッセージを表示します。
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+どのボリュームが暗号化されているかを確認するには、*ボリューム*タブを*仮想マシン*の詳細画面で確認してください。
+
+image::vm/volume-detail.png[]
+
+== {rancher-product-name}統合を使用した高度な利用法
+
+秘密は、暗号化されていないBase64エンコードされた文字列です。秘密を安全に保つために、プロジェクトとネームスペースを使用して権限を分離することができます。詳細については、xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[マルチテナンシー]を参照してください。
+
+== 制限
+
+次のアクションを実行することはできません：
+
+* 暗号化された画像から新しい画像をエクスポートする
+* 暗号化された画像をダウンロードする
+* 暗号化された画像をアップロードする

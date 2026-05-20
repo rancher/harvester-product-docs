@@ -1,0 +1,83 @@
+= 外部ディスクサポート
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== 概要
+
+{harvester-product-name}は外部ディスクにインストールして起動することができます。これは、ホストが外部iSCSIデバイスやSANストレージアレイからの起動をサポートするNICまたはHBAカードを持つ環境で特に便利です。そのようなディスクレスシステムは、大規模なデータセンターで一般的です。
+
+以下のセクションでは、外部iSCSIデバイスに{harvester-product-name}をインストールする方法についての情報を提供します。SANアレイのワークフローは似ていますが、{harvester-product-name}がSANアレイから正常に起動するためには異なるカーネル引数が必要になる場合があります。
+
+== iSCSIベースのインストール
+
+=== iSCSIターゲットを設定する
+
+[NOTE]
+====
+BIOSまたはファームウェアに必要な変更は、使用するハードウェアによって異なります。
+====
+
+インストール先が電源を入れるかリセットされると、ファームウェア設定メニューに入って起動設定を変更し、iSCSI経由での起動を有効にする必要があります。設定はシステムによって異なります。
+
+ファームウェア設定メニューに入るには、通常、指定されたキー（例えば、F2、F7、またはESC）を押す必要があります。システムは、特定のファームウェア機能に利用可能なキーのリストを表示する可能性があります。ただし、このリストは非常に短い時間しか表示されないため、リストが消える前にメニューオプションを選択する必要があります。
+
+image::install/target-details.png[target-details]
+
+実行する必要がある構成タスクは以下の通りです：
+
+* UEFIブートを有効にする
++
+* iSCSIイニシエーターとターゲットパラメータを設定する
++
+* ブートメニューでiSCSIデバイスを有効にする
++
+* システムがiSCSIデバイスから起動するようにブート順序を設定する
+
+ブート設定やファームウェア機能に関する詳細は、システム提供者のドキュメントを参照してください。
+
+=== {harvester-product-name}をインストールします
+
+{harvester-product-name}のISOを標準的な方法のいずれかを使用してロードできます。インストーラーはiSCSIデバイスを自動的に検出するはずです。インストールディスクを指定するように求められたときに、このデバイスを選択してください。
+
+iSCSIターゲットを選択すると、インストーラーに表示される情報がわずかに異なります。
+
+* ネットワーク構成画面：iSCSIボリュームをマウントするために使用されるネットワークインターフェースは表示されません。
++
+* ディスク構成画面：マルチパスされたリモートディスクへの最初のパスを表示します。ただし、インストール後（`os.externalStorageConfig`が提供されていると仮定して）、オペレーティングシステムはマルチパスデバイスから起動します。
+
+インストール中に、マルチパスおよび追加のカーネル引数を含む設定ファイル（`config.yaml`）を提供する必要があります。この情報は、iSCSIターゲットからのその後の起動を可能にするために、インストールされたオペレーティングシステムに追加されます。
+
+例（`config.yaml`）：
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+テストセットアップでは、iSCSIボリュームとの接続に使用されるVLAN 2017や、{harvester-product-name}管理インターフェースに使用されるVLAN 2011など、複数のタグ付きVLANが使用されます。
+
+カーネル引数`vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none`は、iSCSIボリュームがタグ付きVLANのネットワークインタフェースを介してアクセス可能な場合にのみ必要です。引数は、ブート中に追加のタグ付きネットワークインタフェースが作成され、当該ネットワークインタフェースに静的アドレスが割り当てられることを保証します。カーネル引数を使用ケースに合わせて構成する方法については、 https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline]を参照してください。
+
+`write_files`ディレクティブは、管理インターフェースがデフォルトゲートウェイとして使用されることを保証するために必要です。これは、RKE2がデフォルトゲートウェイが設定されたネットワークインタフェースをノードアドレスとして使用するため、重要です。

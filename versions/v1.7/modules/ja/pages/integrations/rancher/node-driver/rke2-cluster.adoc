@@ -1,0 +1,146 @@
+= RKE2 Kubernetes クラスターの作成
+:revdate: 2025-06-09
+:page-revdate: {revdate}
+
+{rke2-product-name} Kubernetes クラスターを {harvester-product-name}のクラスターの上に、ビルトインの Harvester Node Driver を使用してプロビジョニングできます。{rancher-product-name}
+
+image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+
+[NOTE]
+====
+
+* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN ネットワーク] は Harvester Node Driver に必要です。
+* RKE2 Kubernetes クラスターのプロビジョニングには、基盤となる仮想マシンの IP アドレスの設定が含まれます。これは、仮想マシンが接続されている VLAN ネットワーク上の DHCP サーバーを使用して行うことができます。そのようなサーバーがネットワーク上に存在しない場合は、xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] 機能を使用して IP アドレスを設定できます。
+* Harvester Node Driver はクラウドイメージのみをサポートしています。
+* {harvester-product-name} 内にデプロイされたゲストクラスターのポート要件については、ドキュメント xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[こちら] を参照してください。
+* Harvester Cloud Provider のサポートマトリックスについては、ウェブサイト https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[こちら] を参照してください。
+====
+
+== 後方互換性のお知らせ
+
+[NOTE]
+====
+Harvester Cloud Provider バージョン *v0.2.2* 以上を使用している場合、既知の後方互換性の問題にご注意ください。 {harvester-product-name} バージョンが *v1.2.0* 未満で、新しい RKE2 バージョン (i.e., >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`) を使用する予定の場合、ゲスト Kubernetes クラスターまたは Harvester Cloud Provider のアップグレードを進める前に、{harvester-product-name} クラスターを v1.2.0 以上にアップグレードすることが重要です。
+
+詳細なサポートマトリックスについては、公式の https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[ウェブサイト] の *Harvester CCM & CSI Driver with RKE2 Releases* セクションを参照してください。
+====
+
+== クラウド資格情報を作成する
+
+. *☰ > クラスター管理* をクリックします。
+. *クラウド資格情報* をクリックします。
+. ［*作成*］をクリックします。
+. *Harvester* をクリックします。
+. クラウド資格情報名を入力してください
+. 「インポートされた Harvester クラスター」を選択します。
+. ［*作成*］をクリックします。
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== RKE2 Kubernetes クラスターを作成する
+
+ユーザーは、RKE2 ノードドライバーを介して *クラスター管理* ページから RKE2 Kubernetes クラスターを作成できます。
+
+. *クラスター* メニューを選択します。
+. ［*Create*］ボタンをクリックします。
+. トグルスイッチを*RKE2/K3s*に切り替えます。
+. Harvester Node Driver を選択します。
+. *クラウド資格情報* を選択します。
+. *クラスター名*を入力してください（必須）。
+. *ネームスペース*を入力してください（必須）。
+. *イメージ*を入力してください（必須）。
+. *ネットワーク名*を入力してください（必須）。
+. *SSHユーザー*を入力してください（必須）。
+. （オプション）VMの必要なパッケージをインストールするために、menu:詳細を表示[ユーザーデータ]を設定します。
++
+[,yaml]
+----
+#cloud-config
+packages:
+  - iptables
+----
++
+[NOTE]
+====
+CalicoおよびCanalネットワークは、ノードに`iptables`または`xtables-nft`パッケージがインストールされている必要があります。詳細については、RKE2ドキュメントの https://documentation.suse.com/cloudnative/rke2/latest/en/known_issues.html#_canal_and_ip_exhaustion[CanalとIP枯渇]を参照してください。
+====
+
+. ［*作成*］をクリックします。
++
+image:rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+image:rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+image:rancher/create-rke2-harvester-cluster-3.png[create-rke2-harvester-cluster-3]
++
+[NOTE]
+====
+* RKE2 v1.21.5+rke2r2以上は、ビルトインのHarvester Cloud ProviderおよびGuest CSIドライバー統合を提供します。
+* ハーベスターのノードドライバーは、インポートされた{harvester-product-name}クラスターのみをサポートしています。
+====
+
+=== ノードアフィニティを追加します。
+
+ハーベスターのノードドライバーは、ノードアフィニティルールを通じて特定のノードにマシンのグループをスケジュールすることをサポートしており、高可用性とより良いリソース利用を提供できます。
+
+クラスター作成中に、マシンプールにノードアフィニティを追加できます：
+
+. `Show Advanced`ボタンをクリックし、`Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[ノードセレクターを追加する]をクリックします。
+. スケジューラがルールが満たされているときにのみマシンをスケジュールするようにするには、優先度を`Required`に設定してください。
+. ノードアフィニティルールを指定するには`Add Rule`をクリックしてください。例えば、xref:./node-driver.adoc#_topology_spread_constraints[トポロジースプレッド制約]のユースケースでは、`region`および`zone`ラベルを次のように追加できます：
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+=== ワークロードアフィニティを追加する
+
+ワークロードアフィニティルールを使用すると、これらのノード上で既に実行中のワークロード（VMおよびポッド）のラベルに基づいて、マシンがスケジュールできるノードを制約できます。
+
+ワークロードアフィニティルールは、クラスター作成中にマシンプールに追加できます：
+
+. *詳細を表示*を選択し、*ワークロードセレクターを追加*を選択します。
+image:rancher/affinity-rke2-add-workload-selector.png[アフィニティ追加ワークロードセレクター]
+. *タイプ*、*アフィニティ*または*アンチアフィニティ*を選択します。
+. *優先度*を選択します。*推奨*はオプションのルールを意味し、*必須*は必須のルールを意味します。
+. ターゲットワークロードのためのネームスペースを選択します。
+. ワークロードアフィニティルールを指定するには*ルールを追加*を選択します。
+. *トポロジーキー*を設定して、{harvester-product-name}ホストを異なるトポロジーに分けるラベルキーを指定します。
+
+詳細については、 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Podアフィニティおよびアンチアフィニティのドキュメント]を参照してください。
+
+== RKE2 Kubernetes クラスターを更新する
+
+RKE2マシンプールの下に強調表示されたフィールドは、{harvester-product-name} VM設定を表します。これらのフィールドに対する変更は、ノードの再プロビジョニングを引き起こします。
+
+image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+== エアギャップ環境でのHarvester RKE2ノードドライバーの使用
+
+RKE2プロビジョニングは、仮想マシンの IP を取得するために`qemu-guest-agent`パッケージに依存しています。
+
+CalicoおよびCanalは、ノードに`iptables`または`xtables-nft`パッケージがインストールされていることを要求します。
+
+ただし、エアギャップ環境ではパッケージをインストールすることが困難な場合があります。
+
+インストールの制約に対処するためのオプションは次のとおりです：
+
+* オプション1。必要なパッケージ（例：`iptables`、`qemu-guest-agent`）が事前に設定されたVMイメージを使用します。
+* オプション2。VMがHTTP(S)プロキシを介して必要なパッケージをインストールできるようにするには、*詳細を表示* > *ユーザーデータ*に移動します。
+
+{harvester-product-name}ノードテンプレートの例のユーザーデータ：
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

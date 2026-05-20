@@ -1,0 +1,79 @@
+= 仮想マシンへのアクセス
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+仮想マシンが起動している場合、{harvester-product-name} UIからVNCクライアントまたはシリアルコンソールを使用してアクセスできます。
+
+さらに、コンピュータのSSHクライアントから直接接続することもできます。
+
+== {harvester-product-name} UIでのアクセス
+
+仮想マシンは、UIから直接VNCまたはシリアルコンソールを使用してアクセスできます。
+
+仮想マシンでVGAディスプレイが有効になっていない場合（例：`Ubuntu-Minimal-Cloud`イメージ）、仮想マシンにはシリアルコンソールでのみアクセスできます。
+
+image::vm/access-to-vm.png[]
+
+== SSHアクセス
+
+{harvester-product-name}は、仮想マシンにSSH公開鍵を注入する2つの方法を提供します。一般的に、これらの方法は2つのカテゴリに分かれます。<<Static SSH Key Injection via cloud-init,静的鍵注入>>は、仮想マシンが最初に電源を入れられたときにcloud-initスクリプトに鍵を配置します；<<Dynamic SSH Key Injection via Qemu guest agent,動的注入>>は、実行時に鍵または基本認証を動的に更新できるようにします。
+
+=== cloud-initを介した静的SSH鍵注入
+
+`Basics`タブで仮想マシンの作成時にSSH鍵を提供できます。さらに、公開SSH鍵をcloud-initスクリプトに配置して、注入を実行できるようにすることもできます。
+
+image::vm/vm-ssh-keys.png[]
+
+==== SSH鍵のcloud-init構成の例：
+
+[,yaml]
+----
+#cloud-config
+ssh_authorized_keys:
+  - >-
+    ssh-rsa #replace with your public key
+----
+
+=== Qemuゲストエージェントを介した動的SSH鍵注入
+
+{harvester-product-name}は、 https://wiki.qemu.org/Features/GuestAgent[qemuゲストエージェント]を使用して、実行時に公開SSH鍵を動的に注入することをサポートしています。これは、`qemuGuestAgent`伝播方法を通じて実現されます。
+
+[NOTE]
+====
+この方法では、ゲスト仮想マシン内にqemuゲストエージェントがインストールされている必要があります。
+
+`qemuGuestAgent`伝播を使用する場合、`/home/$USER/.ssh/authorized_keys`ファイルはゲストエージェントによって所有されます。qemuゲストエージェントの制御外で行われたそのファイルへの変更は削除されます。
+====
+
+{harvester-product-name} UIを介してアクセス資格情報を注入するには、次の手順を実行します。
+
+. 仮想マシンを選択します。
+
+. *⋮ -> 設定を編集*を選択します。
+
+. *アクセス資格情報*タブで、基本認証資格情報またはSSHキーのいずれかを追加します。
++
+ゲストオペレーティングシステムに既に存在するユーザーのみを追加できます。たとえば、openSUSEを使用している場合、ユーザー`opensuse`を追加し、SSHキーを選択できます。
+
+. ［*保存*］をクリックします。
+
+. QEMUゲストエージェントがすでにインストールされていることを確認します。
+
+. 仮想マシンを再起動します。
+
+[NOTE]
+====
+UIから資格情報を削除した後、パスワードを編集したりSSH鍵を削除するには、仮想マシンに入る必要があります。
+====
+
+
+image::vm/vm-add-access-credentails.png[]
+
+=== SSHクライアントでアクセスします。
+
+仮想マシンが起動し、稼働している状態になったら、PuTTYなどの端末エミュレーションクライアントに仮想マシンのIPアドレスを入力できます。コンピュータのSSHクライアントから仮想マシンに直接アクセスするには、次のコマンドを実行することもできます。
+
+[,sh]
+----
+ ssh -i ~/.ssh/your-ssh-key user@<ip-address-or-hostname>
+----

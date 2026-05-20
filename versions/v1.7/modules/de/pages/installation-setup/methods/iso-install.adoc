@@ -1,0 +1,197 @@
+= ISO Installation
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+{harvester-product-name} wird als bootfähiges Appliance-Image bereitgestellt, Sie können es direkt auf einem Bare-Metal-Server mit dem ISO-Image installieren. Um das ISO-Image zu erhalten, laden Sie *💿 harvester-v1.x.x-amd64.iso* von der https://github.com/harvester/harvester/releases[Releases-Seite] herunter.
+
+Während der Installation können Sie entweder wählen, *ein neues Cluster zu erstellen* oder *dem bestehenden Cluster beizutreten*.
+
+Das folgende https://youtu.be/X0VIGZ_lExQ[Video] zeigt einen kurzen Überblick über eine ISO-Installation.
+
++++++++++<iframe width="800" height="400" src="https://www.youtube.com/embed/X0VIGZ_lExQ" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="">[]++++++</iframe>+++++++++
+
+== Installationsschritte
+
+. Binden Sie die ISO-Datei ein und starten Sie den Server, indem Sie die `Harvester Installer` Option auswählen.
++
+image::install/iso-install.png[iso-install.png]
++
+Der Installer überprüft automatisch die Hardware und zeigt Warnmeldungen an, wenn die Mindestanforderungen nicht erfüllt sind. Der *Hardware-Checks* Bildschirm wird nicht angezeigt, wenn alle Prüfungen bestanden sind.
++
+image::install/hardware-checks.png[hardware-checks.png]
+
+. Verwenden Sie die Pfeiltasten, um einen Installationsmodus auszuwählen. Standardmäßig wird der erste Knoten der Verwaltungsknoten des Clusters sein.
++
+image::install/choose-installation-mode.png[choose-installation-mode.png]
++
+** `Create a new Harvester cluster`: erstellt ein völlig neues Cluster.
+** `Join an existing Harvester cluster`: tritt einem bestehenden Cluster bei. Sie benötigen die VIP und den Cluster-Token des Clusters, dem Sie beitreten möchten.
+** `Install Harvester binaries only`: Wenn Sie diese Option wählen, sind nach dem ersten Bootvorgang zusätzliche Einstellungen erforderlich.
++
+[IMPORTANT]
+====
+Wenn es 3 Knoten gibt, werden die anderen 2 zuerst hinzugefügten Knoten automatisch zu Verwaltungsknoten befördert, um ein HA-Cluster zu bilden. Wenn Sie Verwaltungsknoten aus verschiedenen Zonen befördern möchten, können Sie das Knoten-Label `topology.kubernetes.io/zone` in der xref:../../installation-setup/config/configuration-file.adoc#_os_labels[os.labels] Konfiguration hinzufügen, indem Sie eine URL der xref:../../installation-setup/config/configuration-file.adoc[Konfigurationsdatei] im Schritt "Host anpassen" bereitstellen. In diesem Fall sind mindestens drei verschiedene Zonen erforderlich.
+====
+
+. Wählen Sie eine Rolle für den Knoten aus. Sie müssen diesen Schritt ausführen, wenn Sie den Installationsmodus `Join an existing Harvester cluster` ausgewählt haben.
++
+image::install/select-role.png[choose-node-role.png]
++
+** `Default Role`: Ermöglicht es einem Knoten, als Verwaltungs- oder Arbeitsknoten zu fungieren. Diese Rolle hat keine spezifischen Berechtigungen oder Einschränkungen.
+** `Management Role`: Ermöglicht es einem Knoten, priorisiert zu werden, wenn {harvester-product-name} Knoten zu Verwaltungsknoten befördert werden.
+** `Witness Role`: Beschränkt einen Knoten darauf, einen Zeugenknoten (funktioniert nur als etcd-Knoten) in einem bestimmten Cluster zu sein.
+** `Worker Role`: Beschränkt einen Knoten darauf, einen Arbeitsknoten (niemals zu Verwaltungsknoten befördert) in einem bestimmten Cluster zu sein.
+
+. Konfigurieren Sie ein Passwort, um auf den Knoten zuzugreifen. Der Standard-SSH-Benutzer ist `rancher`.
++
+image::install/config-password.png[config-password.png]
+
+. Wählen Sie das Installationslaufwerk, auf dem Sie das Cluster installieren möchten, und das Datenlaufwerk, auf dem Sie VM-Daten speichern möchten. Standardmäßig verwendet {harvester-product-name} das https://en.wikipedia.org/wiki/GUID_Partition_Table[GUID-Partitionstabelle (GPT)]-Partitionsschema sowohl für UEFI als auch für BIOS. Wenn Sie den BIOS-Boot verwenden, haben Sie die Möglichkeit, https://en.wikipedia.org/wiki/Master_boot_record[Master Boot Record (MBR)] auszuwählen.
++
+[IMPORTANT]
+====
+Die Unterstützung für das Booten im Legacy-BIOS-Modus ist in v1.7.0 ausgelaufen und wird in einer späteren Version entfernt. Bestehende {harvester-product-name} Cluster, die diesen Bootmodus verwenden, werden weiterhin funktionieren, aber ein Upgrade auf spätere Versionen kann eine Neuinstallation im UEFI-Modus erfordern. Um Probleme und Unterbrechungen zu vermeiden, verwenden Sie UEFI bei neuen Installationen.
+====
++
+image::install/choose-installation-target-data-disk.png[choose-installation-target-data-disk.png]
++
+** `Installation disk`: Die Festplatte, auf der der Cluster installiert werden soll.
+** `Data disk`: Die Festplatte, auf der VM-Daten gespeichert werden sollen. Es wird empfohlen, eine separate Festplatte zur Speicherung von VM-Daten zu wählen. Dies gilt nicht für Zeugenknoten.
+** `Persistent size`: Wenn Sie nur eine Festplatte haben oder dieselbe Festplatte sowohl für das Betriebssystem als auch für VM-Daten verwenden, müssen Sie die Größe der persistenten Partition so konfigurieren, dass Systempakete und Container-Images gespeichert werden können. Die Standard- und Mindestgröße der persistenten Partition beträgt 150 GiB. Sie können eine Größe wie 200Gi oder 153600Mi angeben.
+
+. Konfigurieren Sie die `HostName` des Knotens.
++
+image::install/config-hostname.png[config-hostname.png]
+
+. Konfigurieren Sie die Netzwerk-Schnittstelle(n) für das Verwaltungsnetzwerk. Standardmäßig erstellt {harvester-product-name} eine xref:../../installation-setup/requirements.adoc#_hardware_requirements[bonded NIC] mit dem Namen `mgmt-bo` für das xref:../../networking/cluster-network.adoc#_built_in_cluster_network[integrierte Verwaltungscluster-Netzwerk], und die IP-Adresse kann über DHCP konfiguriert oder statisch zugewiesen werden.
++
+image::install/config-network.png[config-network.png]
++
+[NOTE]
+====
+Physische Switches, die mit gebündelten Schnittstellen verbunden sind, müssen strikt als Trunk-Ports konfiguriert werden. Diese Ports müssen getaggten Datenverkehr akzeptieren und Datenverkehr mit der VLAN-ID senden, die vom VM-Netzwerk verwendet wird.
+
+Es ist nicht möglich, die Knoten-IP während des gesamten Lebenszyklus eines Clusters zu ändern. Wenn Sie DHCP verwenden, müssen Sie sicherstellen, dass der DHCP-Server immer dieselbe IP für denselben Knoten anbietet. Wenn die Knoten-IP geändert wird, kann der betreffende Knoten dem Cluster nicht beitreten und könnte sogar den Cluster beschädigen.
+
+Darüber hinaus sind Sie verpflichtet, die _Routers_-Option (`option routers`) bei der Konfiguration des DHCP-Servers hinzuzufügen. Diese Option wird verwendet, um die Standardroute auf dem Host hinzuzufügen. Ohne die Standardroute kann der Knoten nicht gestartet werden.
+
+Beispiel:
+
+----
+Linux~ # ip route
+default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+Der Standard-MTU-Wert der gebündelten NIC beträgt `1500`. Um einen anderen MTU-Wert zu verwenden, konfigurieren Sie die xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[[`install.management_interface`]-Einstellung in einer Harvester-Konfigurationsdatei gemäß dem folgenden Schritt.
+
+Für weitere Informationen siehe xref:./pxe-boot-install.adoc#_dhcp_server_configuration[DHCP-Server-Konfiguration].
+====
+
+. (Optional) Konfigurieren Sie die CIDRs für die Cluster-Pods und -Dienste.
++
+Um die Standardwerte zu verwenden, lassen Sie die Felder leer.
++
+image::install/config-cluster-cidrs.png[config-cluster-cidrs.png]
++
+[IMPORTANT]
+====
+Die CIDR-Werte dürfen sich nicht überschneiden und müssen im privaten IP-Adressbereich von 10.0.0.0/8, 172.16.0.0/12 oder 192.168.0.0/16 liegen.
+
+Die IP des DNS-Dienstes muss im Bereich des Feldes *Service CIDR* liegen.
+====
++
+Beispiel für eine gültige CIDR-Konfiguration:
++
+* *Pod CIDR*: 172.16.0.0/16
+* *Service CIDR*: 172.22.0.0/16
+* *Cluster DNS IP*: 172.22.0.10
+
+. (Optional) Konfigurieren Sie die `DNS Servers`. Verwenden Sie Kommas als Trennzeichen, um weitere DNS-Server hinzuzufügen. Lassen Sie es leer, um den Standard-DNS-Server zu verwenden.
++
+image::install/config-dns-server.png[config-dns-server.png]
+
+. Konfigurieren Sie die virtuelle IP (VIP), indem Sie eine `VIP Mode` auswählen. Diese VIP wird verwendet, um auf den Cluster zuzugreifen oder damit andere Knoten dem Cluster beitreten können.
++
+[NOTE]
+====
+Für die DHCP-Konfiguration mit statischen MAC-zu-IP-Adresszuordnungen geben Sie die MAC-Adresse im bereitgestellten Feld ein, um die eindeutige persistente virtuelle IP (VIP) abzurufen. Andernfalls lassen Sie es leer.
+====
++
+image::install/config-virtual-ip.png[config-virtual-ip.png]
+
+. Konfigurieren Sie die `Cluster token`. Dieses Token wird verwendet, um andere Knoten zum Cluster hinzuzufügen.
++
+image::install/config-cluster-token.png[config-cluster-token.png]
+
+. Konfigurieren Sie `NTP servers`, um sicherzustellen, dass die Zeiten aller Knoten synchronisiert sind. Dies ist standardmäßig auf `0.suse.pool.ntp.org` eingestellt. Verwenden Sie Kommas als Trennzeichen, um weitere NTP-Server hinzuzufügen.
++
+image::install/config-ntp-server.png[config-ntp-server.png]
++
+[NOTE]
+====
+Die Verwendung mehrerer NTP-Server bietet Redundanz, bessere Genauigkeit, Fehlertoleranz und verbesserte Leistung. Es stellt sicher, dass die Zeit-Synchronisation auch dann fortgesetzt wird, wenn ein Server ausfällt oder falsche Daten liefert, und hilft, die Last auf verschiedene Server zu verteilen.
+====
+
+. (Optional) Wenn Sie einen HTTP-Proxy benötigen, um auf die Außenwelt zuzugreifen, geben Sie die `Proxy address` ein. Andernfalls lassen Sie dieses Feld leer.
++
+image::install/config-proxy.png[config-proxy.png]
+
+. (Optional) Sie können SSH-Schlüssel importieren, indem Sie `HTTP URL` angeben. Zum Beispiel können Ihre GitHub-öffentlichen Schlüssel `https://github.com/<username>.keys` verwendet werden.
++
+image::install/import-ssh-keys.png[import-ssh-keys.png]
+
+. (Optional) Wenn Sie den Host mit einer xref:../../installation-setup/config/configuration-file.adoc[Konfigurationsdatei] anpassen müssen, geben Sie die `HTTP URL` hier ein.
++
+image::install/remote-config.png[remote-config.png]
+
+. Überprüfen und bestätigen Sie Ihre Installationsoptionen. Nach der Bestätigung der Installationsoptionen wird {harvester-product-name} auf Ihrem Host installiert. Die Installation kann einige Minuten in Anspruch nehmen, um abgeschlossen zu sein.
++
+image::install/confirm-install.png[confirm-install.png]
+
+. Sobald die Installation abgeschlossen ist, wird Ihr Knoten neu gestartet. Nach dem Neustart zeigt die Konsole die Verwaltungs-URL und den Status an. Die Standard-URL der Weboberfläche ist `https://your-virtual-ip`. Sie können `F12` verwenden, um von der Konsole zur Shell zu wechseln und `exit` eingeben, um zur Konsole zurückzukehren.
++
+
+[NOTE]
+====
+Die Auswahl von `Install Harvester binaries only` auf der ersten Seite erfordert zusätzliche Einstellungen nach dem ersten Bootvorgang.
+====
+
++
+image::install/iso-installed.png[iso-installed.png]
+
+. Sie werden aufgefordert, das Passwort für den Standardbenutzer `admin` beim ersten Anmelden festzulegen.
++
+image::install/first-time-login.png[first-login.png]
+
+////
+
+[NOTE]
+====
+In some cases, if you are using an older VGA connector, you may encounter an `panic: invalid dimensions` error with ISO installation. See issue [#2937](https://github.com/harvester/harvester/issues/2937#issuecomment-1278545927) for a workaround.
+====
+
+////
+
+== Bekanntes Problem
+
+=== Der Installer kann abstürzen, wenn Sie eine ältere Grafikkarte/einen älteren Monitor verwenden.
+
+In einigen Fällen, wenn Sie eine ältere Grafikkarte/einen älteren Monitor verwenden, kann es während der ISO-Installation zu einem `panic: invalid dimensions` Fehler kommen.
+
+image::install/invalid-dimensions.png[invalid-dimensions.png]
+
+Wir arbeiten an diesem bekannten Problem und planen eine Lösung für eine zukünftige Version. Sie können versuchen, einen anderen GRUB-Eintrag zu verwenden, um die Auflösung von `1024x768` beim Booten zu erzwingen.
+
+image::install/force-resolution.png[force-resolution.png]
+
+Wenn Sie eine Version vor v1.1.1 verwenden, versuchen Sie bitte die folgende Umgehungslösung:
+
+. Starten Sie mit der ISO und drücken Sie `E`, um den ersten Menüeintrag zu bearbeiten:
++
+image::install/grub-menu.png[grub-menu.png]
+
+. Fügen Sie `vga=792` zu der Zeile hinzu, die mit `$linux` beginnt:
++
+image::install/edit-menu-entry.png[edit-menu-entry.png]
+
+. Drücken Sie `Ctrl+X` oder `F10`, um zu booten.

@@ -1,0 +1,513 @@
+= 创建虚拟机
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+== 如何创建虚拟机
+
+[tabs]
+======
+UI::
++
+--
+您可以从 *虚拟机* 页面创建一个或多个虚拟机。
+
+[NOTE]
+====
+请参考 xref:./create-windows-vm.adoc[此页面] 以创建 Windows 虚拟机。
+====
+
+. 选择创建一个或多个虚拟机实例的选项。
+
+. 选择您的虚拟机的名称空间，只有 `harvester-public` 名称空间对所有用户可见。
+
+. 虚拟机名称是必填字段。
+
+. （可选）虚拟机模板是可选的，您可以选择 `iso-image`、`raw-image` 或 `windows-iso-image` 模板来加快虚拟机实例的创建。
+
+. 在 *基本信息* 标签上，配置以下设置：
++
+* *处理器* 和 *内存*：您最多可以分配 *254* 个 vCPU。作为最佳实践，请确保分配给每个虚拟机的 vCPU 数量不超过主机上可用的物理处理器线程数。如果虚拟机在大多数时间内不预计会完全消耗分配的资源，您可以使用 xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] 设置来优化物理资源分配。
+* *SSH 密钥*：选择 SSH 密钥或上传新密钥。
+
+. 在 *卷* 标签上选择自定义虚拟机镜像。默认磁盘将是根磁盘。您可以向虚拟机添加更多磁盘。
+
+. 要配置网络，请转到 *网络* 标签。
+
+. 默认情况下添加 *管理网络*，如果配置了 VLAN 网络，您可以去除它。
+
+. 您还可以使用 VLAN 网络向虚拟机添加其他网络。您可以先在 *高级 -> 网络* 中配置 VLAN 网络。
++
+[NOTE]
+====
+如果虚拟机有一个接口连接到 `mgmt` 网络，另一个接口连接到 VLAN 网络，则节点可能无法访问虚拟机的 `mgmt` IP 地址。当其他网络的网关覆盖虚拟机的默认路由时，会发生此连接问题，导致路由优先选择 VLAN 网络处理所有进出流量，即使是发往 `mgmt` 网络的流量。
+====
+
+. （可选）在 *节点调度* 选项卡上设置节点亲和性规则。
+
+. （可选）在 *虚拟机调度* 选项卡上设置工作负载亲和性规则。
+
+. 运行策略、操作系统类型和 cloud-init 数据等高级选项是可选的。在适用时，您可以在 *高级选项* 部分进行配置。
+
+image::vm/create-vm.png[]
+--
+
+API::
++
+--
+要使用 Kubernetes API 创建虚拟机，请创建一个 `VirtualMachine` 对象。
++
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachine
+metadata:
+  name: new-vm
+  namespace: default
+spec:
+  runStrategy: RerunOnFailure
+  template:
+    spec:
+      domain:
+        cpu:
+          cores: 2
+          sockets: 1
+          threads: 1
+        memory: "3996Mi"
+        devices:
+          disks: []
+          interfaces:
+            - name: default
+              model: virtio
+              masquerade: {}
+        machine:
+          type: q35
+        resources:
+          requests:
+            cpu: "125m"
+            memory: "2730Mi"
+          limits:
+            cpu: 2
+            memory: "4Gi"
+        networks:
+          - name: default
+            pod: {}
+----
+
+有关更多信息，请参见 API 参考。
+--
+
+Terraform::
+
+要使用 [Harvester Terraform Provider](https://registry.terraform.io/providers/harvester/harvester/latest) 创建虚拟机，请定义一个 `harvester_virtualmachine` 资源块：
++
+[,hcl]
+----
+resource "harvester_virtualmachine" "opensuse154" {
+  name                 = "opensuse154"
+  namespace            = "default"
+  restart_after_update = true
+
+  cpu    = 2
+  memory = "2Gi"
+
+  run_strategy = "RerunOnFailure"
+  hostname     = "opensuse154"
+  machine_type = "q35"
+
+  ssh_keys = [
+    harvester_ssh_key.mysshkey.id
+  ]
+
+  network_interface {
+    name           = "nic-1"
+    network_name   = harvester_network.cluster-vlan1.id
+    wait_for_lease = true
+  }
+
+  disk {
+    name       = "rootdisk"
+    type       = "disk"
+    size       = "10Gi"
+    bus        = "virtio"
+    boot_order = 1
+
+    image       = harvester_image.opensuse154.id
+    auto_delete = true
+  }
+
+  cloudinit {
+    user_data_secret_name    = harvester_cloudinit_secret.cloud-config-opensuse154.name
+    network_data_secret_name = harvester_cloudinit_secret.cloud-config-opensuse154.name
+  }
+}
+----
+======
+
+== 卷
+
+您可以通过 `Volumes` 选项卡添加一个或多个额外的卷，默认情况下，第一个磁盘将是根磁盘，您可以通过拖放卷或使用箭头按钮更改启动顺序。
+
+可以通过以下类型使磁盘可访问：
+
+|===
+| type | 描述
+
+| disk
+| 此类型将卷作为普通磁盘暴露给虚拟机。
+
+| 光盘
+| 此类型将卷作为光盘驱动器暴露给虚拟机。默认情况下为只读。
+|===
+
+在添加新空卷时，可以指定卷的 xref:../storage/storageclass.adoc[存储类]；对于其他卷（例如虚拟机镜像），存储类在镜像创建时定义。
+
+如果您使用外部存储，请确保选择正确的 *存储类* 和 *卷模式*。例如，具有 *nfs-csi* 存储类的卷必须使用 *文件系统* 卷模式。
+
+[IMPORTANT]
+.重要
+====
+从虚拟机镜像创建卷时，请确保卷大小大于或等于镜像大小。如果配置的卷大小小于底层镜像的大小，卷可能会损坏。这对于 qcow2 镜像尤其重要，因为虚拟大小通常大于物理大小。
+
+默认情况下，{harvester-product-name} 将卷大小设置为 10 GiB 或虚拟机镜像的虚拟大小，以较大者为准。
+====
+
+image::vm/create-vm-volumes.png[create-vm]
+
+=== 添加容器磁盘
+
+容器磁盘是一个临时存储卷，可以分配给任意数量的虚拟机，并提供在容器镜像注册表中存储和分发虚拟机磁盘的能力。容器磁盘是：
+
+* 一个理想的工具，用于复制大量虚拟机工作负载或注入不需要持久数据的机器驱动程序。临时卷设计用于需要更多存储的虚拟机，但不关心这些数据是否在虚拟机重启时持久存储，或者只期望某些只读输入数据存在于文件中，如配置数据或密钥。
+* 对于任何需要在虚拟机重启时保持持久根磁盘的工作负载，这不是一个好的解决方案。
+
+通过提供 Docker 镜像，在创建虚拟机时添加容器磁盘。创建虚拟机时，请按照以下步骤操作：
+
+. 转到 *卷* 选项卡。
+. 选择 *添加容器*。
++
+image::vm/add-container-volume-1.png[添加容器卷]
++
+. 为容器磁盘输入一个 *名称*。
+. 选择一个磁盘 *类型*。
+. 添加一个 *Docker 镜像*。
+ ** 磁盘映像，格式为 qcow2 或 raw，必须放置在 `/disk` 目录中。
+ ** 支持 raw 和 qcow2 格式，但建议使用 qcow2 以减少容器映像的大小。如果使用不支持的映像格式，虚拟机将陷入`Running`状态。
+ ** 容器磁盘还允许您将磁盘映像存储在`/disk`目录中。创建此类容器映像的示例可以在 https://kubevirt.io/user-guide/virtual_machines/disks_and_volumes/#containerdisk-workflow-example[这里]找到。
+. 选择一个*总线*类型。
++
+image:vm/add-container-volume-2.png[添加容器卷]
+
+== 网络
+
+您可以通过`Networks`选项卡选择将`management network`或`VLAN network`添加到您的虚拟机实例，如果您已配置VLAN网络，则`management network`是可选的。
+
+网络接口通过`Type`字段进行配置。它们描述了在客户操作系统中看到的虚拟接口的属性：
+
+|===
+| type | 描述
+
+| bridge
+| 使用Linux桥接连接
+
+| masquerade
+| 使用iptables规则连接以进行流量NAT
+|===
+
+=== 管理网络
+
+管理网络表示由集群网络解决方案配置的默认虚拟机eth0接口，该接口在每个虚拟机中存在。
+
+默认情况下，虚拟机可以通过集群节点内的管理网络访问。
+
+=== 辅助网络
+
+还可以使用{harvester-product-name}的内置xref:../networking/vm-network.adoc[VLAN网络]连接虚拟机。
+
+在桥接VLAN中，虚拟机通过 Linux `bridge` 连接到主机网络。网络IPv4地址通过DHCPv4分配给虚拟机。虚拟机应配置为使用DHCP以获取IPv4地址。
+
+== 节点调度
+
+`Node Scheduling`允许您根据节点标签限制虚拟机可以调度到的节点。
+
+image::vm/vm-node-scheduling.png[]
+
+您可以选择在以下节点上运行虚拟机：
+
+* 任何可用节点
+
+* 特定节点
+
+在以下示例中，目标节点的主机名为`harv21`。
+
+----
+nodeSelector:
+  kubernetes.io/hostname: harv21
+----
+
+[NOTE]
+====
+如果您将调度限制在特定节点上，则虚拟机可能是 xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[不可迁移] 的。
+====
+
+* 符合调度规则的节点
+
+通过在一组节点上调度虚拟机，您可以获得更大的灵活性。在以下示例中，虚拟机可以调度到具有特定标签的节点上。键为 `harvesterhci.io/group`，值可以是 `engineering` 或 `qa`。
+
+----
+spec:
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+          - matchExpressions:
+              - key: harvesterhci.io/group
+                operator: In
+                values:
+                  - engineering
+                  - qa
+----
+
+有关更多信息，请参见 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#node-affinity[Kubernetes 节点亲和性文档]。
+
+== 虚拟机调度
+
+虚拟机调度允许您根据这些节点上已运行的工作负载（虚拟机和 Pod）的标签来限制虚拟机的调度，而不是节点标签。
+
+例如，您可以将 `Required` 与 `Affinity` 结合使用，以指示调度程序将来自两个服务的虚拟机放置在同一区域，从而提高通信效率。同样，使用 `Preferred` 和 `Anti-Affinity` 可以帮助将特定服务的虚拟机分布在多个区域，以提高可用性。
+
+有关更多详细信息，请参见 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod 亲和性和反亲和性文档]。
+
+[IMPORTANT]
+====
+在升级的预排空阶段，{harvester-product-name} 可能无法实时迁移虚拟机，因为存在无法满足的严格反亲和性规则。发生这种情况时，{harvester-product-name} 会自动关闭这些虚拟机，以解除升级阻塞并防止升级流程不安全地重新启动。
+====
+
+=== 自动应用的亲和性规则
+
+{harvester-product-name} 可能会根据虚拟机的配置自动应用某些亲和性规则。这些规则决定哪些节点可以作为调度或迁移目标。如果没有其他节点满足条件，则虚拟机无法被调度或迁移。
+
+有关更多信息，请参见 xref:troubleshooting/virtual-machines.adoc#_unschedulable_virtual_machines[不可调度的虚拟机]。
+
+[IMPORTANT]
+====
+{harvester-product-name} 网络钩子会撤销手动更改以自动应用的规则。
+====
+
+==== 相关的网络概念
+
+为虚拟机设置网络的一般过程包括以下步骤：
+
+* 创建一个 xref:networking/cluster-network.adoc#_cluster_network[集群网络] 和相应的 xref:networking/cluster-network.adoc#_network_configuration[网络配置]。只有被网络配置覆盖的节点才能设置网络设备。
+
+* 创建一个具有特定 VLAN ID 的 xref:networking/vm-network.adoc#_create_a_vm_network[虚拟机网络]。
+
+在以下示例中，采取步骤设置集群网络并定义连接到该集群网络的虚拟机。
+
+* 创建一个名为 `cn2` 的集群网络。
+
+* 创建一个名为 `cn2-vc1` 的网络配置。`cn2-vc1` 覆盖 `node1` 和 `node2`。
+
+* 创建一个名为 `cn2-nad-100` 的虚拟机网络，VLAN ID 为 `vlan id 100`。
+
+* 名为 `VM vm1` 的虚拟机连接到名为 `cn2-nad-100` 的辅助网络。
+
+{harvester-product-name} 确保以下内容：
+
+* {harvester-product-name} 控制器自动标记 Kubernetes `node` 对象。
++
+[,shell]
+----
+kubectl get node node1 -oyaml
+...
+metadata:
+  labels:
+    network.harvesterhci.io/cn2: "true"
+    network.harvesterhci.io/mgmt: "true"
+    network.harvesterhci.io/vlanconfig: cn2-vc1
+...
+----
+
+* {harvester-product-name} 网络钩子自动更新 `virtualmachine` 对象。
++
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: network.harvesterhci.io/cn2
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+* 虚拟机仅在 `node1` 或 `node2` 上被调度。
+
+[IMPORTANT]
+====
+当虚拟机连接到由多个集群网络支持的多个虚拟机网络时，{harvester-product-name} 应用多个亲和性规则。应用的规则共同决定哪些节点符合调度或迁移目标。
+
+当虚拟机连接到由 xref:networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`]（内置集群网络）支持的虚拟机网络时，不应用任何亲和性规则。`mgmt` 默认覆盖所有节点，因此所有节点都符合调度或迁移目标。
+====
+
+NOTE: 当集群网络中只有一个节点时，虚拟机是xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[非可迁移]的。
+
+==== 相关的 CPU 绑定概念
+
+当您在节点上启用xref:virtual-machines/cpu-pinning.adoc#_enable_and_disable_cpu_manager[CPU 管理器]时，{harvester-product-name}会将以下标签应用于相关的`node`对象。
+
+[,yaml]
+----
+...
+metadata:
+  labels:
+    cpumanager: "true"
+...
+----
+
+在虚拟机创建期间启用xref:virtual-machines/cpu-pinning.adoc#_enable_cpu_pinning_on_a_new_vm[CPU 绑定]时，{harvester-product-name}会应用一个亲和性规则，确保虚拟机仅在启用 CPU 管理器的节点上调度。
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cpumanager
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+NOTE: 如果仅在一个节点上启用了 CPU 管理器，则虚拟机是xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[非可迁移]的。
+
+== 注解
+
+{harvester-product-name}允许您使用注解将自定义元数据附加到虚拟机。这些键值对使扩展功能或行为成为可能，而无需更改核心虚拟机配置。
+
+您可以使用`harvesterhci.io/custom-ip`注解在{harvester-product-name} UI上设置IP地址*以供显示目的*。当虚拟机因缺少`qemu-guest-agent`或其他原因无法报告其IP地址时，这非常有用。
+
+== 高级选项
+
+=== 运行策略
+
+{harvester-product-name}之前使用`Running`（布尔数据类型）字段来确定虚拟机实例是否应该运行。然而，简单的布尔数据类型并不总是足以完全描述用户期望的行为。例如，在某些情况下，用户希望能够从虚拟机内部关闭实例。如果使用`running`字段，虚拟机将立即重新启动。
+
+为了满足更多用户的场景需求，引入了`RunStrategy`字段。这与`Running`是互斥的，因为它们的条件有些重叠。目前定义了四个`RunStrategies`：
+
+* 总是：虚拟机实例将始终存在。如果虚拟机实例崩溃，将会生成一个新的实例。这与`Running: true`的行为相同。
+* 失败时重新运行（默认）：如果之前的实例处于错误状态，则会重新生成一个虚拟机实例。如果客户机成功停止（例如，从客户机内部关闭），则不会重新创建。
+* 手动：虚拟机实例的存在与否仅由`start/stop/restart`虚拟机操作控制。
+* 停止：将不会有虚拟机实例。如果客户机已经在运行，它将被停止。这与`Running: false`的行为相同。
+
+=== 云配置
+
+{harvester-product-name}支持将启动脚本分配给虚拟机实例，该脚本在虚拟机初始化时自动执行。
+
+这些脚本通常用于自动将用户和SSH密钥注入虚拟机，以便提供对机器的远程访问。例如，可以使用启动脚本将凭据注入虚拟机，以允许在远程主机上运行的Ansible作业访问和配置虚拟机。
+
+==== Cloud-init
+
+https://cloudinit.readthedocs.io/en/latest/[Cloud-init]是一个广泛采用的项目，是跨平台云实例初始化的行业标准多发行版方法。它在所有主要云镜像提供商（如SUSE、Redhat、Ubuntu等）中得到支持，cloud-init已确立为向虚拟机提供启动脚本的事实标准方法。
+
+{harvester-product-name}支持通过使用临时磁盘将自定义cloud-init启动脚本注入虚拟机实例。安装了cloud-init软件包的虚拟机将在启动时检测临时磁盘并执行自定义用户数据和网络数据脚本。
+
+默认用户的密码配置示例：
+
+[,YAML]
+----
+#cloud-config
+password: password
+chpasswd: { expire: False }
+ssh_pwauth: True
+----
+
+使用DHCP的网络数据配置示例：
+
+[,YAML]
+----
+network:
+  version: 1
+  config:
+    - type: physical
+      name: eth0
+      subnets:
+        - type: dhcp
+    - type: physical
+      name: eth1
+      subnets:
+        - type: dhcp
+----
+
+您还可以使用`Advanced > Cloud Config Templates`功能为虚拟机创建预定义的cloud-init配置模板。
+
+[NOTE]
+====
+运行 Ubuntu 16.04 及更高版本的虚拟机的网络配置默认可能由 `netplan` 管理。在创建备份之前，您必须停止虚拟机，编辑配置（*编辑配置 -> 高级选项*），然后重新启动虚拟机。请使用以下 `network` 设置作为 DHCP 配置的参考。
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+恢复的虚拟机保留原始虚拟机的机器 ID。如果未指定 `dhcp-identifier: mac`，恢复的虚拟机将从 DHCP 服务器接收相同的 IP 地址，因为 `netplan` 默认使用机器 ID 作为 DHCP 客户端标识符。这就是为什么您必须在创建运行 Ubuntu 的虚拟机备份之前配置 `network` 设置。如果不这样做，可能会导致意外行为和潜在的网络冲突。
+====
+
+==== 安装 QEMU 客户代理程序
+
+QEMU 客户代理程序是一个在虚拟机实例上运行的守护程序，它将有关虚拟机、用户、文件系统和辅助网络的信息传递给主机。
+
+创建新虚拟机时，`Install guest agent` 复选框默认启用。
+
+image::vm/qga.png[]
+
+[NOTE]
+====
+如果您的操作系统是 openSUSE 且版本低于 15.3，请将 `qemu-guest-agent.service` 替换为 `qemu-ga.service`。
+====
+
+=== TPM 设备
+
+https://en.wikipedia.org/wiki/Trusted_Platform_Module[可信平台模块 (TPM)] 是使用加密密钥保护硬件的加密处理器。
+
+根据 https://learn.microsoft.com/en-us/windows/whats-new/windows-11-requirements[Windows 11 要求]，TPM 2.0 设备是 Windows 11 的硬性要求。
+
+在 {harvester-product-name} 界面中，您可以通过在 *高级选项* 标签中勾选 `Enable TPM` 框，将模拟的 TPM 2.0 设备添加到虚拟机。
+
+[NOTE]
+====
+目前，仅支持非持久性 vTPM，并且它们的状态在每次虚拟机关闭后会被清除。因此，不应启用 https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker]。
+====
+
+== 一次性启动以进行 ISO 安装
+
+在创建从 CD-ROM 启动的虚拟机时，您可以使用 *启动顺序* 选项，以便操作系统在镜像安装期间可以从 CD-ROM 启动，并在安装完成后从磁盘启动，而无需卸载 CD-ROM。
+
+以下示例描述如何使用 https://get.opensuse.org/leap/15.4/[openSUSE Leap 15.4] 安装 ISO 映像：
+
+. 在左侧边栏中点击 *映像* 并下载 openSUSE Leap 15.4 ISO 映像。
+. 在左侧边栏中点击 *虚拟机*，然后创建一个虚拟机。您需要填写这些虚拟机的基本配置。
+. 点击 *卷* 标签，在 *镜像* 字段中，选择在步骤 1 中下载的镜像，并确保 *类型* 为 `cd-rom`。
+. 点击 *添加卷* 并选择一个现有的 *存储类*。
+. 将 *卷* 拖动到 *镜像卷* 的顶部，如下所示。这样，*启动顺序* 将变为 *卷* 的 `1`。
+
+image::vm/one-time-boot-create-vm-bootorder.png[one-time-boot-create-vm-bootorder]
+
+. 单击*创建*。
+. 打开您刚刚创建的虚拟机 web-vnc，并按照安装程序提供的说明进行操作。
+. 安装完成后，按照操作系统的指示重启虚拟机（您可以在系统启动后去除安装介质）。
+. 虚拟机重启后，将自动从磁盘卷启动操作系统。

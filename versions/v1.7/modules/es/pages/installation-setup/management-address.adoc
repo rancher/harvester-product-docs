@@ -1,0 +1,88 @@
+= Dirección de gestión
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} proporciona una IP virtual fija (VIP) como dirección de gestión, la VIP debe ser diferente de cualquier IP de nodo. Puedes encontrar la dirección de gestión en el panel de control de la consola después de la instalación.
+
+[NOTE]
+====
+
+Si seleccionaste que la dirección IP se configure a través de DHCP, necesitarás configurar un mapeo estático de MAC a dirección IP en tu servidor DHCP para tener una IP virtual persistente.
+====
+
+image::install/iso-installed.png[]
+
+== Requisitos
+
+* La VIP y las interfaces de gestión del nodo deben pertenecer a la misma subred.
+* Todas {harvester-product-name} las interfaces de gestión de nodos deben estar en el mismo segmento de red de capa 2.
+
+Ambas son necesarias porque la VIP depende del Protocolo de Resolución de Direcciones (ARP), que es un protocolo de capa 2.
+
+La VIP puede ser asignada a cualquier {harvester-product-name} interfaz de gestión de nodo y puede cambiar en cualquier momento (no solo cuando ocurre un fallo de nodo). Cuando la VIP cambia de anfitriones, se envían _ARP gratuitos_ para que otros anfitriones en la red sepan a dónde dirigir el tráfico destinado a la dirección IP de gestión del clúster {harvester-product-name} (la VIP).
+
+[CAUTION]
+====
+
+Si planeas alojar un {harvester-product-name} clúster en un centro de datos de equipo sin sistema operativo, es probable que el proveedor de servicios designe una dirección IP "flotante" o "reservada" como la VIP que puedes asignar a uno de tus servidores. Actualizar esta asignación hace que el tráfico comience a fluir instantáneamente hacia el nuevo nodo al que se le asigna. En estas situaciones, {harvester-product-name} no puede actualizar la asignación de IP flotante/reservada en los sistemas de tu proveedor cuando la VIP cambia de anfitriones.
+
+Además, los "ARP gratuitos" de la VIP también pueden ser ineficaces dependiendo de la configuración de red de tu proveedor entre tus {harvester-product-name} nodos (por ejemplo, si tus {harvester-product-name} anfitriones no están en la misma red de capa 2). Debes actualizar manualmente la asignación de IP flotante/reservada cuando la VIP cambia de anfitriones para asegurar que el clúster funcione correctamente. Para más información, consulta <<Identifying the node the VIP is assigned to,Identificando el nodo al que se le asigna la VIP>>.
+====
+
+== Cómo obtener la dirección MAC de la VIP
+
+Para obtener la dirección MAC de la VIP, puedes ejecutar el siguiente comando en el nodo de gestión:
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+Ejemplo de salida:
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== Identificación del nodo al que se asigna la VIP
+
+Puedes usar kubectl (ya sea en tu máquina local con el {harvester-product-name} archivo kubeconfig, o al usar SSH para conectarte a cualquier nodo de gestión {harvester-product-name} como raíz).
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+Resultado de ejemplo:
+
+[,console]
+----
+harvester-xzj76
+----
+
+Alternativamente, puedes usar SSH para conectarte a cada {harvester-product-name} nodo de gestión y luego ejecutar el comando `ip address show mgmt-br`.
+
+Ejemplo:
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+Cuando la salida incluye tanto la VIP como la dirección del nodo, la VIP se asigna al nodo al que estás conectado.
+
+== Usos
+
+La dirección de gestión:
+
+* Permite el acceso a la {harvester-product-name} API/UI a través del protocolo `HTTPS`.
+* Permite que otros nodos se unan al clúster.
++
+image:install/configure-management-address.png[]

@@ -1,0 +1,104 @@
+= 日志问题
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== 无法启用 `rancher-logging` 附加产品
+
+=== 问题描述
+
+当您尝试启用 `rancher-logging` 附加产品时，{harvester-product-name} 用户界面上会出现错误消息。
+
+image::troubleshooting/failed-to-enable-rancher-logging-addon.png[无法启用 rancher-logging 附加产品]
+
+来自 `cattle-logging-system/helm-install-rancher-logging` pod 的日志消息确认发生了错误。
+
+示例：
+
+[,shell]
+----
+...
+ echo 'Installing helm chart'
+...
++ helm install --version ... rancher-logging rancher-logging/rancher-logging ...
+...
+Error: INSTALLATION FAILED: Unable to continue with install: ClusterRole "logging-admin" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata;
+annotation validation error: key "meta.helm.sh/release-name" must equal "rancher-logging":
+current value is "hvst-upgrade-md54b-upgradelog-operator"
+----
+
+image::troubleshooting/logging-installation-failure-due-to-conflict.png[由于冲突导致 rancher-logging 安装错误]
+
+=== 根本原因
+
+当您启用 `rancher-logging` 附加产品时，{harvester-product-name} 尝试安装 https://kube-logging.dev/docs/#overview[Logging Operator].当集群中已经存在该 Operator 时，安装失败，这可能是由于之前升级尝试遗留的过时资源或当前正在进行的升级所创建的.
+
+*升级软件* 界面包含一个 *启用日志记录* 选项，您必须选择该选项以启用 {harvester-product-name} 记录升级事件。然而，后台进程取决于是否启用了 `rancher-logging` 附加产品.
+
+image::troubleshooting/upgrade-with-enable-logging.png[在升级期间启用日志记录]
+
+当附加产品被禁用时，Upgrade Controller 会创建以下 `logging` 和 `managedchart` 对象.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-hpfnw   36s
+
+$ kubectl get logging -A
+NAME                                          LOGGINGREF             CONTROLNAMESPACE
+hvst-upgrade-hpfnw-upgradelog-infra           harvester-upgradelog   harvester-system        // newly created by upgrade controller
+hvst-upgrade-hpfnw-upgradelog-operator-root                          cattle-logging-system   // newly created by upgrade controller, acts as logging-operator
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                                     AGE
+fleet-local   hvst-upgrade-hpfnw-upgradelog-operator   18s  // newly created by upgrade controller
+----
+
+当附加产品被启用时，Upgrade Controller 会创建以下 `logging` 对象.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-9sn4x   14s
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                     AGE
+
+$ kubectl get logging -A
+NAME                                  LOGGINGREF                     CONTROLNAMESPACE
+hvst-upgrade-9sn4x-upgradelog-infra   harvester-upgradelog           harvester-system        // newly created by upgrade controller
+rancher-logging-kube-audit            harvester-kube-audit-log-ref   cattle-logging-system   // originally created by rancher-logging addon
+rancher-logging-root                                                 cattle-logging-system   // originally created by rancher-logging addon, acts as logging-operator
+----
+
+您可能会在以下情况下遇到此问题：
+
+* `rancher-logging` 附加产品最初被禁用。您在选择 *启用日志记录* 选项的情况下开始升级。在不等待升级完成的情况下，您启用 `rancher-logging` 附加产品。{harvester-product-name} 用户界面显示错误消息.
+
+* `rancher-logging` 附加产品最初被禁用。您选择了 *启用日志记录* 选项开始升级，并等待升级完成。由于 https://github.com/harvester/harvester/issues/7654[已知问题]，`managedchart` 和 `logging` 对象未被移除。接下来，您启用 `rancher-logging` 附加产品。{harvester-product-name} 用户界面显示错误消息.
+
+=== 解决方法
+
+. 如果升级正在进行，请等待其成功完成或被移除。
++
+[IMPORTANT]
+====
+为避免日志记录冲突，在升级进行时请勿启用或禁用 `rancher-logging` 附加产品.此操作在 {harvester-product-name} v1.7.0 及更高版本中被阻止。
+====
+
+. 如果 `rancher-logging` 附加产品已启用但处于故障状态，请禁用它.
+
+. 检查 `logging` 和 `managedchart` 对象。如果这些对象的名称以 `hvst-upgrade-` 开头，请手动删除它们。
+
+. 启用 `rancher-logging` 附加产品。
+
+[NOTE]
+====
+所有附加产品在开始升级之前必须处于健康状态。此前提条件在 {harvester-product-name} v1.7.0 及更高版本中会自动验证。
+====
+
+=== 相关问题
+
+https://github.com/harvester/harvester/issues/9289[#9289] 和 https://github.com/harvester/harvester/issues/9644[#9644]

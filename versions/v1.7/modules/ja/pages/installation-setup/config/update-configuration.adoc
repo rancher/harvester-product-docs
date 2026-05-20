@@ -1,0 +1,124 @@
+= インストール後の設定を更新する
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+{harvester-product-name}オペレーティングシステムは不変の設計を持っており、これはオペレーティングシステム内のほとんどのファイルが再起動後に事前に設定された状態に戻ることを意味します。オペレーティングシステムは、起動時に設定ファイルからシステムコンポーネントの事前設定された値を読み込みます。
+
+設定を更新するには、まずシステム内のランタイム値を更新し、その後設定ファイルを更新して、再起動間で変更が持続するようにする必要があります。
+
+しかし、v1.7.0以降、`nmcli`ツールを使用して行ったネットワーク設定の変更は自動的に持続します。なぜなら、`/etc/NetworkManager`ディレクトリが持続パスのリストに含まれるようになったからです。
+
+[NOTE]
+====
+`v1.1.2`より前のバージョンからアップグレードする場合、examples内の`cloud-init`ファイルは`/oem/99_custom.yaml`になります。必要に応じて値を置き換えてください。
+====
+
+== `rancher`ユーザーのパスワード
+
+=== ランタイム変更
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Harvesterノードにログイン]するには、`rancher`ユーザーアカウントを使用してください。
+
+. コマンド`passwd`を実行して、`rancher`ユーザーアカウントのパスワードをリセットします。
+
+=== 設定の持続性
+
+. {elemental-product-name} `cloud-init`ファイル`/oem/90_custom.yaml`のバックアップを取ります。
++
+[,sh]
+----
+ cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
+----
+
+. `/oem/90_custom.yaml`を編集し、YAMLパス`stages.initramfs[0].users.rancher.passwd`を更新します。
+
+暗号化された形式で`rancher`ユーザーアカウントのパスワードを指定する方法については、[`os.password`](./harvester-configuration.md#ospassword)を参照してください。
+
+== NTPサーバー
+
+NTP設定に関する情報は、xref:hosts/hosts.adoc#_ntp_configuration[NTPサーバー]を参照してください。
+
+== DNSサーバ
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Harvesterノードにログイン]するには、rootアカウントを使用してください。
+
+. 管理インターフェースの設定を確認し、次のいずれかのコマンドを実行してください：
++
+** VLANを使用するように設定されていません：
++
+[,shell]
+----
+nmcli con modify bridge-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br
+----
+** VLANを使用するように設定されました:
++
+[,shell]
+----
+nmcli con modify vlan-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br.VLAN_ID
+----
++
+`VLAN_ID`を実際のIDに置き換える必要があります。設定された接続とデバイスのリストを表示するには、コマンド`nmcli con`を実行してください。
+
+. ファイル`/etc/resolv.conf`に正しいDNSサーバーが含まれていることを確認するには、`cat`コマンドを実行してください。
++
+[,shell]
+----
+cat /etc/resolv.conf
+----
+
+. `rke2-coredns`のデプロイメントを再起動してください。
++
+[,shell]
+----
+kubectl rollout restart deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+. `rke2-coredns`のデプロイメントが正常に展開されたことを確認してください。
++
+[,shell]
+----
+kubectl rollout status deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+== ボンディングスレーブ
+
+管理ボンディングインターフェース`mgmt-bo`のスレーブインターフェースを更新できます。
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Harvesterノードにログイン]するには、rootアカウントを使用してください。
+
+. 次のコマンドを使用してインターフェース名を特定してください。
++
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    connected               bridge-mgmt +
+\... +
+mgmt-bo          bond      connected               bond-mgmt +
+ens6             ethernet  connected               bond-slave-ens6 +
+ens7             ethernet  disconnected            -- +
+\...
+----
+
+. `nmcli`ツールを使用してインターフェースの接続を作成し、管理ボンディングインターフェースに割り当ててください。
++
+例:
++
+[shell]
+----
+$ nmcli con add type bond-slave ifname ens7 master mgmt-bo +
+接続 'bond-slave-ens7' (5a379328-178a-4167-b065-b5426facd659) が正常に追加されました。
+----
+
+デバイスが接続されていることが確認できるはずです。
+
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    connected               bridge-mgmt +
+\... +
+mgmt-bo          bond      connected               bond-mgmt +
+ens6             ethernet  connected               bond-slave-ens6 +
+ens7             ethernet  connected               bond-slave-ens7
+----

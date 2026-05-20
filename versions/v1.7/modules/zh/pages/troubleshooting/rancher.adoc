@@ -1,0 +1,83 @@
+= Rancher 问题：
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== 来宾集群日志收集
+
+您可以收集来宾集群日志和配置文件。在每个来宾集群节点上执行以下步骤：
+
+. 登录到节点。
+
+. 下载 Rancher v2.x Linux 日志收集脚本，并使用以下命令生成日志包：
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+脚本的输出指示生成的 tarball 的位置。
+
+有关更多信息，请参见 https://www.suse.com/support/kb/doc/?id=000020191[Rancher v2.x Linux 日志收集脚本]。
+
+== 将 Harvester 集群导入 Rancher
+
+在 Harvester 上设置 `cluster-registration-url` 后，将创建一个名为 `cattle-system/cattle-cluster-agent` 的部署，以将 Harvester 集群导入 Rancher。
+
+=== 因 `unable to read CA file` 错误，导入待定
+
+`cattle-cluster-agent-*` pod 日志中的以下错误消息表明 Harvester 集群无法导入到 Rancher。
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+根本原因是 Rancher 的 `agent-tls-mode` 设置配置不当，该设置控制 Rancher 的代理（`cluster-agent`、`fleet-agent` 和 `system-agent`）在建立连接时如何验证 Rancher 的证书。此设置的默认值取决于 Rancher 的版本和安装类型。
+
+|===
+| 类型 | 版本 | 默认值
+
+| 全新安装
+| v2.8
+| `system-store`
+
+| 全新安装
+| v2.9 及更高版本
+| `strict`
+
+| 升级
+| v2.8 到 v2.9
+| `system-store`
+|===
+
+您可以通过执行以下步骤来配置此设置以满足您的要求：
+
+. 登录到 Rancher UI。
+
+. 转到 *全局设置 -> 设置*。
+
+. 选择 *agent-tls-mode*，然后选择 *⋮ -> 编辑设置* 以访问配置选项。
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. 选择以下值之一：
++
+* *严格*：Rancher 的代理仅信任在 `cacerts` 设置中指定的证书颁发机构 (CA) 生成的证书。这是推荐的默认 TLS 设置。
++
+*严格* 选项通过要求 Rancher 访问生成证书的 CA，从而为代理提供更高的安全级别。在某些证书配置的情况下（特别是外部证书），这不是自动的，*需要额外配置*。有关需要额外配置的场景的更多信息，请参见 Rancher 文档中的 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[选择您的 SSL 配置]。
++
+* *系统存储*：Rancher 的代理信任操作系统信任存储中指定的公共 CA 生成的任何证书。如果您的设置使用外部信任机构，并且您没有对证书颁发机构的所有权，请使用此设置。
++
+[IMPORTANT]
+====
+使用 *系统存储* 设置意味着代理信任操作系统信任存储中找到的所有外部机构，包括用户控制之外的那些。
+====
+
+. 单击 *保存*。
+
+相关问题：
+
+- Harvester: https://github.com/harvester/harvester/issues/7105[#7105] 和 https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher： https://github.com/rancher/rancher/issues/45628[#45628]（参见 https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[此评论]。）

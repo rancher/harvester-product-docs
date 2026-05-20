@@ -1,0 +1,83 @@
+= Problemas do Rancher
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== Coleta de Logs do Cluster Convidado
+
+Você pode coletar logs do cluster convidado e arquivos de configuração. Realize os seguintes passos em cada nó do cluster convidado:
+
+. Faça login no nó.
+
+. Baixe o script coletor de logs do Rancher v2.x para Linux e gere um pacote de logs usando os seguintes comandos:
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+A saída do script indica a localização do tarball gerado.
+
+Para mais informações, veja https://www.suse.com/support/kb/doc/?id=000020191[O script coletor de logs do Rancher v2.x para Linux].
+
+== Importação de Clusters Harvester no Rancher
+
+Após o `cluster-registration-url` ser configurado no Harvester, uma implantação chamada `cattle-system/cattle-cluster-agent` é criada para a importação do cluster Harvester no Rancher.
+
+=== Importação Pendente Devido ao Erro `unable to read CA file`
+
+As seguintes mensagens de erro nos logs do pod `cattle-cluster-agent-*` indicam que o cluster Harvester não pode ser importado para o Rancher.
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+A causa raiz é a configuração ineficaz do `agent-tls-mode` do Rancher, que controla como os agentes do Rancher (`cluster-agent`, `fleet-agent` e `system-agent`) validam o certificado do Rancher ao estabelecer uma conexão. O valor padrão dessa configuração depende da versão do Rancher e do tipo de instalação.
+
+|===
+| Tipo | Versões | Valor Padrão
+
+| Nova instalação
+| v2.8
+| `system-store`
+
+| Nova instalação
+| v2.9 e posteriores
+| `strict`
+
+| Upgrade
+| v2.8 para v2.9
+| `system-store`
+|===
+
+Você pode ajustar essa configuração para atender às suas necessidades, realizando os seguintes passos:
+
+. Faça login na interface do Rancher.
+
+. Vá para *Configurações Globais -> Configurações*.
+
+. Selecione *modo-agent-tls*, e depois selecione *⋮ -> Editar Configuração* para acessar as opções de configuração.
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. Selecione um dos seguintes valores:
++
+* *Estrito*: Os agentes do Rancher confiam apenas em certificados gerados pela Autoridade Certificadora (CA) especificada na configuração `cacerts`. Esta é a configuração TLS padrão recomendada.
++
+A opção *Estrito* habilita um nível mais elevado de segurança, exigindo que o Rancher tenha acesso à CA que gerou o certificado visível para os agentes. No caso de certas configurações de certificado (notavelmente, certificados externos), isso não é automático, e *configuração extra é necessária*. Para mais informações sobre cenários que exigem configuração extra, veja https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[Escolha sua Configuração SSL] na documentação do Rancher.
++
+* *Armazenamento do Sistema*: Os agentes do Rancher confiam em qualquer certificado gerado por uma CA pública especificada no armazenamento de confiança do sistema operacional. Use esta configuração se sua configuração usar uma autoridade de confiança externa e você não tiver propriedade sobre a Autoridade Certificadora.
++
+[IMPORTANT]
+====
+Usar a configuração *Armazenamento do Sistema* implica que o agente confia em todas as autoridades externas encontradas no armazenamento de confiança do sistema operacional, incluindo aquelas fora do controle do usuário.
+====
+
+. Clique em *Salvar*.
+
+Problemas relacionados:
+
+- Harvester: https://github.com/harvester/harvester/issues/7105[#7105] e https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher: https://github.com/rancher/rancher/issues/45628[#45628] (Veja https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[esse comentário].)

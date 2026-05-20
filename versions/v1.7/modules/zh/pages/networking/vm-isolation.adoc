@@ -1,0 +1,265 @@
+= 虚拟机隔离
+:revdate: 2025-09-15
+:page-revdate: {revdate}
+
+[NOTE]
+====
+所有使用 Kube-OVN 的功能都被视为实验性。有关实验性功能的更多信息，请参见 xref:introduction/document-conventions.adoc#_feature_labels[功能标签]。
+====
+
+虚拟机之间的隔离通常通过 VLAN（在传统网络中）或虚拟交换机（在 Kube-OVN 中）来实现。如果您想在同一虚拟交换机网络内隔离虚拟机，可以使用以下任一方法实现所需的微分段：
+
+* 子网访问控制列表 (ACL)：对虚拟机使用的子网应用规则。
+* Kubernetes 网络策略：在网络名称空间内应用规则，并使用 Pod 选择器。
+
+== 子网 ACL
+
+有关架构和使用指南的更多信息，请参见 Kube-OVN 文档中的 https://kubeovn.github.io/docs/v1.13.x/en/guide/subnet/#subnet-acl[子网 ACL] 和 https://kubeovn.github.io/docs/v1.13.x/en/reference/kube-ovn-api/#acl[ACL API 参考]。
+
+=== 示例
+
+* 示例 1：在 `172.20.10.0/24` 子网内，除了地址为 `172.20.10.2` 和 `172.20.10.3` `172.20.10.0/30` 的虚拟机外，允许所有虚拟机相互通信。
++
+Kube-OVN 会自动将网关地址 `172.20.10.1` 添加到 `excludeIps` 列表中，防止其分配给任何虚拟机。然而，进出网关地址的通信也会受到影响。
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.0/30
+      priority: 1005
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.0/30
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* 示例 2：在 `172.20.10.0/24` 子网内，除了地址为 `172.20.10.3` 的虚拟机外，允许所有虚拟机相互通信。地址为 `172.20.10.2` 的虚拟机被允许通信，因为 ACL 规则的执行是基于优先级的。对于该子网，优先级值为 `1006` 的规则在 `1005` 之前执行。
++
+Kube-OVN 会自动将网关地址 `172.20.10.1` 添加到 `excludeIps` 列表中，防止其分配给任何虚拟机。然而，进出网关地址的通信也会受到影响。
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: allow
+      direction: to-lport
+      match: ip4.dst == 172.20.10.2
+      priority: 1006
+    - action: allow
+      direction: from-lport
+      match: ip4.src == 172.20.10.2
+      priority: 1006
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.0/30
+      priority: 1005
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.0/30
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* 示例 3：地址为 `172.20.10.2` 的虚拟机被允许与其他虚拟机通信。然而，反向流量被阻止。没有虚拟机被允许与 `172.20.10.2` 通信。
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: to-lport
+      match: ip4.dst == 172.20.10.2
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+* 示例 4：来自端口 `9501` 和 IP 地址 `172.20.10.6` 的 TCP 流量在 `vswitch1` 子网中被阻止。
++
+[,yaml]
+----
+  apiVersion: kubeovn.io/v1
+  kind: Subnet
+  metadata:
+    name: vswitch1
+  spec:
+    acls:
+    - action: drop
+      direction: from-lport
+      match: ip4.src == 172.20.10.6 && tcp.src == 9501
+      priority: 1005
+    cidrBlock: 172.20.10.0/24
+    excludeIps:
+    - 172.20.10.1
+    gateway: 172.20.10.1
+    gatewayNode: ""
+    natOutgoing: false
+    private: false
+    protocol: IPv4
+    provider: vswitch1.default.ovn
+    vpc: vpc1
+----
+
+== 网络策略
+
+[CAUTION]
+====
+网络策略规则默认拒绝流量。为避免影响其他 Pod，请确保以下内容：
+
+* 所有必需的匹配条件都已添加到策略中。
+* 流量通过 Pod 选择器和名称空间进行隔离。
+====
+
+本文件中的示例侧重于在同一子网内实现虚拟机之间的隔离。
+
+有关更多信息，请参见 Kubernetes 文档中的 https://kubernetes.io/docs/concepts/services-networking/network-policies[网络策略] 和 Kube-OVN 文档中的 https://kubeovn.github.io/docs/v1.13.x/en/guide/networkpolicy-log[网络策略日志]。
+
+=== 示例
+
+以下虚拟机在 `default` 名称空间中创建，并连接到为子网范围 `172.20.10.0/24` 创建的覆盖网络。
+
+|===
+| 虚拟机 | IP 地址
+
+| `VM1`
+| `172.20.10.2`
+
+| `VM2`
+| `172.20.10.3`
+
+| `VM3`
+| `172.20.10.4`
+
+| `VM4`
+| `172.20.10.5`
+
+| `VM5`
+| `172.20.10.6`
+|===
+
+* 示例1：`VM1` 和 `VM2` 被允许相互通信，因为它们的地址在子网 `172.20.10.0/30` 内。在 `default` 名称空间中的所有其他流量，包括与 `VM3`、 `VM4` 和 `VM5` 之间的流量，均被阻止。
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+    - Egress
+----
+
+* 示例2：`VM1` 和 `VM2` 被允许相互通信，并与子网 `172.20.10.0/24` 中的其他虚拟机通信。然而，该子网中的其他虚拟机无法与 `VM1`、 `VM2` 及彼此通信。这是因为入口策略仅允许来自 `172.20.10.0/30` 的流量。
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+----
+
+* 示例3：`VM1` 和 `VM2` 被允许相互通信，但不与子网 `172.20.10.0/24` 中的其他虚拟机通信。同一子网中的其他虚拟机可以与 `VM1` 和 `VM2` 通信。这是因为出口策略允许将流量发送到 `172.20.10.0/30`。
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - egress
+----
+
+* 示例4：`VM2` 被允许与 `VM1` 通信，但不与子网 `172.20.10.0/24` 中的其他虚拟机通信。这是因为一个 Pod 选择器标签被应用于 `VM2`。同一子网中的所有其他虚拟机可以与 `VM1` 及彼此通信。
++
+[,yaml]
+----
+  apiVersion: networking.k8s.io/v1
+  kind: NetworkPolicy
+  metadata:
+    name: ip-block
+    namespace: default
+  spec:
+    podSelector:
+      matchLabels:
+        vm.kubevirt.io/name: VM2
+    egress:
+    - to:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    ingress:
+    - from:
+      - ipBlock:
+          cidr: 172.20.10.0/30
+    policyTypes:
+    - Ingress
+    - Egress
+----

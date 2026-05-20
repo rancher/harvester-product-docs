@@ -1,0 +1,112 @@
+= Seguridad del volumen
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Harvester te permite cifrar y descifrar imágenes de máquinas virtuales. El mecanismo de cifrado utiliza el módulo del kernel de Linux dm_crypt y la utilidad de línea de comandos cryptsetup.
+
+== Requisitos previos
+
+Prepara los siguientes recursos:
+
+* Secreto: Un secreto de Kubernetes se utiliza como la frase de paso de dm_crypt. Debes especificar el valor del campo `CRYPTO_KEY_VALUE`. Todos los demás campos son fijos.
++
+image::vm/create-encryption-used-secret.png[]
++
+Ejemplo de un secreto:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+El ejemplo contiene el código YAML predeterminado para secretos de Kubernetes. Aparte de esto, puedes usar https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[opciones de cifrado para el modo LUKS], que es un modo de operación de cryptsetup. Harvester v1.4.1 y versiones posteriores admiten estas opciones, pero debes verificar que sean compatibles con tus nodos.
+
+|===
+| Opción | Posibles valores
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Puedes crear un secreto en el espacio de nombres del sistema usando kubectl o la interfaz de usuario de Harvester (*Editar como YAML* función). Los recursos en el espacio de nombres del sistema no se muestran en la pantalla de la interfaz de usuario de Harvester *Secretos*.
+====
++
+* Clase de Almacenamiento: Las imágenes se cifran utilizando Longhorn, por lo que se deben pasar los campos requeridos al controlador CSI de Longhorn. Puedes especificar el secreto de cifrado al crear una Clase de Almacenamiento. Para más información, consulte xref:/virtual-machines/vm-images/upload-image.adoc#_image_storageclass[Clase de Almacenamiento de Imágenes].
++
+image::vm/create-storage-class.png[]
++
+Ejemplo de una Clase de Almacenamiento:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Puedes crear un secreto en el espacio de nombres del sistema utilizando la interfaz de usuario de Harvester (*Editar como YAML* función) y kubectl. Los recursos en el espacio de nombres del sistema no se muestran en la pantalla de la interfaz de usuario de Harvester *Secretos*.
+====
+
+== Volúmenes cifrados
+
+Puedes crear un volumen cifrado utilizando una Clase de Almacenamiento cifrada en las siguientes ubicaciones de la interfaz de usuario:
+
+* *Volúmenes: Crear* pantalla
++
+image::volume/volume-security-create-empty-volume.png[create-empty-volume]
++
+* La pestaña *Volúmenes* en la *Máquina Virtual: Crear* pantalla
++
+image::volume/volume-security-create-empty-volume-in-vm.png[create-empty-volume-in-vm]
+
+== Uso Avanzado con Integración de Rancher
+
+El secreto es una cadena sin cifrar codificada en Base64. Para mantener el secreto a salvo, puedes utilizar proyectos y espacios de nombres para aislar permisos. Para más información, consulta xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== limitaciones
+
+No puedes realizar las siguientes acciones:
+
+* Exportar un nuevo volumen desde un volumen cifrado
+* Restaurar un volumen cifrado a un volumen sin cifrar
+* Restaurar un volumen sin cifrar a un volumen cifrado

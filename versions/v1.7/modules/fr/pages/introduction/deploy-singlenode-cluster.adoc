@@ -1,0 +1,108 @@
+= Déployer un cluster à nœud unique
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Un cluster {harvester-product-name} avec trois nœuds ou plus est nécessaire pour réaliser pleinement les fonctionnalités multi-nœuds telles que la haute disponibilité. Les dernières versions vous permettent de créer des clusters avec deux nœuds de gestion et un xref:../hosts/witness-node.adoc[witness node] (et éventuellement, un ou plusieurs nœuds de travail). Vous pouvez également créer des xref:../installation-setup/single-node-clusters.adoc[clusters à nœud unique] qui prennent en charge la plupart des fonctionnalités (à l'exception de la haute disponibilité, du support multi-répliques et de la migration en direct).
+
+Ce guide vous accompagne à travers les étapes nécessaires pour déployer un *cluster à nœud unique* et des machines virtuelles (VM) qui peuvent héberger des clusters invités et exécuter des charges de travail personnalisées.
+
+== 1. Vérifiez que les exigences minimales en matière de matériel et de réseau sont respectées.
+
+{harvester-product-name} est conçu pour des serveurs sur matériel sans système d'exploitation utilisant des composants logiciels Open Source de niveau entreprise. L'installateur vérifie automatiquement le matériel et affiche des messages d'avertissement si les xref:../installation-setup/requirements.adoc[exigences] minimales ne sont pas respectées.
+
+== 2. Préparez les fichiers d'installation en fonction de la méthode d'installation que vous souhaitez utiliser.
+
+Vous pouvez télécharger les fichiers d'installation depuis la page https://github.com/harvester/harvester/releases[Releases]. La section *Downloads* des notes de version contient des liens vers les fichiers ISO et les artefacts associés. Les types de fichiers ISO suivants sont disponibles{nbsp}:
+
+* *Image ISO complète*{nbsp}: Contient les composants principaux du système d'exploitation et toutes les images de conteneur requises, qui sont préchargées lors de l'installation. Vous devez utiliser une image ISO complète lors de l'installation de {harvester-product-name} derrière une passerelle de périmètre de sécurité ou un proxy, et dans des environnements sans connectivité Internet.
+* xref:../installation-setup/media/net-install.adoc[*Image ISO d'installation réseau*]{nbsp}: Contient uniquement les composants principaux du système d'exploitation. Après l'installation, le système d'exploitation récupère toutes les images de conteneur requises depuis Internet (principalement depuis Docker Hub).
+
+|===
+| Méthode | Fichiers d'installation requis | Autres exigences
+
+| xref:../installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| S/O
+
+| xref:../installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| Clé de stockage{nbsp}; utilitaire tel que https://etcher.balena.io/[balenaEtcher] ou la commande Linux https://man7.org/linux/man-pages/man1/dd.1.html[dd]
+
+| xref:../installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO, image du noyau Linux (vmlinuz), initrd, image SquashFS
+| Répertoire sur le serveur HTTP (pour servir les fichiers de démarrage){nbsp}; scripts de démarrage iPXE (pour installation automatique){nbsp}; configuration du serveur DHCP
+|===
+
+== 3. Préparez les exigences de configuration du cluster.
+
+* Jeton de cluster{nbsp}: Chaîne ASCII que les nœuds utilisent lors de leur adhésion au cluster
+* Adresse IP fixe pour chaque nœud{nbsp}: Peut être attribuée statiquement ou en utilisant DHCP (réservation d'hôte)
+* Adresse IP virtuelle fixe (VIP) à utiliser comme adresse de gestion du cluster{nbsp}: VIP auquel vous vous connectez lors de l'exécution des tâches d'administration après le déploiement du cluster
+* Adresses des serveurs DNS, des serveurs NTP et du serveur proxy (si nécessaire)
+
+== 4. Déployez le nœud du cluster.
+
+Le déploiement implique l'installation du système d'exploitation et d'autres composants sur l'hôte, puis un redémarrage une fois l'installation terminée. Le déploiement du nœud crée le cluster, et le nœud se voit attribuer le rôle de gestion par défaut.
+
+Lors de l'installation, vous devez configurer les paramètres du nœud, définir l'adresse de gestion du cluster (VIP) et le jeton de cluster, et spécifier d'autres informations. Si nécessaire, vous pouvez configurer d'autres paramètres à l'aide d'un xref:../installation-setup/config/configuration-file.adoc[fichier de configuration].
+
+Une fois l'installation terminée, le nœud redémarre et la console apparaît. La console affiche des informations sur le cluster (URL de gestion et statut) et le nœud (nom d'hôte, adresse IP et statut). Après l'initialisation du cluster et le démarrage de tous les services, le statut du cluster change en *Prêt*.
+
+== 5. Configurez un mot de passe fort pour l'utilisateur par défaut `admin`.
+
+Une fois que l'état du cluster change en *Prêt*, vous pouvez accéder à l'xref:../installation-setup/authentication.adoc[UI] en utilisant l'URL de gestion affichée sur la console.
+
+== 6. Configurez le StorageClass par défaut.
+
+{harvester-product-name} utilise des StorageClasses pour décrire comment Longhorn doit provisionner les volumes. Chaque StorageClass a un paramètre qui définit le nombre de répliques à créer pour chaque volume.
+
+Le StorageClass par défaut `harvester-longhorn` a une valeur de nombre de répliques de *3* pour une haute disponibilité. Si vous utilisez `harvester-longhorn` dans votre cluster à nœud unique, Longhorn ne peut pas créer le nombre par défaut de répliques, et les volumes sont marqués comme _Dégradé_ sur l'UI.
+
+Pour éviter ce problème, vous pouvez effectuer l'une des actions suivantes{nbsp}:
+
+* Changez le xref:../installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[nombre de répliques] de `harvester-longhorn` à *1* en utilisant un xref:../installation-setup/config/configuration-file.adoc[fichier de configuration].
+* xref:../storage/storageclass.adoc#_creating_a_storageclass[Créez un nouveau StorageClass] avec le paramètre *Nombre de répliques* défini sur *1*. Une fois créé, localisez le nouveau StorageClass dans la liste puis sélectionnez *⋮* > *Définir comme par défaut*.
+
+== 7. Créez un réseau de cluster personnalisé et un réseau de VM. (Facultatif)
+
+Le réseau implique trois concepts majeurs{nbsp}:
+
+* xref:../networking/cluster-network.adoc#_cluster_network[*Réseau de cluster*] : Chemin de transmission isolé pour la transmission du trafic réseau dans le cluster {harvester-product-name}.
++
+Lors du déploiement, un réseau de cluster appelé xref:../networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] est créé pour les communications intra-cluster. `mgmt` permet d'accéder aux VM depuis le réseau d'infrastructure (externe au cluster) auquel chaque nœud se connecte avec des NIC de gestion à des fins de gestion du cluster. {harvester-product-name} permet également de créer des xref:../networking/cluster-network.adoc#_custom_cluster_network[réseaux de cluster personnalisés] qui peuvent être dédiés au trafic des VM.
+
+* xref:../networking/cluster-network.adoc#_network_configuration[*Configuration réseau*] : Définition de la manière dont les nœuds du cluster se connectent à un réseau de cluster spécifique.
++
+Chaque configuration réseau correspond à un ensemble de nœuds avec des spécifications réseau uniformes. Seuls les nœuds couverts par la configuration réseau peuvent accéder au réseau de cluster associé. Cet arrangement vous offre de la flexibilité lors de la configuration d'un cluster hétérogène, en particulier lorsque les noms des interfaces réseau sont différents pour chaque nœud.
+
+* xref:../networking/cluster-network.adoc#_vm_network[*Réseau VM*]{nbsp}: Réseau virtuel que les VMs utilisent pour communiquer avec d'autres VMs et des réseaux externes.
++
+Chaque réseau VM est lié à un réseau de cluster spécifique, qui est utilisé pour la transmission du trafic des VMs. Vous pouvez créer soit un xref:../networking/vm-network.adoc#_vlan_network[réseau VLAN] soit un xref:../networking/vm-network.adoc#_untagged_network[réseau non étiqueté] en fonction de vos besoins, tels que l'isolement du trafic, la segmentation du réseau, la facilité de gestion ou l'alignement avec l'environnement réseau externe.
+
+Vous pouvez créer un réseau VM qui utilise `mgmt` lors du test de {harvester-product-name} avec un cluster à nœud unique.
+
+== 8. Importer des images de VM.
+
+Dans l'UI, vous pouvez importer des ISO, qcow2 et des xref:../virtual-machines/vm-images/upload-image.adoc[images] brutes en téléchargeant une image depuis le système de fichiers local, ou en spécifiant l'URL d'une image accessible depuis le cluster.
+
+== 9. Importer des clés SSH. (Recommandée)
+
+Vous pouvez stocker des clés publiques SSH dans {harvester-product-name}. Lorsqu'une VM est lancée, une clé stockée peut être xref:../virtual-machines/access-vm.adoc#_ssh_access[injectée] dans la VM pour permettre un accès sécurisé via SSH. Les clés validées sont affichées sur l'écran *Clés SSH* dans l'UI.
+
+== 10. Créer des VMs.
+
+Vous pouvez créer des xref:../virtual-machines/create-vm.adoc[VMs Linux] en utilisant l'une des méthodes suivantes :
+
+* UI : Sur l'écran *Machines Virtuelles*, cliquez sur *Créer* et configurez les paramètres sur chaque onglet.
+* API Kubernetes : Créez un objet `VirtualMachine`.
+* xref:../integrations/terraform/terraform-provider.adoc[Fournisseur Terraform] : Définissez un bloc de ressources `harvester_virtualmachine`.
+
+Créer des xref:../virtual-machines/create-windows-vm.adoc[VM Windows] sur l'UI implique des étapes légèrement différentes. {harvester-product-name} fournit un modèle de VM nommé `windows-iso-image-base-template` qui ajoute un volume avec les pilotes Virtio pour Windows, ce qui simplifie le processus de configuration de la VM. Si vous avez besoin de périphériques Virtio mais choisissez de ne pas utiliser le modèle, vous devez ajouter vos propres pilotes Virtio pour Windows afin d'activer la détection correcte du matériel.
+
+== Suite des opérations
+
+Les sections suivantes fournissent des guides qui vous expliquent comment sauvegarder et restaurer des VM, gérer des hôtes et utiliser {rancher-product-name} avec {harvester-product-name}.
+
+* xref:../virtual-machines/backup-restore.adoc[Sauvegarde de VM, Instantané & Restauration]
+* xref:../hosts/hosts.adoc[Administration des hôtes]
+* xref:../integrations/rancher/rancher-integration.adoc[{rancher-product-name} Intégration]

@@ -1,0 +1,197 @@
+= Instalación de ISO
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+{harvester-product-name} se distribuye como una imagen arrancable, puedes instalarlo directamente en un equipo sin sistema operativo con la imagen ISO. Para obtener la imagen ISO, descarga *💿 harvester-v1.x.x-amd64.iso* de la página de https://github.com/harvester/harvester/releases[Releases].
+
+Durante la instalación, puedes elegir *crear un nuevo clúster* o *unir el nodo a un clúster existente*.
+
+El siguiente https://youtu.be/X0VIGZ_lExQ[video] muestra una visión rápida de una instalación de ISO.
+
++++++++++<iframe width="800" height="400" src="https://www.youtube.com/embed/X0VIGZ_lExQ" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="">[]++++++</iframe>+++++++++
+
+== Pasos de instalación
+
+. Monta el archivo ISO y arranca el servidor seleccionando la opción `Harvester Installer`.
++
+image::install/iso-install.png[iso-install.png]
++
+El instalador comprueba automáticamente el hardware y muestra mensajes de advertencia si no se cumplen los requisitos mínimos. La pantalla de *Comprobaciones de Hardware* no se muestra si todas las comprobaciones se han superado.
++
+image::install/hardware-checks.png[hardware-checks.png]
+
+. Utiliza las teclas de flecha para elegir un modo de instalación. Por defecto, el primer nodo será el nodo de gestión del clúster.
++
+image::install/choose-installation-mode.png[choose-installation-mode.png]
++
+** `Create a new Harvester cluster`: crea un clúster completamente nuevo.
+** `Join an existing Harvester cluster`: se une a un clúster existente. Necesitas el VIP y el token del clúster al que deseas unirte.
+** `Install Harvester binaries only`: Si eliges esta opción, se requiere configuración adicional después del primer arranque.
++
+[IMPORTANT]
+====
+Cuando hay 3 nodos, los otros 2 nodos añadidos primero se promueven automáticamente a nodos de gestión para formar un clúster HA. Si deseas promover nodos de gestión de diferentes zonas, puedes añadir la etiqueta de nodo `topology.kubernetes.io/zone` en la configuración de xref:../../installation-setup/config/configuration-file.adoc#_os_labels[os.labels] proporcionando una URL de xref:../../installation-setup/config/configuration-file.adoc[archivo de configuración] en el paso de personalizar el host. En este caso, se requieren al menos tres zonas diferentes.
+====
+
+. Elige una función para el nodo. Se requiere realizar este paso si seleccionaste el modo de instalación `Join an existing Harvester cluster`.
++
+image::install/select-role.png[choose-node-role.png]
++
+** `Default Role`: Permite que un nodo funcione como nodo de gestión o nodo trabajador. Este rol no tiene privilegios ni restricciones específicas.
+** `Management Role`: Permite que un nodo sea priorizado cuando {harvester-product-name} promueve nodos a nodos de gestión.
+** `Witness Role`: Restringe a un nodo a ser un nodo testigo (solo funciona como un nodo etcd) en un clúster específico.
+** `Worker Role`: Restringe a un nodo a ser un nodo trabajador (nunca promovido a nodo de gestión) en un clúster específico.
+
+. Configura una contraseña para acceder al nodo. El usuario SSH por defecto es `rancher`.
++
+image::install/config-password.png[config-password.png]
+
+. Elige el disco de instalación en el que deseas instalar el clúster y el disco de datos en el que deseas almacenar los datos de la máquina virtual. Por defecto, {harvester-product-name} utiliza el esquema de particionamiento https://en.wikipedia.org/wiki/GUID_Partition_Table[Tabla de particiones GUID (GPT)] para UEFI y BIOS. Si utilizas el arranque BIOS, entonces tendrás la opción de seleccionar https://en.wikipedia.org/wiki/Master_boot_record[Registro de arranque principal (MBR)].
++
+[IMPORTANT]
+====
+El soporte para el arranque BIOS heredado quedará obsoleto en v1.7.0 y se eliminará en una versión posterior. Los clústeres {harvester-product-name} existentes que utilizan este modo de arranque seguirán funcionando, pero actualizar a versiones posteriores puede requerir la reinstalación en modo UEFI. Para evitar problemas y interrupciones, utiliza UEFI en nuevas instalaciones.
+====
++
+image::install/choose-installation-target-data-disk.png[choose-installation-target-data-disk.png]
++
+** `Installation disk`: El disco en el que instalar el clúster.
+** `Data disk`: El disco para almacenar los datos de la máquina virtual. Se recomienda elegir un disco separado para almacenar los datos de la máquina virtual. Esto no se aplica a los nodos testigos.
+** `Persistent size`: Si solo tienes un disco o utilizas el mismo disco para el sistema operativo y los datos de la máquina virtual, necesitas configurar el tamaño de la partición persistente para almacenar paquetes del sistema e imágenes de contenedor. El tamaño de la partición persistente por defecto y mínimo es de 150 GiB. Puedes especificar un tamaño como 200Gi o 153600Mi.
+
+. Configura el `HostName` del nodo.
++
+image::install/config-hostname.png[config-hostname.png]
+
+. Configura la(s) interfaz(es) de red para la red de gestión. Por defecto, {harvester-product-name} crea una xref:../../installation-setup/requirements.adoc#_hardware_requirements[interfaz de enlace] llamada `mgmt-bo` para la xref:../../networking/cluster-network.adoc#_built_in_cluster_network[red de gestión integrada], y la dirección IP se puede configurar a través de DHCP o asignarse estáticamente.
++
+image::install/config-network.png[config-network.png]
++
+[NOTE]
+====
+Los switches físicos conectados a interfaces de enlace deben configurarse estrictamente como puertos troncales. Estos puertos deben aceptar tráfico etiquetado y enviar tráfico etiquetado con el ID de VLAN utilizado por la red de máquina virtual.
+
+No es posible cambiar la IP del nodo a lo largo del ciclo de vida de un clúster. Si utilizas DHCP, debes asegurarte de que el servidor DHCP siempre ofrezca la misma IP para el mismo nodo. Si se cambia la IP del nodo, el nodo relacionado no podrá unirse al clúster y podría incluso romper el clúster.
+
+Además, se requiere que añadas la opción _routers_ (`option routers`) al configurar el servidor DHCP. Esta opción se utiliza para añadir la ruta por defecto en el host. Sin la ruta por defecto, el nodo no podrá iniciarse.
+
+Por ejemplo:
+
+----
+Linux~ # ip route
+default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+El valor MTU por defecto de la interfaz de enlace es `1500`. Para utilizar un valor MTU diferente, configura el ajuste xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[[`install.management_interface`] en un archivo de configuración de Harvester según el siguiente paso.
+
+Para más información, consulta xref:./pxe-boot-install.adoc#_dhcp_server_configuration[Configuración del Servidor DHCP].
+====
+
+. (Opcional) Configura los CIDRs para los pods y servicios del clúster.
++
+Para utilizar los valores por defecto, deja los campos en blanco.
++
+image::install/config-cluster-cidrs.png[config-cluster-cidrs.png]
++
+[IMPORTANT]
+====
+Los valores CIDR no deben solaparse y deben estar dentro del rango de direcciones IP privadas de 10.0.0.0/8, 172.16.0.0/12 o 192.168.0.0/16.
+
+La IP del servicio DNS debe estar dentro del rango definido por el campo *CIDR de servicio*.
+====
++
+Ejemplo de una configuración CIDR válida:
++
+* *Pod CIDR*: 172.16.0.0/16
+* *Service CIDR*: 172.22.0.0/16
+* *Cluster DNS IP*: 172.22.0.10
+
+. (Opcional) Configura el `DNS Servers`. Usa comas como delimitador para añadir más servidores DNS. Déjalo en blanco para usar el servidor DNS por defecto.
++
+image::install/config-dns-server.png[config-dns-server.png]
+
+. Configura la IP virtual (VIP) seleccionando un `VIP Mode`. Esta VIP se utiliza para acceder al clúster o para que otros nodos se unan al clúster.
++
+[NOTE]
+====
+Para la configuración de DHCP con asignaciones de direcciones MAC a IP estáticas configuradas, introduce la dirección MAC en el campo proporcionado para obtener la IP virtual persistente única (VIP). De lo contrario, déjalo en blanco.
+====
++
+image::install/config-virtual-ip.png[config-virtual-ip.png]
+
+. Configura el `Cluster token`. Este token se utiliza para añadir otros nodos al clúster.
++
+image::install/config-cluster-token.png[config-cluster-token.png]
+
+. Configura `NTP servers` para asegurarte de que los tiempos de todos los nodos estén sincronizados. Esto se establece por defecto en `0.suse.pool.ntp.org`. Usa comas como delimitador para añadir más servidores NTP.
++
+image::install/config-ntp-server.png[config-ntp-server.png]
++
+[NOTE]
+====
+Usar múltiples servidores NTP proporciona redundancia, mejor precisión, tolerancia a fallos y un rendimiento mejorado. Asegura que la sincronización del tiempo continúe incluso si un servidor falla o proporciona datos incorrectos, y ayuda a distribuir la carga entre diferentes servidores.
+====
+
+. (Opcional) Si necesitas usar un proxy HTTP para acceder al mundo exterior, introduce la `Proxy address`. De lo contrario, deja esto en blanco.
++
+image::install/config-proxy.png[config-proxy.png]
+
+. (Opcional) Puedes elegir importar claves SSH proporcionando `HTTP URL`. Por ejemplo, tus claves públicas de GitHub `https://github.com/<username>.keys` pueden ser utilizadas.
++
+image::install/import-ssh-keys.png[import-ssh-keys.png]
+
+. (Opcional) Si necesitas personalizar el host con un xref:../../installation-setup/config/configuration-file.adoc[archivo de configuración], introduce la `HTTP URL` aquí.
++
+image::install/remote-config.png[remote-config.png]
+
+. Revisa y confirma tus opciones de instalación. Después de confirmar las opciones de instalación, {harvester-product-name} se instalará en tu host. La instalación puede tardar unos minutos en completarse.
++
+image::install/confirm-install.png[confirm-install.png]
+
+. Una vez que la instalación esté completa, tu nodo se reinicia. Después del reinicio, la consola muestra la URL de gestión y el estado. La URL por defecto de la interfaz web es `https://your-virtual-ip`. Puedes usar `F12` para cambiar de la consola a la Shell y escribir `exit` para volver a la consola.
++
+
+[NOTE]
+====
+Elegir `Install Harvester binaries only` en la primera página requiere configuración adicional después del primer arranque.
+====
+
++
+image::install/iso-installed.png[iso-installed.png]
+
+. Se te pedirá que establezcas la contraseña para el usuario por defecto `admin` al iniciar sesión por primera vez.
++
+image::install/first-time-login.png[first-login.png]
+
+////
+
+[NOTE]
+====
+In some cases, if you are using an older VGA connector, you may encounter an `panic: invalid dimensions` error with ISO installation. See issue [#2937](https://github.com/harvester/harvester/issues/2937#issuecomment-1278545927) for a workaround.
+====
+
+////
+
+== Problema conocido
+
+=== El instalador puede fallar al usar una tarjeta gráfica o monitor más antiguo.
+
+En algunos casos, si estás usando una tarjeta gráfica o monitor más antiguo, puedes encontrar un error de `panic: invalid dimensions` durante la instalación del ISO.
+
+image::install/invalid-dimensions.png[invalid-dimensions.png]
+
+Estamos trabajando en este problema conocido y planeando una solución para una futura versión. Puedes intentar usar otra entrada de GRUB para forzar el uso de la resolución de `1024x768` al arrancar.
+
+image::install/force-resolution.png[force-resolution.png]
+
+Si estás usando una versión anterior a la v1.1.1, por favor intenta la siguiente solución alternativa:
+
+. Arranca con el ISO y presiona `E` para editar la primera entrada del menú:
++
+image::install/grub-menu.png[grub-menu.png]
+
+. Añade `vga=792` a la línea que comienza con `$linux`:
++
+image::install/edit-menu-entry.png[edit-menu-entry.png]
+
+. Presiona `Ctrl+X` o `F10` para arrancar.

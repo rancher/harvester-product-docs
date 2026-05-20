@@ -1,0 +1,247 @@
+= Requisitos de Hardware e Rede
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+Como uma solução HCI em servidores bare metal, existem requisitos mínimos de hardware e rede para instalar e executar {harvester-product-name}.
+
+Um cluster de três nós é necessário para realizar totalmente os recursos de múltiplos nós. O primeiro nó adicionado ao cluster é, por padrão, o nó de gerenciamento. Quando o cluster tem três ou mais nós, os dois nós adicionados após o primeiro são automaticamente promovidos a nós de gerenciamento para formar um cluster de alta disponibilidade (HA).
+
+As versões mais recentes suportam a implantação de xref:installation-setup/single-node-clusters.adoc[clusters de nó único]. Esses clusters não suportam alta disponibilidade, múltiplas réplicas e migração ao vivo.
+
+== Requisitos de hardware
+
+Os nós {harvester-product-name} têm os seguintes requisitos e recomendações de hardware para instalação e teste.
+
+|===
+| Hardware | Desenvolvimento/Teste | Servidor
+
+| CPU
+| AMD64 ou ARM64 (com virtualização assistida por hardware); mínimo de 8 núcleos
+| AMD64 ou ARM64 (com virtualização assistida por hardware); mínimo de 16 núcleos
+
+| Memória
+| Mínimo de 32 GB
+| Mínimo de 64 GB
+
+| Capacidade do disco
+| Mínimo de 250 GB (mínimo de 180 GB para xref:hosts/witness-node.adoc[nós de testemunha] ou ao usar múltiplos discos)
+| Mínimo de 500 GB; 1 TB ou mais recomendado
+
+| Desempenho do disco
+| 5.000+ IOPS aleatórios por disco (SSD/NVMe); o armazenamento do nó de gerenciamento deve atender aos requisitos de velocidade de https://support.scc.suse.com/s/kb/360045276411[etcd]. Apenas discos locais e RAID de hardware são suportados.
+| 5.000+ IOPS aleatórios por disco (SSD/NVMe); o armazenamento do nó de gerenciamento deve atender aos requisitos de velocidade de https://support.scc.suse.com/s/kb/360045276411[etcd]. Apenas discos locais e RAID de hardware são suportados.
+
+| Contagem de placas de rede
+| Rede do cluster de gerenciamento: 1 NIC necessária, 2 NICs recomendadas; rede de carga de trabalho da VM: 1 NIC necessária, pelo menos 2 NICs recomendadas (não se aplica ao xref:hosts/witness-node.adoc[nó de testemunha])
+| Rede do cluster de gerenciamento: 1 NIC necessária, 2 NICs recomendadas; rede de carga de trabalho da VM: 1 NIC necessária, pelo menos 2 NICs recomendadas (não se aplica ao xref:hosts/witness-node.adoc[nó de testemunha])
+
+| Velocidade da placa de rede
+| Mínimo de 1 Gbps Ethernet
+| Mínimo de 10 Gbps Ethernet
+
+| Switch de rede
+| Tronco de porta para suporte a VLAN
+| Tronco de porta para suporte a VLAN
+|===
+
+[IMPORTANT]
+====
+* Clusters de arquitetura mista não são suportados. Implante clusters separados para evitar comportamento inesperado do sistema.
+* Para melhores resultados, use https://www.suse.com/yesCertified/home#search?platforms=1361&platforms=1360&platforms=1355[hardware certificado pela YES] para SUSE Linux Micro 5.5/6.0/6.1. {harvester-product-name} é construído sobre a tecnologia SUSE Linux Enterprise e o hardware certificado pela YES tem validação adicional de compatibilidade de driver e placa-mãe. Laptops e virtualização aninhada não são suportados.
+* A virtualização aninhada não é suportada em máquinas virtuais executando em {harvester-product-name}.
+* Cada nó deve ter um `product_uuid` exclusivo (obtido de `/sys/class/dmi/id/product_uuid`) para evitar erros durante a migração ao vivo da VM e outras operações. Para mais informações, consulte https://github.com/harvester/harvester/issues/4025[Problema #4025].
+* {harvester-product-name} possui uma xref:networking/cluster-network.adoc#_built_in_cluster_network[rede de cluster de gerenciamento incorporada] (`mgmt`). Para alcançar alta disponibilidade e o melhor desempenho em ambientes de produção, use pelo menos duas NICs em cada nó para configurar uma NIC agrupada para a rede de gerenciamento (veja o passo 6 em xref:installation-setup/methods/iso-install.adoc#_installation_steps[Instalação ISO]). Você também pode criar xref:networking/cluster-network.adoc#_custom_cluster_network[redes de cluster personalizadas] para cargas de trabalho de VM. Cada rede de cluster personalizada requer pelo menos duas NICs adicionais para configurar uma NIC agrupada em cada nó envolvido do cluster. O xref:hosts/witness-node.adoc[nó de testemunha] não requer NICs adicionais. Para mais informações, consulte xref:networking/cluster-network.adoc#_concepts[Cluster Network].
+* Durante os testes, você pode usar apenas uma NIC para a xref:networking/cluster-network.adoc#_built_in_cluster_network[rede de gerenciamento incorporada do cluster] (`mgmt`), e para testar a xref:networking/vm-network.adoc#_create_a_vm_network[rede de VM] que também é transportada por `mgmt`. Alta disponibilidade e desempenho ideal não são garantidos.
+* Se o disco atender apenas à capacidade mínima exigida, você pode encontrar problemas relacionados ao xref:upgrades/upgrades.adoc#_free_system_partition_space_requirement[requisito de espaço livre na partição do sistema] durante as atualizações.
+* O suporte para inicialização por BIOS legado está descontinuado na versão v1.7.0 e será removido em uma versão posterior. Os clusters {harvester-product-name} existentes que usam este modo de inicialização continuarão a funcionar, mas a atualização para versões posteriores pode exigir reinstalação em modo UEFI. Para evitar problemas e interrupções, use UEFI em novas instalações.
+====
+
+
+=== Especificações da CPU
+
+A xref:virtual-machines/live-migration.adoc[Migração ao Vivo] funciona corretamente apenas se as CPUs de todos os servidores físicos no cluster tiverem as mesmas especificações. Esse requisito se aplica a todas as operações que dependem da funcionalidade de Migração ao Vivo, como a migração automática de VM quando o xref:hosts/hosts.adoc#_node_maintenance[Modo de Manutenção] está habilitado.
+
+CPUs mais novas (mesmo aquelas do mesmo fornecedor, geração e família) podem ter capacidades variadas que podem ser expostas aos sistemas operacionais de VM. Para garantir a estabilidade da VM, a Migração ao Vivo verifica se as capacidades da CPU são consistentes e bloqueia tentativas de migração quando a origem e o destino são incompatíveis.
+
+Ao criar clusters, adicionar mais hosts a um cluster e substituir hosts, sempre use CPUs com as mesmas especificações para evitar restrições operacionais.
+
+== Requisitos de Rede
+
+Os nós têm os seguintes requisitos de rede para instalação.
+
+=== Requisitos de Porta para Nós
+
+Os nós requerem as seguintes conexões de porta ou regras de entrada. Normalmente, todo o tráfego de saída é permitido.
+
+|===
+| Protocolo | Portar | Origem | Descrição
+
+| TCP
+| 2379
+| Nós de gerenciamento
+| Porta do cliente etcd
+
+| TCP
+| 2381
+| Nós de gerenciamento
+| Coleta de métricas do etcd
+
+| TCP
+| 2380
+| Nós de gerenciamento
+| Porta do par etcd
+
+| TCP
+| 2382
+| Nós de gerenciamento
+| Porta do cliente etcd (apenas HTTP)
+
+| TCP
+| 10010
+| Nós de gerenciamento e computação
+| Containerd
+
+| TCP
+| 6443
+| Nós de gerenciamento
+| API Kubernetes
+
+| TCP
+| 9345
+| Nós de gerenciamento
+| API Kubernetes
+
+| TCP
+| 10252
+| Nós de gerenciamento
+| Verificações de saúde do kube-controller-manager
+
+| TCP
+| 10257
+| Nós de gerenciamento
+| Porta segura do kube-controller-manager
+
+| TCP
+| 10251
+| Nós de gerenciamento
+| Verificações de saúde do kube-scheduler
+
+| TCP
+| 10259
+| Nós de gerenciamento
+| Porta segura do kube-scheduler
+
+| TCP
+| 10250
+| Nós de gerenciamento e computação
+| Kubelet
+
+| TCP
+| 10256
+| Nós de gerenciamento e computação
+| Verificações de saúde do kube-proxy
+
+| TCP
+| 10258
+| Nós de gerenciamento
+| cloud-controller-manager
+
+| TCP
+| 10260
+| Nós de gerenciamento
+| cloud-controller-manager
+
+| TCP
+| 9091
+| Nós de gerenciamento e computação
+| Canal calico-node felix
+
+| TCP
+| 9099
+| Nós de gerenciamento e computação
+| Verificações de saúde do Canal CNI
+
+| UDP
+| 8472
+| Nós de gerenciamento e computação
+| Canal CNI com VxLAN
+
+| TCP
+| 2112
+| Nós de gerenciamento
+| Kube-vip
+
+| TCP
+| 6444
+| Nós de gerenciamento e computação
+| Agente RKE2
+
+| TCP
+| 10246/10247/10248/10249
+| Nós de gerenciamento e computação
+| Processo worker do Nginx
+
+| TCP
+| 8181
+| Nós de gerenciamento e computação
+| Controlador de ingress do Nginx
+
+| TCP
+| 8444
+| Nós de gerenciamento e computação
+| Controlador de ingress do Nginx
+
+| TCP
+| 10245
+| Nós de gerenciamento e computação
+| Controlador de ingress do Nginx
+
+| TCP
+| 80
+| Nós de gerenciamento e computação
+| Nginx
+
+| TCP
+| 9796
+| Nós de gerenciamento e computação
+| Node-exporter
+
+| TCP
+| 30000-32767
+| Nós de gerenciamento e computação
+| Intervalo de portas NodePort
+
+| TCP
+| 22
+| Nós de gerenciamento e computação
+| sshd
+
+| UDP
+| 68
+| Nós de gerenciamento e computação
+| NetworkManager
+
+| TCP
+| 3260
+| Nós de gerenciamento e computação
+| iscsid
+|===
+
+=== Requisitos de porta para integração com {rancher-product-name}
+
+Se você quiser xref:integrations/rancher/rancher-integration.adoc[integrar com {rancher-product-name}], precisa garantir que todos os {harvester-product-name} nós possam se conectar à porta TCP *443* do balanceador de carga {rancher-product-name}.
+
+Ao provisionar VMs com clusters Kubernetes de {rancher-product-name} para {harvester-product-name}, você precisa ser capaz de se conectar à porta TCP *443* do balanceador de carga {rancher-product-name}. Caso contrário, o cluster não será gerenciável por {rancher-product-name}. Para mais informações, consulte https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/about-rancher/architecture/communicating-with-downstream-clusters.html[Arquitetura do Rancher].
+
+=== Requisitos de porta para Clusters K3s e RKE2
+
+Para os requisitos de porta para clusters convidados implantados dentro de VMs {harvester-product-name}, consulte os seguintes links:
+
+* https://documentation.suse.com/cloudnative/k3s/latest/en/networking/networking.html[Rede K3s]
+* https://documentation.suse.com/cloudnative/rke2/latest/en/install/requirements.html#_networking[Rede RKE2]
+
+== Requisitos de Tempo
+
+Um servidor de Protocolo de Tempo de Rede (NTP) confiável é crítico para manter a hora do sistema correta em todos os nós de um cluster Kubernetes, especialmente ao executar {harvester-product-name}. O Kubernetes depende do etcd, um armazenamento de chave-valor distribuído, que requer sincronização de tempo precisa para garantir a consistência dos dados e evitar problemas com a eleição de líderes, replicação de logs e estabilidade do cluster.
+
+Garantir um tempo preciso e consistente em todo o cluster é essencial para a confiabilidade, segurança e integridade geral do sistema.

@@ -1,0 +1,102 @@
+= Mise à niveau de v1.2.1 à v1.2.2
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== informations générales
+
+Un bouton *Mettre à niveau* apparaît sur l'écran *Tableau de bord* chaque fois qu'une nouvelle {harvester-product-name} version à laquelle vous pouvez mettre à niveau est disponible. Pour plus d'informations, voir xref:./upgrades.adoc#_start_an_upgrade[Démarrer une mise à niveau].
+
+Pour les environnements isolés physiquement, voir xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Préparer une mise à niveau isolée].
+
+== Problèmes connus
+
+=== 1. Mise à niveau bloquée dans l'état `Upgrading System Service`
+
+Des certificats expirés de certains services système peuvent provoquer le blocage d'une mise à niveau dans l'état `Upgrading System Service` pendant une période prolongée. Pour résoudre ce problème, procédez comme suit :
+
+. Identifiez le nom du travail d'application du manifeste.
++
+[,sh]
+----
+kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+----
++
+Exemple de sortie{nbsp}:
++
+[,console]
+----
+NAME                                 COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-apply-manifests   0/1           46s        46s
+----
++
+. Vérifiez les journaux du travail d'application du manifeste.
++
+[,sh]
+----
+ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
+----
++
+Si les messages suivants apparaissent dans le journal, passez à l'étape suivante.
++
+[,console]
+----
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+----
++
+. Vérifiez l'état du cluster API (CAPI).
++
+[,sh]
+----
+kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+Si la sortie est similaire à l'exemple suivant, le problème existe probablement dans le cluster.
++
+[,console]
+----
+    - lastUpdateTime: "2023-01-17T16:26:48Z"
+      message: 'configuring bootstrap node(s) custom-24cb32ce8387: waiting for probes:
+        kube-controller-manager, kube-scheduler'
+      reason: Waiting
+      status: Unknown
+      type: Updated
+----
++
+. Identifiez le nom d'hôte du nœud affecté et mettez en œuvre le https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[solution de contournement] pour voir si les certificats de service expirent.
++
+[,sh]
+----
+kubectl get machines.cluster.x-k8s.io -n fleet-local <machine_name> -o yaml | yq .status.nodeRef.name
+----
++
+Remplacez `<machine_name>` par le nom du nœud affecté (tel qu'indiqué dans la sortie de l'étape précédente).
++
+[NOTE]
+====
+Si plusieurs nœuds ont rejoint le cluster à peu près au même moment, vous devez mettre en œuvre le https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[solution de contournement] sur tous ces nœuds.
+====
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/3863[#3863] (Voir https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[solution de contournement])
+
+'''
+
+=== 2. Le produit complémentaire *harvester-seeder* n'est pas mis à niveau
+
+Lors de la mise à niveau des clusters Harvester de v1.2.1 à v1.2.2, le produit complémentaire *harvester-seeder* n'est pas entièrement mis à niveau car les versions des graphiques Helm ne correspondent pas. Le `harvester-seeder` graphique fourni avec Harvester v1.2.2 est de v0.1.1, tandis que le `harvester-seeder` produit complémentaire utilise le graphique v0.1.0.
+
+[,console]
+----
+Error: chart "harvester-seeder" matching 0.1.0 not found in harvester-seeder index. (try 'helm repo update'): no chart version found for harvester-seeder-0.1.0
+----
+
+Si vous activez le produit complémentaire après avoir mis à niveau vers Harvester v1.2.2, l'installation du graphique ne sera également pas possible en raison de l'incompatibilité mentionnée.
+
+La solution de contournement consiste à mettre à jour manuellement le manifeste du produit complémentaire *harvester-seeder* en utilisant la commande suivante. Vous devez désactiver le produit complémentaire avant d'appliquer le correctif.
+
+[,sh]
+----
+kubectl -n harvester-system patch addons.harvesterhci harvester-seeder --type=json -p '[{"op": "replace", "path": "/spec/version", "value": "0.1.1"}]'
+----

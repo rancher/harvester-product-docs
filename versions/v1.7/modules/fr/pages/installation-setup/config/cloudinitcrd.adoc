@@ -1,0 +1,140 @@
+= CloudInit CRD
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Vous pouvez utiliser le `CloudInit` CRD pour configurer les paramètres du système d'exploitation {harvester-product-name} soit manuellement, soit en utilisant des solutions GitOps.
+
+== Arrière-plan
+
+Le système d'exploitation {harvester-product-name} utilise le https://github.com/rancher/elemental-toolkit[elemental-toolkit], qui a une forme unique de https://rancher.github.io/elemental-toolkit/docs/reference/cloud_init/[support cloud-init].
+
+Les paramètres configurés pendant le processus d'installation sont écrits dans le `elemental` fichier cloud-init dans le répertoire `/oem`. Parce que le système d'exploitation est immuable, le fichier cloud-init garantit que les paramètres spécifiques au nœud sont appliqués à chaque redémarrage.
+
+Le `CloudInit` CRD expose le fichier cloud-init via un CRD Kubernetes. Cela vous permet de modifier les paramètres spécifiques au nœud après l'installation sans avoir besoin de rendre le système de fichiers racine modifiable.
+
+De plus, le `CloudInit` CRD est persistant et synchronisé avec les hôtes sous-jacents afin que les modifications apportées directement au système d'exploitation ne soient pas perdues chaque fois que les nœuds sont redémarrés et mis à niveau.
+
+[NOTE]
+====
+
+Le `CloudInit` CRD est une ressource à portée de cluster. Assurez-vous que votre compte utilisateur dispose des autorisations nécessaires pour accéder à la ressource (via {rancher-product-name} le contrôle d'accès en fonction du rôle).
+====
+
+
+== Mise en route
+
+L'exemple suivant ajoute des clés SSH à tous les nœuds d'un {harvester-product-name} cluster existant.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: my-ssh-keys
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-my-ssh-keys
+  contents: |
+    stages:
+      network:
+        - name: "add my ssh keys"
+          authorized_keys:
+            rancher:
+            - ssh-rsa key1
+            - ssh-rsa key2
+  paused: false
+----
+
+Le `spec` champ contient les éléments suivants{nbsp}:
+
+* `matchSelector (required)` : Sélecteur d'étiquettes utilisé pour identifier les nœuds auxquels le changement doit être appliqué. Vous pouvez utiliser l'étiquette `harvesterhci.io/managed: "true"` pour sélectionner tous les nœuds.
+* `filename (required)` : Nom du fichier dans `/oem`. Les fichiers cloud-init dans `/oem` sont appliqués par ordre alphabétique. Cela peut être utilisé pour garantir que les modifications de fichiers sont appliquées lors du démarrage.
+* `content (required)` : Contenu en ligne pour la ressource cloud-init Elemental qui est écrit sur les nœuds cibles.
+* `paused (optional)` : Utilisé pour mettre en pause la réconciliation du CRD `CloudInit`. Les {harvester-product-name} contrôleurs surveillent les fichiers cloud-init Elemental qui sont gérés par le `CloudInit` CRD. Les modifications directes apportées à ces fichiers sont immédiatement réconciliées avec l'état défini, sauf si le CRD est mis en pause.
+
+Une fois l'objet créé, vous pouvez vous connecter aux nœuds cibles pour vérifier les résultats.
+
+Dans l'exemple suivant, un fichier nommé `/oem/99-my-ssh-keys.yaml` est créé et ensuite surveillé par les {harvester-product-name} contrôleurs.
+
+----
+harvester-qhgd4:/oem # more 99-my-ssh-keys.yaml
+stages:
+  network:
+    - name: "add my ssh keys"
+      authorized_keys:
+        rancher:
+        - ssh-rsa key1
+        - ssh-rsa key2
+----
+
+La `status` sous-ressource peut être utilisée pour suivre le déploiement d'un changement sur les nœuds sous-jacents.
+
+Dans l'exemple suivant, les `status` valeurs indiquent que le changement a été appliqué à tous les trois nœuds du cluster.
+
+----
+status:
+  rollouts:
+    harvester-kfs2c:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-qhgd4:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-rmvzg:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+[NOTE]
+====
+
+Une fois les modifications cloud-init appliquées, vous devez redémarrer les nœuds pour vous assurer que le `elemental-toolkit` applique les changements demandés au système d'exploitation.
+====
+
+
+La suppression du `CloudInit` CRD entraîne la suppression des fichiers associés des nœuds sous-jacents. Comme pour d'autres ressources cloud-init, les effets de ce changement ne se manifestent pas tant que les nœuds concernés ne sont pas redémarrés.
+
+Vous êtes encouragé à tirer parti de https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] et du `CloudInit` CRD pour gérer les changements apportés au {harvester-product-name} système d’exploitation.

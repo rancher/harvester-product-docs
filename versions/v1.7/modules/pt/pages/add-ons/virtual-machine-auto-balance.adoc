@@ -1,0 +1,143 @@
+= Balance Automático de Máquinas Virtuais (Experimental)
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*balance-automático-de-máquinas-virtuais* é um *complemento experimental*. Para mais informações sobre recursos experimentais, consulte xref:introduction/document-conventions.adoc#_feature_labels[Rótulos de Recursos].
+====
+
+O complemento *balance-automático-de-máquinas-virtuais* permite que {harvester-product-name} utilize o https://github.com/kubernetes-sigs/descheduler[Descheduler do Kubernetes] para reequilibrar as cargas de trabalho das máquinas virtuais. O Descheduler do Kubernetes otimiza o agendamento de cargas de trabalho ao expulsar pods que não estão colocados de forma otimizada de acordo com as políticas definidas pelo administrador. Essa função crucial melhora a utilização de recursos, equilibra as cargas de trabalho entre os nós e melhora o desempenho geral do cluster.
+
+== Habilitando o complemento
+
+Quando habilitado, o complemento implanta o Descheduler no namespace `kube-system` e uma configuração relacionada no ConfigMap `kube-system/descheduler`. Você pode habilitar o complemento apenas quando o cluster possui mais de um nó.
+
+. Na interface do {harvester-product-name}, vá para *Complementos Avançados ->*.
+
+. Selecione *descheduler (Experimental)*, e então selecione *⋮ -> Habilitar*.
+
+== Políticas do Descheduler
+
+A configuração contém os seguintes plugins:
+
+* `DefaultEvictor`: Fornece configuração comum de expulsão no nível superior.
+* `LowNodeUtilization`: Monitora o uso de recursos do nó e expulsa pods de nós sobrecarregados para nós subutilizados com base em limites definidos.
+
+Com a configuração padrão, o Descheduler apenas expulsa pods de máquinas virtuais.
+
+== Personalizando as políticas do Descheduler
+
+Selecione *⋮ -> Editar YAML* para personalizar as políticas do Descheduler de acordo com suas necessidades. A configuração é definida no formato YAML.
+
+[,yaml]
+----
+  - apiVersion: harvesterhci.io/v1beta1
+    kind: Addon
+    metadata:
+      name: descheduler
+      namespace: kube-system
+      labels:
+        addon.harvesterhci.io/displayName: "virtual-machine-auto-balance"
+        addon.harvesterhci.io/experimental: "true"
+    spec:
+      repo: http://harvester-cluster-repo.cattle-system.svc/charts
+      version: << .DESCHEDULER_CHART_VERSION >>
+      chart: descheduler
+      {{- if and .Addons .Addons.descheduler }}
+      enabled: {{ .Addons.descheduler.Enabled }}
+      {{- else }}
+      enabled: false
+      {{- end }}
+      valuesContent: |
+        kind: Deployment
+        image:
+          repository: registry.k8s.io/descheduler/descheduler
+          pullPolicy: IfNotPresent
+        deschedulingInterval: 5m
+        replicas: 1
+        cmdOptions:
+          v: 3
+          feature-gates: EvictionsInBackground=true
+        deschedulerPolicy:
+          maxNoOfPodsToEvictPerNode: 5
+          profiles:
+          - name: default
+            pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                ignorePvcPods: false
+                evictLocalStoragePods: true
+                labelSelector:
+                  matchExpressions:
+                    - key: "kubevirt.io"
+                      operator: "In"
+                      values:
+                        - "virt-launcher"
+            - name: LowNodeUtilization
+              args:
+                evictableNamespaces:
+                  exclude:
+                  - cattle-dashboards
+                  - cattle-fleet-clusters-system
+                  - cattle-fleet-local-system
+                  - cattle-fleet-system
+                  - cattle-logging-system
+                  - cattle-monitoring-system
+                  - cattle-provisioning-capi-system
+                  - cattle-system
+                  - fleet-local
+                  - harvester-system
+                  - kube-system
+                  - local
+                  - longhorn-system
+                thresholds:
+                  cpu: 30
+                  memory: 30
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+            plugins:
+              balance:
+                enabled:
+                - LowNodeUtilization
+----
+
+** `deschedulingInterval`: Com que frequência o Descheduler é executado. O valor padrão é `5m` (5 minutos).
+** `maxNoOfPodsToEvictPerNode`: Número máximo de pods que podem ser expulsos durante um único ciclo de desagendamento. O valor padrão é `5`.
+** `evictableNamespaces.exclude`: Namespaces a serem excluídos da expulsão. Por padrão, os namespaces do sistema são excluídos para proteger componentes críticos do sistema.
+** `targetThresholds`: Limite superior de utilização para recursos monitorados. Nós cuja utilização excede esse limite são marcados como sobreutilizados, acionando a expulsão de pods para reduzir sua carga. Os valores padrão são aplicados automaticamente para CPU (`50`) e memória (`50`), mas você pode definir valores para outros recursos monitorados.
+** `thresholds`: Limite inferior de utilização para recursos monitorados. Pods expulsos de nós sobreutilizados são reprogramados apenas para nós cuja utilização está atualmente abaixo desse limite. Os valores padrão são aplicados automaticamente para CPU (`30`) e memória (`30`), mas você pode definir valores para outros recursos monitorados.
+
+== Desabilitando o complemento
+
+. Na interface do {harvester-product-name}, vá para *Complementos Avançados ->*.
+
+. Selecione *descheduler (Experimental)*, e então selecione *⋮ -> Desabilitar*.
+
+== Utilização do nó
+
+Verifique os logs do Descheduler para informações sobre a utilização do nó.
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.067225       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-131-tink-system" usage={"cpu":"4583m","memory":"3075Mi","pods":"25"} usagePercentage={"cpu":20,"memory":2,"pods":13}
+I1209 02:06:21.067328       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-121-tink-system" usage={"cpu":"5198m","memory":"4023Mi","pods":"30"} usagePercentage={"cpu":23,"memory":3,"pods":15}
+I1209 02:06:21.067355       1 lownodeutilization.go:210] "Node has been classified" category="overutilized" node="hp-119-tink-system" usage={"cpu":"10490m","memory":"109333705514","pods":"81"} usagePercentage={"cpu":46,"memory":81,"pods":41}
+----
+
+== Solução de problemas
+
+O Descheduler funciona com pods em vez de máquinas virtuais. Se uma máquina virtual que você espera que seja expulsa não for, verifique os logs do Descheduler.
+
+Exemplo:
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.068059       1 defaultevictor.go:228] "pod does not fit on any other node because of nodeSelector(s), Taint(s), or nodes marked as unschedulable" pod="default/virt-launcher-vm-3-w866s"
+----
+
+Neste exemplo, a máquina virtual foi migrada manualmente e, por isso, a especificação do pod relacionado contém um seletor de nó restritivo. O Descheduler não consegue expelir este pod porque o seletor de nó impediria que o pod fosse executado com sucesso em qualquer outro nó disponível no cluster.

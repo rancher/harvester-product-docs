@@ -1,0 +1,167 @@
+= Entorno aislado
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Esta sección describe cómo utilizar {harvester-product-name} en un entorno aislado. Algunos casos de uso podrían ser donde {harvester-product-name} se instalará sin conexión, detrás de un firewall o detrás de un proxy.
+
+La imagen ISO contiene todos los paquetes necesarios para que funcione en un entorno aislado.
+
+== Trabajando Detrás de un Proxy HTTP
+
+En algunos entornos, la conexión a servicios externos, desde los servidores o máquinas virtuales, requiere un proxy HTTP(S).
+
+=== Configurar un Proxy HTTP Durante la Instalación
+
+Puedes configurar el proxy HTTP(S) durante la xref:../installation-setup/methods/iso-install.adoc[instalación de la ISO] como se muestra en la imagen a continuación:
+
+image::install/iso-proxy.png[iso-proxy]
+
+=== Configurar un Proxy HTTP
+
+Puedes configurar el proxy HTTP(S) utilizando la interfaz de usuario.
+
+. Ve a la página de configuración de la interfaz de usuario.
+. Encuentra la configuración de `http-proxy`, haz clic en *⋮ > Editar configuración*
+. Introduce el/los valor(es) para `http-proxy`, `https-proxy` y `no-proxy`.
+
+image::proxy-setting.png[proxy-setting]
+
+[NOTE]
+====
+{harvester-product-name} añade las direcciones necesarias a `no-proxy` configuradas por el usuario para asegurar que el tráfico interno funcione. Es decir, `localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`. `harvester-system` se añadió a la lista desde la versión 1.1.2.
+
+Cuando los nodos en el clúster no utilizan un proxy para comunicarse entre sí, el CIDR necesita ser añadido a `http-proxy.noProxy` después de que el primer nodo se instale correctamente. Por favor, consulta xref:../troubleshooting/cluster.adoc#_fail_to_deploy_a_multi_node_cluster_due_to_incorrect_http_proxy_setting[fallo al desplegar un clúster de múltiples nodos].
+====
+
+== Imágenes del Clúster de Invitados
+
+Todas las imágenes necesarias para instalar y ejecutar {harvester-product-name} están convenientemente empaquetadas en la ISO, eliminando la necesidad de precargar imágenes en nodos sin sistema operativo. Un {harvester-product-name} clúster los gestiona de forma independiente y eficaz en segundo plano.
+
+Sin embargo, es esencial entender que un clúster Kubernetes invitado (por ejemplo, un {rke2-product-name} clúster) creado por el xref:../integrations/rancher/node-driver/node-driver.adoc[Controlador de Nodo Harvester] es una entidad distinta de un clúster {harvester-product-name}. Un clúster invitado opera dentro de máquinas virtuales y requiere obtener imágenes ya sea de internet o de un https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/global-configuration/global-default-private-registry.html#_configure_a_private_registry_with_credentials_when_creating_a_cluster[registro privado].
+
+Si la opción *Proveedor de Nube* está configurada para {harvester-product-name} en un clúster Kubernetes invitado, despliega el Proveedor de Nube Harvester y el controlador de Interfaz de Almacenamiento de Contenedores (CSI).
+
+image::cluster-registry.png[registro-clúster]
+
+Como resultado, recomendamos monitorizar cada versión de RKE2 en su entorno aislado y obtener las imágenes necesarias en su registro privado. Por favor, consulte la https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[Matriz de Soporte] para el mejor soporte de capacidades del Proveedor de Nube Harvester y del controlador CSI.
+
+== Integrar con un Externo {rancher-short-name}
+
+{rancher-short-name} determina la imagen `rancher-agent` que se utilizará cada vez que se importe un clúster {harvester-product-name}. Si la imagen no está incluida en el {harvester-product-name} ISO, debe obtenerse de internet y cargarse en cada nodo, o enviarse al registro del clúster {harvester-product-name}.
+
+[,bash]
+----
+# Run the following commands on a computer that can access both the internet and the {harvester-product-name} cluster.
+docker pull rancher/rancher-agent:<version>
+docker save rancher/rancher-agent:<version> -o rancher-agent-<version>.tar
+
+# Copy the image TAR file to the air-gapped environment.
+scp rancher-agent-<version>.tar rancher@<harvester-node-ip>:/tmp
+
+# Use SSH to connect to the {harvester-product-name} node, and then load the image.
+ssh rancher@<harvester-node-ip>
+sudo -i
+docker load -i /tmp/rancher-agent-<version>.tar
+----
+
+== Extensión de la interfaz de usuario de Harvester con integración de {rancher-short-name}
+
+La extensión de la interfaz de usuario de Harvester es necesaria para acceder a la interfaz de usuario de {harvester-product-name} en {rancher-short-name} v2.10.x y versiones posteriores. Sin embargo, instalar la extensión a través de la red no es posible en un entorno aislado, por lo que debe realizar el siguiente procedimiento alternativo:
+
+. Extraiga la imagen https://hub.docker.com/r/rancher/ui-plugin-catalog/tags[rancher/ui-plugin-catalog] con la etiqueta más reciente.
+
+. En la interfaz de usuario de {rancher-short-name}, vaya a *Extensiones*, y luego seleccione *⋮ -> Gestionar catálogos de extensiones*.
++
+image::air-gapped/air-gappted-harvester-ui-extension-01.png[Rancher UI - Gestionar catálogos de extensiones]
+
+. Especifique la información requerida.
++
+image::air-gapped/air-gappted-harvester-ui-extension-02.png[Rancher UI - Importar catálogo de extensiones]
++
+* *Referencia de imagen del catálogo*: Especifique la URL del registro privado y el repositorio de imágenes.
+* *Secretos de extracción de imágenes*: Especifique el secreto utilizado para acceder al registro cuando se requieren un nombre de usuario y una contraseña. Debe crear ese secreto en el espacio de nombres `cattle-ui-plugin-system`. Utilice `kubernetes.io/dockercfg` o `kubernetes.io/dockerconfigjson` como el valor de `type`.
++
+Ejemplo:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-registry-secret-rancher
+  namespace: cattle-ui-plugin-system
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {base64 encoded data}
+----
+
+. Haga clic en *Cargar*, y luego permita un tiempo para que la extensión se cargue.
++
+image::air-gapped/air-gappted-harvester-ui-extension-03.png[Interfaz de Rancher - Catálogos de extensiones]
+
+. En la pestaña *Disponibles*, localice la extensión llamada *Harvester*, y luego haga clic en *Instalar*.
++
+image::air-gapped/air-gappted-harvester-ui-extension-04.png[Interfaz de Rancher - Extensiones disponibles]
+
+. Seleccione la versión que coincida con el clúster {harvester-product-name}, y luego haga clic en *Instalar*.
++
+Para más información, consulte la xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[matriz de soporte de extensiones de Harvester UI].
++
+image::air-gapped/air-gappted-harvester-ui-extension-05.png[Interfaz de Rancher - Seleccionar versión de extensión de Harvester UI]
++
+image::air-gapped/air-gappted-harvester-ui-extension-06.png[Interfaz de Rancher - Extensión de Harvester UI instalada]
+
+. Ve a *Gestión de virtualización -> Clústeres de Harvester*.
++
+Ahora puede importar clústeres {harvester-product-name} y acceder a la interfaz de usuario {harvester-product-name}.
++
+image::air-gapped/air-gappted-harvester-ui-extension-07.png[Interfaz de Rancher - Clústeres de Harvester]
+
+== Requisitos de tiempo
+
+Un servidor de protocolo de tiempo de red (NTP) fiable es crítico para mantener la hora del sistema correcta en todos los nodos de un clúster de Kubernetes, especialmente al ejecutar {harvester-product-name}. Kubernetes depende de etcd, un almacén de clave-valor distribuido, que requiere una sincronización precisa para asegurar la consistencia de los datos y prevenir problemas con la elección de líderes, la replicación de registros y la estabilidad del clúster.
+
+En un entorno aislado, donde las fuentes de tiempo externas no están disponibles, mantener un tiempo preciso y sincronizado se vuelve aún más crucial. Sin una sincronización adecuada, los nodos del clúster pueden experimentar fallos de autenticación, problemas de programación o incluso corrupción de datos. Para mitigar estos riesgos, las organizaciones deben desplegar un servidor NTP interno robusto que realice la sincronización en todos los sistemas dentro de la red.
+
+Asegurar una hora precisa y consistente en el clúster es esencial para la fiabilidad, la seguridad y la integridad general del sistema.
+
+== Solución de problemas
+
+=== Las extensiones de la interfaz de usuario no aparecen
+
+Si la pantalla de *Extensiones* está vacía, ve a *Repositorios* (*⋮ -> Gestionar Repositorios*) y luego haz clic en *Actualizar*.
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-01.png[Interfaz de Rancher - Gestionar Repositorios]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-02.png[Interfaz de Rancher - Error de Conexión Rechazada]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-03.png[Interfaz de Rancher - Actualizar Pantalla de Repositorios]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-04.png[Interfaz de Rancher - Repositorios]
+
+=== Error de Instalación
+
+Si encuentras un error durante la instalación, revisa el recurso `uiplugins`.
+
+image::air-gapped/air-gappted-harvester-ui-extension-05-01.png[Interfaz de Rancher - Error de Instalación de la Extensión de Interfaz de Usuario de Harvester]
+
+Ejemplo:
+
+[,shell]
+----
+bash-4.4# k get uiplugins -A
+NAMESPACE                 NAME        PLUGIN NAME   VERSION   STATE
+cattle-ui-plugin-system   harvester   harvester     1.0.3     pending
+bash-4.4# k get uiplugins harvester --namespace cattle-ui-plugin-system -o yaml
+apiVersion: catalog.cattle.io/v1
+kind: UIPlugin
+metadata:
+  # skip
+  name: harvester
+  namespace: cattle-ui-plugin-system
+spec:
+  plugin:
+    endpoint: http://ui-plugin-catalog-svc.cattle-ui-plugin-system:8080/plugin/harvester-1.0.3
+----
+
+Asegúrate de que `svc.namespace` sea accesible desde {rancher-short-name}. Si ese punto final no es accesible, puedes usar directamente una IP de clúster como `10.43.33.58:8080/plugin/harvester-1.0.3`.

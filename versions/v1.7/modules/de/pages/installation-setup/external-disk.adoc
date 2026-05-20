@@ -1,0 +1,83 @@
+= Unterstützung für externe Festplatten
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== Übersicht
+
+{harvester-product-name} kann auf externen Festplatten installiert und von diesen gebootet werden. Dies ist besonders nützlich in Umgebungen, in denen Hosts NICs oder HBA-Karten haben, die das Booten von externen iSCSI-Geräten oder SAN-Speicherarrays unterstützen. Solche festplattenlosen Systeme sind in großen Rechenzentren verbreitet.
+
+Die folgenden Abschnitte enthalten Informationen zur Installation von {harvester-product-name} auf einem externen iSCSI-Gerät. Der Workflow für SAN-Arrays ist ähnlich, jedoch können andere Kernel-Argumente erforderlich sein, um {harvester-product-name} erfolgreich von einem SAN-Array zu booten.
+
+== iSCSI-basierte Installation
+
+=== Konfigurieren Sie das iSCSI-Ziel
+
+[NOTE]
+====
+Notwendige Änderungen am BIOS oder an der Firmware hängen von der verwendeten Hardware ab.
+====
+
+Wenn das Installationsziel eingeschaltet oder zurückgesetzt wird, müssen Sie das Firmware-Setup-Menü aufrufen, um die Boot-Einstellungen zu ändern und das Booten über iSCSI zu aktivieren. Die Einstellungen variieren von System zu System.
+
+Das Betreten des Firmware-Setup-Menüs erfordert in der Regel das Drücken einer bestimmten Taste (zum Beispiel F2, F7 oder ESC). Das System zeigt wahrscheinlich eine Liste von Tasten an, die für bestimmte Firmware-Funktionen verfügbar sind. Diese Liste wird jedoch nur für sehr kurze Zeit angezeigt, sodass Sie eine Menüoption auswählen müssen, bevor die Liste verschwindet und das System mit dem Booten beginnt.
+
+image::install/target-details.png[target-details]
+
+Zu den Konfigurationsaufgaben, die Sie ausführen müssen, gehören folgende:
+
+* UEFI-Boot aktivieren
++
+* iSCSI-Initiator- und Zielparameter konfigurieren
++
+* Das iSCSI-Gerät im Boot-Menü aktivieren
++
+* Die Boot-Reihenfolge so festlegen, dass Ihr System von dem iSCSI-Gerät bootet
+
+Siehe die Dokumentation Ihres Systemanbieters für weitere Informationen zu Boot-Einstellungen und Firmware-Funktionen.
+
+=== Installieren {harvester-product-name}
+
+Sie können das {harvester-product-name} ISO mit einer der gängigen Methoden laden. Der Installer sollte das iSCSI-Gerät automatisch erkennen. Wählen Sie dieses Gerät aus, wenn Sie aufgefordert werden, die Installationsdisk anzugeben.
+
+Die Informationen, die im Installer angezeigt werden, unterscheiden sich leicht, wenn Sie ein iSCSI-Ziel auswählen.
+
+* Bildschirm zur Netzwerkkonfiguration: Zeigt nicht die Netzwerkschnittstellen an, die zum Mounten der iSCSI-Volumes verwendet werden.
++
+* Bildschirm zur Festplattenkonfiguration: Zeigt den ersten Pfad zu einer Multipfad-Remote-Festplatte an. Nach der Installation (vorausgesetzt, `os.externalStorageConfig` wird bereitgestellt), bootet das Betriebssystem jedoch vom Multipfad-Gerät.
+
+Während der Installation müssen Sie eine Konfigurationsdatei (`config.yaml`) bereitstellen, die Multipfad- und zusätzliche Kernel-Argumente enthält. Die Informationen werden dem installierten Betriebssystem hinzugefügt, um nachfolgende Boots von einem iSCSI-Ziel zu ermöglichen.
+
+Beispiel (`config.yaml`):
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+Die Testkonfiguration verwendet mehrere getaggte VLANs, wie VLAN 2017 (verwendet für die Verbindung mit dem iSCSI-Volume) und VLAN 2011 (verwendet für die {harvester-product-name} Verwaltungsoberfläche).
+
+Das Kernel-Argument `vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none` ist nur erforderlich, wenn das iSCSI-Volume über eine Netzwerkschnittstelle in einem getaggten VLAN zugänglich ist. Die Argumente stellen sicher, dass während des Bootvorgangs eine zusätzliche getaggte Netzwerkschnittstelle erstellt wird und dass einer dieser Schnittstellen eine statische Adresse zugewiesen wird. Siehe https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline] für weitere Informationen zur Konfiguration der Kernel-Argumente, um Ihren Anwendungsfall zu erfüllen.
+
+Die `write_files` Direktive ist erforderlich, um sicherzustellen, dass die Verwaltungsoberfläche als Gateway verwendet wird. Dies ist entscheidend, da RKE2 die Netzwerkschnittstelle mit dem Gateway als Knotenadresse verwendet.

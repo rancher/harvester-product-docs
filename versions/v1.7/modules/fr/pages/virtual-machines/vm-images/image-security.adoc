@@ -1,0 +1,168 @@
+= Sécurité de l'image
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{harvester-product-name} vous permet de chiffrer et de déchiffrer les images de machines virtuelles. Le mécanisme de chiffrement utilise le module du noyau Linux dm_crypt et l'utilitaire en ligne de commande cryptsetup.
+
+[NOTE]
+====
+Cette fonctionnalité ne prend en charge que le moteur de données Longhorn V1. Vous ne pouvez pas chiffrer et déchiffrer des images stockées dans d'autres solutions de stockage.
+====
+
+== Conditions préalables
+
+Préparez les ressources suivantes{nbsp}:
+
+* Machine virtuelle source image: You can xref:./upload-image.adoc[téléverser ou créer une image] en utilisant l'une des méthodes prises en charge.
++
+[CAUTION]
+====
+Ne téléversez pas une image chiffrée.
+====
++
+* Secret : Un secret Kubernetes est utilisé comme phrase de passe de dm_crypt. Vous devez spécifier la valeur du champ `CRYPTO_KEY_VALUE`. Tous les autres champs sont fixes.
++
+image::vm/create-encryption-used-secret.png[]
++
+Exemple d'un secret{nbsp}:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+L'exemple contient le code YAML par défaut pour les secrets Kubernetes. En plus de cela, vous pouvez utiliser https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[options de chiffrement pour le mode LUKS], qui est un mode de fonctionnement de cryptsetup. Harvester v1.4.1 et les versions ultérieures prennent en charge ces options, mais vous devez vérifier qu'elles sont prises en charge par vos nœuds.
+
+|===
+| Option | Valeurs possibles
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Vous pouvez créer un secret dans l'espace de noms système en utilisant kubectl et l'interface {harvester-product-name} (fonctionnalité *Modifier en YAML*). Les ressources dans l'espace de noms système ne sont pas affichées à l'écran *Secrets*.
+====
++
+* Classe de Stockage{nbsp}: Les images sont chiffrées à l'aide de Longhorn, donc les champs requis doivent être transmis au pilote CSI Longhorn. Vous pouvez spécifier le secret de chiffrement lors de la création d'une Classe de Stockage. Pour plus d'informations, voir xref:./upload-image.adoc#_image_storageclass[Image StorageClass].
++ 
+image::vm/create-storage-class.png[]
++
+Exemple d'une Classe de Stockage{nbsp}:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Vous pouvez créer un secret dans l'espace de noms système en utilisant kubectl et l'interface {harvester-product-name} (fonctionnalité *Modifier en YAML*). Les ressources dans l'espace de noms système ne sont pas affichées à l'écran *Secrets*.
+====
+
+== Chiffrer une image de machine virtuelle
+
+. Dans l'interface {harvester-product-name}, allez à *Images*.
++
+. Cliquez sur *Create*.
++
+. Spécifiez un espace de noms et un nom.
++
+. Dans l'onglet *Basics*, sélectionnez *Encrypt* puis sélectionnez une image source.
++
+image::vm/create-encrypted-image.png[]
++
+. Dans l'onglet *Storage*, sélectionnez une Classe de Stockage qui inclut des champs liés au chiffrement. 
++
+{harvester-product-name} transmet les champs requis à Longhorn.
++
+image::vm/select-encryption-storage-class.png[]
++
+. Cliquez sur *Create*.
+
+== Déchiffrer une image de machine virtuelle
+
+. Dans l'interface {harvester-product-name}, allez à *Images*.
++
+. Cliquez sur *Create*.
++
+. Spécifiez un espace de noms et un nom.
++
+. Dans l'onglet *Basics*, sélectionnez *Decrypt* puis sélectionnez une image source.
++
+image::vm/create-decrypted-image.png[]
++
+. Dans l'onglet *Storage*, sélectionnez *harvester-longhorn (Default)* ou une autre Classe de Stockage couramment utilisée.
++
+{harvester-product-name} utilise la Classe de Stockage de l'image source que vous souhaitez déchiffrer.
++
+image::vm/select-normal-storage-class.png[]
++
+. Cliquez sur *Create*.
+
+== Utiliser une image avec des volumes chiffrés
+
+Vous devez sélectionner l'image que vous souhaitez utiliser lors de la création d'une machine virtuelle.
+
+image::vm/create.png[]
+
+L'écran *Virtual Machines* affiche les icônes et messages suivants lorsque les volumes utilisés par les machines virtuelles sont chiffrés.
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+Pour déterminer quels volumes sont chiffrés, vérifiez l'onglet *Volumes* sur l'écran des détails de la *Machine Virtuelle*.
+
+image::vm/volume-detail.png[]
+
+== Utilisation avancée avec l'intégration {rancher-product-name}
+
+Le secret est une chaîne encodée en Base64 non chiffrée. Pour garder le secret en sécurité, vous pouvez utiliser des projets et des espaces de noms pour isoler les autorisations. Pour plus d'informations, voir xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== limites
+
+Vous ne pouvez pas effectuer les opérations suivantes{nbsp}:
+
+* Exporter une nouvelle image à partir d'une image chiffrée
+* Télécharger une image chiffrée
+* Téléverser une image chiffrée

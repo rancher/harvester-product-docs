@@ -1,0 +1,81 @@
+= ハーベスターシーダー
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*ハーベスターシーダー* は *実験的* アドオンです。実験的機能に関する詳細は、xref:introduction/document-conventions.adoc#_feature_labels[機能ラベル] を参照してください。
+====
+
+*ハーベスターシーダー* アドオンを使用すると、インテリジェントプラットフォーム管理インターフェース（IPMI）を使用して {harvester-product-name} ホストでアウトオブバンド操作を実行できます。
+
+このアドオンは、 https://www.dmtf.org/standards/redfish[Redfish] ベースのアクセスをサポートするホストのハードウェアおよび関連イベントを検出し、そのハードウェアを対応するホストに関連付けることもできます。
+
+== 前提条件
+
+アドオンを有効にする前に、以下の要件が満たされていることを確認してください。
+
+* ホストでIPMIアクセスが有効になっており、関連操作を実行するために必要な権限がユーザーアカウントに付与されています。
++
+https://github.com/ipmitool/ipmitool[ipmitool] を使用している場合は、`ipmitool -I lanplus -H iloOriDracIPAddress -U admin -P admin sel list` を実行して両方の要件が満たされていることを確認できます。
+
+* Redfishが有効になっています。
++
+`curl -vk https://iloOriDracIPAddress/redfish/v1` を実行してRedfishが有効になっていることを確認できます。
+
+* ポート443と623にアクセス可能です。
++
+一部のIPMI実装では、ポート443のWebインターフェースを使用してデバイスにアクセスできます。ただし、IPMIデバイスは、UDPポート623（IPMI over IP）でコマンドラインインタフェースを使用してアクセスされることが一般的です。
+
+* ホストでアラートが有効になっています。
++
+一部のハードウェアベンダーは、アラートを有効にする必要がある場合があります。
+
+== アドオンを有効にし、ホストを構成する
+
+. {harvester-product-name} UIで、*高度な -> アドオン* に移動します。
+
+. *ハーベスターシーダー* を選択し、次に *⋮ -> 有効にする* を選択します。
++
+数秒後、*状態* の値が *デプロイ成功* に変更されます。
++
+image::vm-import-controller/EnableAddon.png[]
+
+. *ホスト* 画面に移動します。
++
+この画面に表示されている各ホストの設定を編集する必要があります。
+
+. ホストを選択し、次に*⋮ -> 設定を編集*を選択します。
++
+image::seeder/EditConfig.png[]
+
+. *アウトオブバンドアクセス*タブで、*有効*を選択し、設定を構成してから、*保存*を選択します。
++
+アドオンは、IPMIインターフェースに接続するための情報を使用します。
++
+image::seeder/OutOfBandAccess.png[]
+
+== 電源関連の操作
+
+アウトオブバンドアクセスの設定が構成されると、{harvester-product-name} UIを使用してホストをシャットダウンおよび再起動できます。ただし、最初にxref:hosts/hosts.adoc#_node_maintenance[メンテナンスモード]を有効にする必要があります。これにより、すべてのVMが他のノードに自動的に移行します。*ハーベスターシーダー*は、選択した操作を実行する際にIPMIを介してホストと通信します。
+
+image::seeder/ShutdownReboot.png[]
+
+メンテナンスモードが有効な状態でVMを起動することもできます。
+
+image::seeder/PowerOn.png[]
+
+== ハードウェアイベントの集約
+
+*アウトオブバンドアクセス*設定画面の*イベント*セクションで*有効*を選択した場合、*ハーベスターシーダー*はRedfishを使用してハードウェアのコンポーネントエラーやファン温度に関する情報を照会します。この情報はハードウェアの調整中にKubernetesイベントに変換され、その後Kubernetesのポリシーによって処理されます。{harvester-product-name}は、デフォルトでこれらのイベントを1時間保存します。
+
+image::seeder/HardwareEvents.png[]
+
+== トラブルシューティング
+
+*アウトオブバンドアクセス*設定画面が応答しなくなり、メッセージ`Waiting for "inventories.metal.harvesterhci.io" to be ready`が表示されることがあります。このような場合は、ページを更新する必要があります。詳細については、 https://github.com/harvester/harvester/issues/4412[問題 #4412]を参照してください。
+
+*ハーベスターシーダー*を使用中に持続的な問題が発生した場合は、次の内容をSUSEサポートに提出してください：
+
+* サポートバンドル
+* コマンド`kubectl get machine -n harvester-system -o yaml`の出力

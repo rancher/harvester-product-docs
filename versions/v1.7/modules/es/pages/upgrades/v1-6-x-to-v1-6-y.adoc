@@ -1,0 +1,93 @@
+= Actualiza la versión de v1.6.x a v1.6.y
+:revdate: 2025-12-08
+:page-revdate: {revdate}
+
+== Información general
+
+Un *botón de actualizar versión* aparece en la pantalla *Tablero* siempre que una nueva {harvester-product-name} versión a la que puedes actualizar esté disponible. Para más información, consulta xref:./upgrades.adoc#_start_an_upgrade[Iniciar una actualización de versión].
+
+Para información sobre cómo actualizar la versión {harvester-product-name} en entornos aislados, consulta xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar una actualización de versión en entornos aislados].
+
+=== Actualiza la extensión de la interfaz de usuario de Harvester en {rancher-product-name} v2.12
+
+Debes usar una versión compatible (v1.6.x) de la extensión de la interfaz de usuario de Harvester para importar clústeres de {harvester-product-name} v1.6.x en {rancher-short-name} v2.12.
+
+. En la UI de {rancher-short-name}, ve a *local -> Apps -> Repositorios*.
+
+. Localiza el repositorio llamado *harvester*, y luego selecciona *⋮ -> Actualizar*.
+
+. Ve a la pantalla *Extensiones*.
+
+. Localiza la extensión llamada *Harvester*, y luego haz clic en *Actualizar*.
+
+. Selecciona una versión compatible, y luego haz clic en *Actualizar*.
+
+. Permite un tiempo para que la extensión se actualice, y luego actualiza la pantalla.
+
+== Problemas conocidos
+
+=== La actualización está atascada en el estado "Pre-drenado"
+
+En ciertas situaciones, el Gestor de Instancias puede no limpiar una instancia de motor, incluso después de que el estado del CR del motor haya cambiado a "Detenido". El proceso de actualización se queda atascado en el estado "Pre-drenado" porque el pod del gestor de instancias no puede ser eliminado mientras exista el correspondiente Presupuesto de Disrupción de Pods (PDB).
+
+La solución alternativa es eliminar el PDB del gestor de instancias después de asegurarte de que todos los volúmenes estén sanos.
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8977[#8977] y https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== El clúster invitado está atascado en el estado "Actualizando"
+
+Un {rke2-short-name} clúster invitado puede quedar atascado en el estado "Actualizando" después de que se actualice {harvester-product-name}. Se mostrará el siguiente mensaje de error en la interfaz de usuario {harvester-product-name}:
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+El problema ocurre cuando la dirección IP del nodo invitado cambia después de la actualización, causando que etcd funcione mal. Es probable que la máquina virtual subyacente se haya reiniciado varias veces y haya recibido una nueva dirección IP del servidor DHCP.
+
+Para abordar el problema, realice los siguientes pasos:
+
+. En la interfaz de usuario {rancher-short-name}, elimine el nodo que causa el error del clúster de invitados.
+. En la interfaz de usuario {harvester-product-name}, verifique el estado de la máquina virtual subyacente.
+. Si es necesario, reinicie la máquina virtual.
+
+La máquina virtual se elimina y el clúster de invitados intenta crear un nuevo nodo. Una vez que se crea el nodo, el estado del clúster de invitados cambia a "Activo".
+
+Problema relacionado: https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== La máquina virtual detenida está atascada en el estado "Iniciando"
+
+Un volumen {longhorn-product-name} puede alternar entre los estados "Desconectando" y "Desconectado" después de una migración en vivo. Debido a que el volumen no está listo, la máquina virtual asociada no puede iniciarse completamente.
+
+La solución alternativa es limpiar el `status.currentMigrationNodeID` del volumen utilizando el siguiente comando:
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8949[#8949] y https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+### 4. La actualización a v1.6.1-rc2 está atascada en el estado "Pre-drenado"
+
+El proceso de actualización puede quedar atascado indefinidamente en el estado "Pre-drenado" si se sigue la siguiente vía de actualización específica:
+
+* El clúster se actualizó primero de v1.5.1 a v1.6.0.
+* Se intenta una actualización posterior de v1.6.0 a v1.6.1-rc2.
+
+Puede ver el siguiente mensaje de error cuando compruebe el controlador {harvester-product-name}:
+
+[,shell]
+----
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:21:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:23:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:25:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+----
+
+Este es un fallo de sincronización raro: el trabajo ya fue creado pero el objeto de actualización no fue actualizado.
+
+La solución alternativa es eliminar el trabajo de post-drenaje existente y luego esperar a que el controlador de actualización lo recree.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/9293[#9293]

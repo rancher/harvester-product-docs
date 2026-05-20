@@ -1,0 +1,187 @@
+= Speichervalidator
+:revdate: 2026-01-21
+:page-revdate: {revdate}
+
+{harvester-product-name} unterstützt die Bereitstellung von Root-Volumes und Datenvolumes mithilfe von externen Container Storage Interface (CSI)-Treibern. Sobald der CSI-Treiber installiert und der {harvester-product-name}-Cluster konfiguriert ist, können Sie eine Speicherlösung von Drittanbietern verwenden, um virtuelle Maschinen-Images zu speichern und zu verwalten, virtuelle Maschinendatenträger auf von dem CSI-Treiber bereitgestellten Volumes zu speichern und andere kritische Speicherfunktionen auszuführen.
+
+Das https://github.com/harvester/storage-validator[`storage-validator`]-Dienstprogramm führt grundlegende Tests durch, die die Kompatibilität einer Speicherlösung mit {harvester-product-name}-Lebenszyklusoperationen für virtuelle Maschinen und Volumes validieren. Es ist für Folgendes konzipiert:
+
+* Cluster-Administratoren: Überprüfen Sie, ob Ihre Speicherlösung korrekt konfiguriert und für {harvester-product-name} optimiert ist.
++
+Speicheranbieter können ihre Lösungen mit {harvester-product-name} validieren, um eine größere Interoperabilität sicherzustellen. Informationen über unternehmensgerechte Speicherlösungen, die zertifiziert sind, um mit {harvester-product-name} kompatibel zu sein, finden Sie in der {rancher-product-name-tm}-Dokumentation, die über das https://scc.suse.com/home[SUSE Customer Center] zugänglich ist.
+
+* Speicherpartner von Drittanbietern: Erhalten Sie die https://www.suse.com/product-certification/suse-certified/virtualization-certification[SUSE Certified Storage for Virtualization]-Zertifizierung, indem Sie Ihre Speicherlösung mit der {harvester-product-name}-Referenzarchitektur validieren. Um die Zertifizierungsanforderungen zu erfüllen, können Sie dieses Dienstprogramm auf der https://www.suse.com/suse-harvester/support-matrix/all-supported-versions[neuesten stabilen Version] ausführen und die Ergebnisse an SUSE senden.
++
+[NOTE]
+====
+Die vom Dienstprogramm durchgeführten Tests werden in zukünftigen Versionen erweitert, um die Anforderungen der https://www.suse.com/product-certification/suse-certified/data-protection-for-virtualization-certification[SUSE Certified Data Protection for Virtualization]-Zertifizierung zu erfüllen.
+====
+
+`storage-validator` testet die folgenden Operationen:
+
+* Volume-Erstellung und -Nutzung
+* Volume-Snapshot-Erstellung
+* Offline-Volume-Erweiterung
+* Erstellung von virtuellen Maschinen-Images unter Verwendung der angegebenen StorageClass
+* Booten der virtuellen Maschine von dem erstellten Image
+* Live-Migration virtueller Maschinen
+* Hot-Plugging von zwei Volumes zu einer virtuellen Maschine
+
+== Voraussetzungen
+
+* {harvester-product-name} Cluster mit xref:introduction/deploy-ha-cluster.adoc[drei oder mehr Knoten], die *v1.6.1* oder eine https://www.suse.com/suse-harvester/support-matrix/all-supported-versions[spätere Prime-Version] (x.y.1) ausführen
+
+* xref:storage/csidriver.adoc[CSI-Treiber von Drittanbietern]
+
+* HTTP-Endpunkt, der Cloud-Images bereitstellt, die für Tests zur Bereitstellung virtueller Maschinen verwendet werden
+
+== Konfigurationsdatei
+
+Um `storage-validator` zu verwenden, erstellen Sie eine Konfigurationsdatei mit dem Namen `config.yml`, die die relevanten Felder enthält. Das Dienstprogramm verwendet die Werte in dieser Konfigurationsdatei, wenn es die Validierungstests durchführt.
+
+[NOTE]
+====
+Wenn Sie nur die URL des Cloud-Images angeben, verwendet `storage-validator` die Standardwerte für die anderen Felder, einschließlich der Standard-StorageClass des Clusters.
+====
+
+|===
+| Feld | Beschreibung | Standardwert | required
+
+| `namespace`
+| Namespace, um Tests durchzuführen
+| `default`
+| Nein
+
+| `imageURL`
+| URL eines Cloud-Images
+| Kein Standardwert
+| Ja
+
+| `storageClass`
+| xref:storage/storageclass.adoc[StorageClass], die für die Volumenerstellung verwendet werden soll
+| Standard-StorageClass des Clusters
+| Nein
+
+| `snapshotClass`
+| VolumeSnapshotClass, die für Snapshot-Operationen verwendet werden soll
+| VolumeSnapshotClass, die mit der StorageClass übereinstimmt
+| Nein
+
+| `vmConfig.cpu`
+| Kerne, die der virtuellen Maschine zugewiesen sind
+| `2`
+| Nein
+
+| `vmConfig.memory`
+| Speicher, der der virtuellen Maschine zugewiesen ist
+| `2Gi`
+| Nein
+
+| `vmConfig.diskSize`
+| Größe des Boot-Datenträgers der virtuellen Maschine
+| `10Gi`
+| Nein
+
+| `skipCleanup`
+| Option, die Bereinigung von Ressourcen nach Abschluss der Validierungstests zu überspringen (nützlich zum Debuggen von Fehlern)
+| `false`
+| Nein
+
+| `timeout`
+| Anzahl der Sekunden, die das Dienstprogramm wartet, bevor es den Validierungslauf beendet
+| `600`
+| Nein
+|===
+
+[NOTE]
+====
+Die Erstellung von Snapshots erfordert, dass die StorageClass und die VolumeSnapshotClass denselben Bereitsteller (CSI-Treiber) verwenden. Wenn die StorageClass `lvm.driver.harvesterhci.io` verwendet, muss die VolumeSnapshotClass ebenfalls `lvm.driver.harvesterhci.io` verwenden.
+====
+
+Beispiel für den Inhalt von `config.yml`:
+
+[,yaml]
+----
+namespace: default 
+imageURL: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.6/images/openSUSE-Leap-15.6.x86_64-NoCloud.qcow2"
+storageClass: lvm
+snapshotClass: lvm-snapshot
+vmConfig:
+  cpu: 2
+  memory: 2Gi
+  diskSize: 10Gi
+skipCleanup: false
+timeout: 600
+----
+
+== Ausführen des Dienstprogramms
+
+Sie können die ausführbare Datei `storage-validator` von der https://github.com/harvester/storage-validator/releases[Releases]-Seite herunterladen.
+
+Das Dienstprogramm akzeptiert die folgenden Flags:
+
+[,shell]
+----
+storage-validator -h
+Usage of /tmp/storage-validator:
+  -config string
+        Path to config file (default "config.yaml")
+  -debug
+        Debug mode
+  -kubeconfig string
+        Paths to a kubeconfig. Only required if out-of-cluster.
+----
+
+Beispiel für die Ausgabe:
+
+[,shell]
+----
+storage-validator -config ./sample/config.yaml
+INFO[0000] 🚀 initiate: preflight checks
+INFO[0003] ✅  completed: preflight checks
+INFO[0007] 🚀 initiate: ensure volume is created and used successfully
+INFO[0015] ✅  completed: ensure volume is created and used successfully
+INFO[0015] 🚀 initiate: ensure volume snapshot can be created successfully
+INFO[0022] ✅  completed: ensure volume snapshot can be created successfully
+INFO[0022] 🚀 initiate: ensure offline volume expansion is successful
+INFO[0059] ✅  completed: ensure offline volume expansion is successful
+INFO[0059] 🚀 initiate: ensure vm image creation is successful
+INFO[0077] ✅  completed: ensure vm image creation is successful
+INFO[0077] 🚀 initiate: ensure vm can boot from recently created vmimage
+INFO[0113] ✅  completed: ensure vm can boot from recently created vmimage
+INFO[0113] 🚀 initiate: trigger VM migration
+INFO[0130] ✅  completed: trigger VM migration
+INFO[0130] 🚀 initiate: hotplug 2 volumes to existing VM
+INFO[0136] ✅  completed: hotplug 2 volumes to existing VM
+INFO[0136] cleaning up objects created from validation
+-------------------------------------
+environmentInfo:
+  harvesterVersion: v1.6.0
+  nodeCount: 2
+  validatorVersion: dev
+inputConfiguration:
+  imageURL: http://10.115.1.6/iso/opensuse/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2
+  namespace: default
+  skipCleanup: false
+  snapshotClass: longhorn-snapshot
+  storageClass: harvester-longhorn
+  timeout: 600
+  vmConfig:
+    cpu: 2
+    diskSize: 10Gi
+results:
+- name: hotplug 2 volumes to existing VM
+  status: success
+- name: trigger VM migration
+  status: success
+- name: ensure vm can boot from recently created vmimage
+  status: success
+- name: ensure vm image creation is successful
+  status: success
+- name: ensure offline volume expansion is successful
+  status: success
+- name: ensure volume snapshot can be created successfully
+  status: success
+- name: ensure volume is created and used successfully
+  status: success
+----

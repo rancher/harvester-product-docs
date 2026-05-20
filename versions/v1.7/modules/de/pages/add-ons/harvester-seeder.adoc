@@ -1,0 +1,81 @@
+= Harvester Seeder
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-seeder* ist ein *experimentelles* Add-on. Für weitere Informationen zu experimentellen Funktionen siehe xref:introduction/document-conventions.adoc#_feature_labels[Funktionsbezeichnungen].
+====
+
+Das *harvester-seeder* Add-on ermöglicht es Ihnen, Out-of-Band-Operationen auf {harvester-product-name} Hosts über die Intelligent Platform Management Interface (IPMI) durchzuführen.
+
+Dieses Add-on kann auch Hardware und verwandte Ereignisse für Hosts entdecken, die den https://www.dmtf.org/standards/redfish[Redfish]-basierten Zugriff unterstützen, und dann diese Hardware mit den entsprechenden Hosts verknüpfen.
+
+== Voraussetzungen
+
+Stellen Sie sicher, dass die folgenden Anforderungen erfüllt sind, bevor Sie das Add-on aktivieren.
+
+* Der IPMI-Zugriff ist auf den Hosts aktiviert, und Ihr Benutzerkonto hat die erforderlichen Berechtigungen für die Durchführung verwandter Operationen.
++
+Wenn Sie https://github.com/ipmitool/ipmitool[ipmitool] verwenden, können Sie `ipmitool -I lanplus -H iloOriDracIPAddress -U admin -P admin sel list` ausführen, um zu überprüfen, ob beide Anforderungen erfüllt sind.
+
+* Redfish ist aktiviert.
++
+Sie können `curl -vk https://iloOriDracIPAddress/redfish/v1` ausführen, um zu überprüfen, ob Redfish aktiviert ist.
+
+* Die Ports 443 und 623 sind erreichbar.
++
+Einige IPMI-Implementierungen ermöglichen den Zugriff auf Geräte über eine Weboberfläche auf Port 443. IPMI-Geräte werden jedoch häufiger über eine Befehlszeilenschnittstelle auf UDP-Port 623 (IPMI über IP) zugegriffen.
+
+* Alarme sind auf den Hosts aktiviert.
++
+Einige Hardwareanbieter verlangen möglicherweise, dass Sie Alarme aktivieren.
+
+== Aktivierung des Add-ons und Konfiguration der Hosts
+
+. Gehen Sie im {harvester-product-name} UI zu *Erweiterte -> Add-ons*.
+
+. Wählen Sie *harvester-seeder* aus und wählen Sie dann *⋮ -> Aktivieren*.
++
+Nach wenigen Sekunden ändert sich der Wert von *State* in *DeploySuccessful*.
++
+image::vm-import-controller/EnableAddon.png[]
+
+. Gehen Sie zum Bildschirm *Hosts*.
++
+Sie müssen die Konfiguration jedes Hosts bearbeiten, der auf diesem Bildschirm aufgeführt ist.
+
+. Wählen Sie einen Host aus und dann *⋮ -> Konfiguration bearbeiten*.
++
+image::seeder/EditConfig.png[]
+
+. Wählen Sie im Tab *Out-of-Band-Zugriff* *Aktiviert*, konfigurieren Sie die Einstellungen und wählen Sie dann *Speichern*.
++
+Das Add-On verwendet die Informationen, um eine Verbindung zu Ihrer IPMI-Schnittstelle herzustellen.
++
+image::seeder/OutOfBandAccess.png[]
+
+== Strombezogene Vorgänge
+
+Sie können die {harvester-product-name} Benutzeroberfläche verwenden, um Hosts herunterzufahren und neu zu starten, sobald die Einstellungen für den Out-of-Band-Zugriff konfiguriert sind. Sie müssen jedoch zuerst xref:hosts/hosts.adoc#_node_maintenance[Wartungsmodus] aktivieren, der automatisch alle VMs auf andere Knoten migriert. *harvester-seeder* kommuniziert mit den Hosts über IPMI, wenn die ausgewählte Operation ausgeführt wird.
+
+image::seeder/ShutdownReboot.png[]
+
+Sie können auch VMs einschalten, während der Wartungsmodus aktiviert ist.
+
+image::seeder/PowerOn.png[]
+
+== Hardwareereignisaggregation
+
+Wenn Sie im Abschnitt *Ereignis* der Einstellungen für den *Out-of-Band-Zugriff* *Aktiviert* ausgewählt haben, verwendet *harvester-seeder* Redfish, um die Hardware nach Informationen über Komponentenfehler und Lüftertemperaturen abzufragen. Die Informationen werden während der Hardwareabstimmung in Kubernetes-Ereignisse umgewandelt und anschließend von der Kubernetes-Garbage-Collection-Richtlinie verarbeitet. {harvester-product-name} speichert diese Ereignisse standardmäßig für 1 Stunde.
+
+image::seeder/HardwareEvents.png[]
+
+== Fehlerbehebung
+
+Der Einstellungsbildschirm für den *Out-of-Band-Zugriff* kann nicht mehr reagieren und die Nachricht `Waiting for "inventories.metal.harvesterhci.io" to be ready` anzeigen. Sie müssen die Seite jedes Mal aktualisieren, wenn dies geschieht. Für weitere Informationen siehe https://github.com/harvester/harvester/issues/4412[Issue #4412].
+
+Wenn Sie bei der Verwendung von *harvester-seeder* auf anhaltende Probleme stoßen, reichen Sie Folgendes bei SUSE Support ein:
+
+* Support-Bundle
+* Ausgabe des Befehls `kubectl get machine -n harvester-system -o yaml`

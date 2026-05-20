@@ -1,0 +1,394 @@
+= Harvester 云提供商
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+您可以使用内置的 Harvester 节点驱动程序在 Rancher 中配置 xref:../../integrations/rancher/node-driver/rke2-cluster.adoc[RKE2] 集群。Harvester 为来宾 Kubernetes 集群提供 <<Load Balancer Support,负载均衡器>> 和 Harvester cluster xref:./csi-driver.adoc[存储直通] 支持。
+
+== 向后兼容性通知
+
+[NOTE]
+====
+如果您使用的 Harvester 云提供商版本为 *v0.2.2* 或更高，请注意已知的向后兼容性问题。如果您的 Harvester 版本低于 *v1.2.0*，并且您打算使用更新的 RKE2 版本（即 >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`），则在继续升级来宾 Kubernetes 集群或 Harvester 云提供商之前，必须将您的 Harvester cluster 升级到 v1.2.0 或更高版本。
+
+有关详细的支持矩阵，请参阅官方 *Harvester CCM 和 CSI Driver 与 RKE2 发布* 部分的 https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[网站]。
+====
+
+== 正在部署
+
+=== 先决条件
+
+* Kubernetes 集群建立在 Harvester 虚拟机之上。
+* 作为来宾 Kubernetes 节点运行的 Harvester 虚拟机位于同一名称空间中。
+* Harvester 虚拟机来宾的主机名与其对应的 Harvester 虚拟机名称匹配。使用 Harvester CSI 驱动程序时，来宾集群的 Harvester 虚拟机不能有与其 Harvester 虚拟机名称不同的主机名。我们希望在未来的 Harvester 版本中 https://github.com/harvester/harvester/issues/4396[去除此限制]。
+
+[IMPORTANT]
+====
+每个 Harvester 虚拟机必须具有 `macvlan` 内核模块，这是 `LoadBalancer` 的 *DHCP* IPAM 模式所需的服务。
+
+要检查内核模块是否可用，请访问虚拟机并运行以下命令：
+
+[,sh]
+----
+lsmod | grep macvlan
+sudo modprobe macvlan
+----
+
+如果出现以下情况，则可能缺少内核模块：
+
+* `$ lsmod | grep macvlan` 不产生输出。
+* `$ sudo modprobe macvlan` 显示类似于 `modprobe: FATAL: Module macvlan not found in directory /lib/modules/5.14.21-150400.22-default` 的错误消息。
+
+默认情况下，`macvlan` 内核模块不包含在 SUSE Linux Enterprise 15 服务包 4/5/6 最小云映像中（请参见 https://github.com/harvester/harvester/issues/6418[问题 #6418]）。这些映像包含 https://software.opensuse.org/package/kernel-default-base[`kernel-default-base`]软件包，其中仅包括基本模块。但是，当您安装 `kernel-default` 软件包时，`macvlan` 内核驱动程序将可用。
+
+为了消除在来宾集群配置后需要手动干预的情况，请使用 openSUSE 构建服务（OBS）构建您自己的云映像。您必须在 `Minimal.kiwi` 文件中去除 `kernel-default-base` 软件包并添加 `kernel-default` 软件包，以确保生成的云映像包含 `macvlan` 内核模块。有关更多信息，请参见xref:../../virtual-machines/vm-images/custom-suse-images.adoc[自定义SUSE虚拟机映像]。
+====
+
+=== 使用Harvester节点驱动程序部署到RKE2集群
+
+在使用Harvester节点驱动程序启动RKE2集群时，请选择`Harvester`云提供商。节点驱动程序将自动帮助部署CSI驱动程序和CCM。
+
+image::rancher/rke2-cloud-provider.png[]
+
+从Rancher v2.9.0开始，您可以使用*数据目录配置路径*字段为云配置数据配置特定文件夹。
+
+image::rancher/rke2-cloud-provider-custom-data-dir.png[]
+
+=== 手动部署到RKE2集群
+
+. 使用脚本`generate_addon.sh`生成云配置数据，然后将数据放置在每个自定义节点上（目录：`/etc/kubernetes/cloud-config`）。
++
+[,bash]
+----
+    curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+[NOTE]
+====
+该脚本在操作Harvester集群时依赖于`kubectl`和`jq`，并且仅在获得对`Harvester Cluster` kubeconfig文件的访问权限时才能正常工作。
+
+您可以在`/etc/rancher/rke2/rke2.yaml`路径的Harvester管理节点之一中找到`kubeconfig`文件。服务器IP必须替换为VIP地址。
+
+内容示例：
+
+[,yaml]
+----
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <redacted>
+    server: https://127.0.0.1:6443
+  name: default
+# ...
+----
+
+您必须指定将要创建客户集群的名称空间。
+====
++
+输出示例：
++
+[,yaml]
+----
+########## cloud config ############
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <CACERT>
+    server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+  name: local
+contexts:
+- context:
+    cluster: local
+    namespace: default
+    user: harvester-cloud-provider-default-local
+  name: harvester-cloud-provider-default-local
+current-context: harvester-cloud-provider-default-local
+kind: Config
+preferences: {}
+users:
+- name: harvester-cloud-provider-default-local
+  user:
+    token: <TOKEN>
+
+########## cloud-init user data ############
+write_files:
+- encoding: b64
+  content: <CONTENT>
+  owner: root:root
+  path: /etc/kubernetes/cloud-config
+  permissions: '0644'
+----
++
+. 在RKE2集群创建页面，转到*集群配置*屏幕，并将*云提供商*的值设置为*外部*。
++
+image::rancher/external-harvester-cloud-provider.png[]
+
+. 将`cloud-init user data`内容复制并粘贴到*机器池*> *显示高级*> *用户数据*。
++
+image::rancher/cloud-config-userdata.png[]
+
+. 将用于 `harvester-cloud-provider` 的 `HelmChart` CRD 添加到 *集群配置* > *附加配置* > *附加清单*。
++
+您必须将 `<cluster-name>` 替换为您的集群名称。
++
+[,yaml]
+----
+ apiVersion: helm.cattle.io/v1
+ kind: HelmChart
+ metadata:
+   name: harvester-cloud-provider
+   namespace: kube-system
+ spec:
+   targetNamespace: kube-system
+   bootstrap: true
+   repo: https://raw.githubusercontent.com/rancher/charts/dev-v2.9
+   chart: harvester-cloud-provider
+   version:  104.0.2+up0.2.6
+   helmVersion: v3
+   valuesContent: |-
+     global:
+       cattle:
+         clusterName: <cluster-name>
+----
++
+image::rancher/external-cloud-provider-addon.png[]
+
+. 要创建负载均衡器，请添加注释 `cloudprovider.harvesterhci.io/ipam: <dhcp|pool>`。
++
+image::rancher/harvester-cloud-provider-loadbalancer-annotation.png[]
+
+=== 部署到 RKE2 自定义集群（实验性）
+
+image::rancher/custom.png[]
+
+. 使用脚本`generate_addon.sh`生成云配置数据，然后将数据放置在每个自定义节点上（目录：`/etc/kubernetes/cloud-config`）。
++
+[,bash]
+----
+ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+[NOTE]
+====
+该脚本在操作Harvester集群时依赖于`kubectl`和`jq`，并且仅在获得对`Harvester Cluster` kubeconfig文件的访问权限时才能正常工作。
+
+您可以在`/etc/rancher/rke2/rke2.yaml`路径的Harvester管理节点之一中找到`kubeconfig`文件。服务器IP必须替换为VIP地址。
+
+内容示例：
+
+[,yaml]
+----
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <redacted>
+    server: https://127.0.0.1:6443
+  name: default
+# ...
+----
+
+您必须指定将要创建客户集群的名称空间。
+====
++
+输出示例：
++
+[,yaml]
+----
+########## cloud config ############
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <CACERT>
+    server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+  name: local
+contexts:
+- context:
+    cluster: local
+    namespace: default
+    user: harvester-cloud-provider-default-local
+  name: harvester-cloud-provider-default-local
+current-context: harvester-cloud-provider-default-local
+kind: Config
+preferences: {}
+users:
+- name: harvester-cloud-provider-default-local
+  user:
+    token: <TOKEN>
+
+########## cloud-init user data ############
+write_files:
+- encoding: b64
+  content: <CONTENT>
+  owner: root:root
+  path: /etc/kubernetes/cloud-config
+  permissions: '0644'
+----
+
+. 在 Harvester 集群中创建一个虚拟机，设置如下：
+ ** *基础* 选项卡：最低要求为 2 个处理器和 4 GiB 的 RAM。所需的磁盘空间取决于虚拟机镜像。
++
+image::rancher/custom-cluster-vm-cpu-and-ram.png[]
+
+ ** *网络* 选项卡：指定网络名称，格式为 `nic-<number>`。
++
+image::rancher/custom-cluster-vm-network.png[]
+
+ ** *高级选项* 选项卡：复制并粘贴 *云配置用户数据* 屏幕的内容。
++
+image::rancher/custom-cluster-vm-user-data.png[]
+. 在 *集群配置* 屏幕的 *基础* 选项卡上，选择 *Harvester* 作为 *云提供商*，然后选择 *创建* 来启动集群。
++
+image::rancher/create-custom-rke2.png[]
+
+. 在 *注册* 选项卡上，执行在虚拟机上运行 RKE2 注册命令所需的步骤。
++
+image::rancher/custom-cluster-registration.png[]
+
+=== 部署到使用 Harvester 节点驱动程序的 K3s 集群（实验性）
+
+使用 Harvester 节点驱动程序启动 K3s 集群时，您可以执行以下步骤来部署 Harvester 云提供商：
+
+. 使用 `generate_addon.sh` 生成云配置。
++
+----
+ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+输出可能如下所示：
++
+----
+ ########## cloud config ############
+ apiVersion: v1
+ clusters:
+ - cluster:
+     certificate-authority-data: <CACERT>
+     server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+   name: local
+ contexts:
+ - context:
+     cluster: local
+     namespace: default
+     user: harvester-cloud-provider-default-local
+   name: harvester-cloud-provider-default-local
+ current-context: harvester-cloud-provider-default-local
+ kind: Config
+ preferences: {}
+ users:
+ - name: harvester-cloud-provider-default-local
+   user:
+     token: <TOKEN>
+
+
+ ########## cloud-init user data ############
+ write_files:
+ - encoding: b64
+   content: <CONTENT>
+   owner: root:root
+   path: /etc/kubernetes/cloud-config
+   permissions: '0644'
+----
+
+. 将 `cloud-init user data` 内容复制并粘贴到 *机器池 > 显示高级 > 用户数据*。
+image:rancher/cloud-config-userdata.png[]
+. 将以下 `HelmChart` yaml 的 `harvester-cloud-provider` 添加到 *集群配置 > 附加配置 > 附加清单*。
++
+----
+ apiVersion: helm.cattle.io/v1
+ kind: HelmChart
+ metadata:
+   name: harvester-cloud-provider
+   namespace: kube-system
+ spec:
+   targetNamespace: kube-system
+   bootstrap: true
+   repo: https://charts.harvesterhci.io/
+   chart: harvester-cloud-provider
+   version: 0.2.2
+   helmVersion: v3
+----
++
+image::rancher/external-cloud-provider-addon.png[]
+
+. 以以下方式禁用 `in-tree` 云提供商：
+ ** 单击 `Edit as YAML` 按钮。
+
++
+image::rancher/edit-k3s-cluster-yaml.png[]
+ ** 禁用 `servicelb` 并将 `disable-cloud-controller: true` 设置为禁用默认的 K3s 云控制器。
++
+[,yaml]
+----
+  machineGlobalConfig:
+    disable:
+      - servicelb
+    disable-cloud-controller: true
+----
+
+ ** 添加 `cloud-provider=external` 以使用 Harvester 云提供商。
++
+[,yaml]
+----
+  machineSelectorConfig:
+    - config:
+        kubelet-arg:
+        - cloud-provider=external
+        protect-kernel-defaults: false
+----
+
++
+image::rancher/k3s-cluster-yaml-content-for-harvester-cloud-provider.png[]
+
+在这些设置到位的情况下，K3s 集群应该能够成功使用外部云提供商进行配置。
+
+== 升级云提供商
+
+=== 升级 RKE2
+
+可以通过升级 RKE2 版本来升级云提供商。您可以通过 Rancher UI 按如下方式升级 RKE2 集群：
+
+. 单击 *☰ > 集群管理*。
+. 找到您想要升级的来宾集群并选择 ⋮ *> 编辑配置*。
+. 选择 *Kubernetes 版本*。
+. 单击 *保存*。
+
+=== 升级 K3s
+
+通过 Rancher UI 升级 K3s 云提供商，方法如下：
+
+. 单击 *☰ > K3s 集群 > 应用 > 已安装应用*。
+. 找到云提供商图表并选择 ⋮ *> 编辑/升级*。
+. 选择 *版本*。
+. 单击 *下一步 > 更新*。
+
+[IMPORTANT]
+====
+对于 xref:../../installation-setup/single-node-clusters.adoc[单节点来宾集群] 的升级过程可能会停滞，当新的 `harvester-cloud-provider` pod 卡在 _待处理_ 状态时。此问题是由于 `harvester-cloud-provider` 部署中的一部分描述了滚动更新策略。具体来说，默认值与单节点集群中的 `podAntiAffinity` 配置冲突。
+
+有关更多信息，请参见 https://github.com/harvester/harvester/issues/5348#issuecomment-2055453709[此 GitHub 问题评论]。要解决此问题，请手动删除旧的`harvester-cloud-provider` pod。您可能需要多次执行此操作，直到新的 pod 能够成功调度。
+====
+
+== 负载均衡器支持
+
+一旦您部署了 Harvester 云提供商，您可以利用 Kubernetes `LoadBalancer` 服务将微服务暴露给外部世界。创建 Kubernetes `LoadBalancer` 服务会为该服务分配一个专用的 Harvester 负载均衡器，您可以通过 Rancher UI 中的 `Add-on Config` 进行调整。
+
+image::rancher/lb-svc.png[]
+
+=== IPAM
+
+Harvester 内置的负载均衡器提供 *DHCP* 和 *池* 模式，您可以通过向其相应服务添加注释 `cloudprovider.harvesterhci.io/ipam: $mode` 来进行配置。从 Harvester 云提供商 >= v0.2.0 开始，它还引入了一种独特的 *共享 IP* 模式。在此模式下，服务与其他服务共享其负载均衡器 IP。
+
+* *DHCP：*需要一个 DHCP 服务器。Harvester 负载均衡器将向 DHCP 服务器请求一个 IP 地址。
+
+* *池:*您必须首先使用 xref:networking/ip-pool.adoc#_creating_an_IP_pool[{harvester-product-name} UI] 或 xref:networking/ip-pool.adoc#_creating_an_IP_pool_using_the_rancher_ui[{rancher-short-name} UI] 创建一个 xref:networking/ip-pool.adoc[IP 池]（有关两种方法之间差异的信息，请参见 xref:networking/ip-pool.adoc#_best_practices[最佳实践]）。{harvester-product-name} 负载均衡器控制器将根据 xref:networking/ip-pool.adoc#_selection_policy[IP 池选择策略] 为负载均衡器服务分配一个 IP。
+
+* *共享 IP:*在创建新的负载均衡器服务时，您可以重新利用现有负载均衡器服务的 IP。新服务被称为辅助服务，而当前选择的服务是主要服务。要在辅助服务中指定主要服务，您可以添加注释 `cloudprovider.harvesterhci.io/primary-service: $primary-service-name`。 但是，有两个已知的限制：
+ ** 共享同一IP地址的服务不能使用相同的端口。
+ ** 辅助服务不能与其他服务共享其IP。
+
+[NOTE]
+====
+不允许修改`IPAM`模式。如果您打算更改`IPAM`模式，则必须创建一个新服务。
+====
+
+== 健康检查
+
+从Harvester云提供商v0.2.0开始，客人Kubernetes集群内的`LoadBalancer`服务的额外健康检查不再必要。相反，您可以为您的工作负载配置 https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-tcp-liveness-probe[活跃性]和 https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes[就绪]探针。因此，任何不可用的Pod将自动从负载均衡器端点中去除，以实现相同的预期结果。

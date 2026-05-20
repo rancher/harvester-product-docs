@@ -1,0 +1,246 @@
+= ストレージクラス
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name}は、{longhorn-product-name}がボリュームをプロビジョニングする方法を説明するためにStorageClassesを使用します。{longhorn-product-name}のStorageClassesは、クラスター管理者によって作成されたレプリカポリシー、ノードスケジュールポリシー、またはディスクスケジュールポリシーにマッピングできます。この概念は、他のストレージシステムでは_プロファイル_と呼ばれています。
+
+[NOTE]
+====
+デフォルトのStorageClass `harvester-longhorn`は、高可用性のためにレプリカ数の値が`3`です。単一ノードクラスターで`harvester-longhorn`を使用すると、{longhorn-product-name}はデフォルトのレプリカ数を作成できず、ボリュームは_Degraded_として{harvester-product-name}のUIに表示されます。
+
+この問題を回避するために、次のいずれかのアクションを実行できます：
+
+* 環境設定ファイル（または設定ファイル）を使用して、xref:installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[レプリカ数]を`harvester-longhorn`から`1`に変更します。
+* xref:storage/storageclass.adoc#_creating_a_storageclass[新しいStorageClassを作成]し、*レプリカの数*パラメータを`1`に設定します。作成後、リスト内の新しいStorageClassを見つけて、*⋮ -> デフォルトに設定*を選択します。
+====
+
+外部コンテナストレージインターフェース（CSI）ドライバーを使用したボリュームプロビジョニングのサポートに関する情報は、xref:./csidriver.adoc[サードパーティストレージサポート]を参照してください。
+
+== StorageClassの作成
+
+[tabs]
+======
+UI::
++
+--
+[CAUTION]
+====
+StorageClassが作成されると、**パラメータ**セクションのフィールドと他のほとんどのオプションは不変になります。
+====
+
+. *高度な-> StorageClasses*に移動します。
++
+image::storageclass/create_storageclasses_entry.png[]
+
+. 一般情報セクションで、次の項目を設定します：
++
+* *名前*:StorageClassの名前。
+* *説明*（オプション）：StorageClassの説明。
+* *プロビジョナー*：ボリュームをプロビジョニングするために使用されるボリュームプラグインを決定するプロビジョナー。
+
+. *パラメータ* タブで、以下を設定します:
++
+* *レプリカの数*:各 {longhorn-product-name} ボリュームに対して作成されるレプリカの数です。デフォルト値は、`3`です。
+* *古いレプリカタイムアウト*:{longhorn-product-name} がステータス `ERROR` のレプリカをクリーンアップする前に待機する分数です。デフォルト値は、`30`です。
+* *ノードセレクタ*（オプション）:ボリュームスケジューリング中に一致させるノードタグです。ホスト設定画面（*ホスト -> 設定を編集*）でノードタグを追加できます。
+* *ディスクセレクタ*（オプション）:ボリュームスケジューリング中に一致させるディスクタグです。ホスト設定画面（*ホスト -> 設定を編集*）でディスクタグを追加できます。
+* *移行可能*:StorageClass を使用して作成されたボリュームのライブマイグレーションを有効にする設定です。デフォルト値は、`Yes`です。
+
+[CAUTION]
+====
+レプリカ数が `1` の StorageClass を使用して仮想マシンに接続されたボリュームを作成すると、その仮想マシンは xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可] と見なされます。
+====
+
+. *カスタマイズ* タブで、以下を設定します:
++
+* *リクレームポリシー*:StorageClass を使用して作成されたボリュームに適用されるリクレームポリシーです。デフォルト値は、`Delete`です。
+** *削除*:ボリュームクレームが削除されると、ボリュームとその基盤となるデバイスを削除します。
+** *保持*:手動クリーンアップのためにボリュームを保持します。
++
+* *ボリューム拡張の許可*:ボリューム拡張を許可する設定で、ブロックデバイスのサイズ変更とファイルシステムの拡張を含みます。設定が有効な場合、対応するPVCオブジェクトを編集することでボリュームサイズを増加させることができます。
++
+[NOTE]
+====
+ボリューム拡張機能は、ボリュームサイズを増加させるためにのみ使用できます。
+====
++
+* *ボリュームバインディングモード*:ボリュームバインディングと動的プロビジョニングが行われるタイミングを制御する設定です。デフォルト値は、`Immediate`です。
+** *直ちに*:PVCが作成されると、ボリュームをバインドしてプロビジョニングします。
+** *最初の消費者を待つ*:PVCを使用する仮想マシンが作成されると、ボリュームをバインドしてプロビジョニングします。
+
+. ［*作成*］をクリックします。
+--
+
+API::
++
+[,yaml]
+---- 
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  annotations:
+    storageclass.beta.kubernetes.io/is-default-class: 'true'
+    storageclass.kubernetes.io/is-default-class: 'true'
+  name: single-replica
+parameters:
+  migratable: 'false'
+  numberOfReplicas: '1'
+  staleReplicaTimeout: '30'
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+----
+
+Terraform::
++
+[,hcl]
+----
+resource "harvester_storageclass" "single-replica" {
+  name = "single-replica"
+
+  is_default = "true"
+  allow_volume_expansion = "true"
+  volume_binding_mode = "immediate"
+  reclaim_policy = "delete"
+
+  parameters = {
+    "migratable"          = "false"
+    "numberOfReplicas"    = "1"
+    "staleReplicaTimeout" = "30"
+  }
+}
+----
+======
+
+== データのローカリティ設定
+
+少なくとも1つの{longhorn-product-name}ボリュームのレプリカが、ボリュームを使用するポッドと同じノードにスケジュールされる必要がある場合、`dataLocality`パラメータを使用できます（可能な限り）。
+
+{harvester-product-name}はデータローカリティを公式にサポートしています。これは、xref:virtual-machines/vm-images/upload-image.adoc[イメージ]から作成されたボリュームにも適用されます。データローカリティを構成するには、{harvester-product-name} UIで新しいStorageClassを作成し（*ストレージクラス -> 作成 -> パラメータ*）、次のパラメータを追加します：
+
+* *キー*: `dataLocality`
+* *値*: `無効` または `ベストエフォート`
+
+image::storageclass/data-locality.png[]
+
+=== データローカリティオプション
+
+{harvester-product-name}は現在次のオプションをサポートしています：
+
+* `無効`:適用されると、{longhorn-product-name}はボリュームを使用するポッドと同じノードにレプリカをスケジュールする場合としない場合があります。これがデフォルトのオプションです。
+* `ベストエフォート`:適用されると、{longhorn-product-name}は常にボリュームを使用するポッドと同じノードにレプリカをスケジュールしようとします。{longhorn-product-name}は、環境的制限（例えば、ディスクスペース不足や互換性のないディスクタグ）によりローカルレプリカが利用できない場合でも、ボリュームを停止しません。
+
+[NOTE]
+====
+{longhorn-product-name}は、`ストリクトローカル`と呼ばれる第三のオプションを提供し、{longhorn-product-name}がボリュームを使用するポッドと同じノードにのみ1つのレプリカを保持するように強制します。{harvester-product-name}は、このオプションをサポートしていません。なぜなら、xref:virtual-machines/live-migration.adoc[VMライブマイグレーション]などの特定の操作に影響を与える可能性があるからです。
+====
+
+詳細については、https://documentation.suse.com/cloudnative/storage/1.8/en/high-availability/data-locality.html[データローカリティ]を{longhorn-product-name}のドキュメントでご覧ください。
+
+== コンテナ化データインポータ（CDI）設定
+
+{harvester-product-name}は、https://kubevirt.io/user-guide/storage/containerized_data_importer[コンテナ化データインポータ]（CDI）と統合し、以下のStorageClassのVMイメージ管理を処理します：
+
+* Longhorn V2データエンジン
+* LVM
+* サードパーティストレージ
+
+{harvester-product-name} UIまたはCDIアノテーションを使用して、StorageClass CDI属性のデフォルト設定を上書きできます。
+
+[NOTE]
+====
+{harvester-product-name} UIは現在、サードパーティストレージとのCDIの使用をサポートしていません。{harvester-product-name} CDIアノテーションをサードパーティStorageClassに直接適用する必要があります。
+====
+
+CDI設定の編集をDay-2操作のために有効にするために、{harvester-product-name}は基盤となるCDI設定を自動的に更新するStorageClass属性を提供します。
+
+*CDI設定*画面の各フィールドは、StorageClassのアノテーションに対応しています。
+
+|===
+| UIフィールド | アノテーション | 説明 | サポートされている値 | 例
+
+| *ボリュームモード / アクセスモード*
+| `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`
+| デフォルトPVCボリュームモードとアクセスモード
+| ボリュームモードとアクセスモードを持つJSONオブジェクト
+| `'{"Block":["ReadWriteOnce"]}'`
+
+| *ボリュームスナップショットクラス*
+| `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`
+| このStorageClassの下で仮想マシンイメージのスナップショットを取得する際に使用されるVolumeSnapshotClass名。この設定は、`スナップショット`クローン戦略を使用している場合にのみ適用されます。対応するプロビジョナーの`volumeSnapshotClassName`を`csi-driver-config`設定で既に構成している場合、その値がデフォルトとして使用されます。
+| Valid VolumeSnapshotClass name | `lvm-snapshot`, `longhorn-snapshot`
+
+| *Clone Strategy*
+| `cdi.harvesterhci.io/storageProfileCloneStrategy`
+| このStorageClassを使用するVMイメージで作成されたボリュームに使用されるクローン戦略。
+| `コピー`:ネットワーク経由でデータのブロックをコピーします; `スナップショット`:一時的なVolumeSnapshotを作成し、それを新しいPVCに復元することでボリュームをクローンします; `csi-clone`:CSIクローン操作を使用してボリュームをクローンします。
+| `スナップショット`
+
+| *ファイルシステムオーバーヘッド*
+| `cdi.harvesterhci.io/filesystemOverhead`
+| PVCサイズを計算する際に考慮されるファイルシステムオーバーヘッドの割合。
+| 0から1の間の小数値で、最大3桁。
+| `0.05`
+|===
+
+StorageClass YAML構成の例:
+
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lvm
+  annotations:
+    cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
+    cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: lvm-snapshot
+    cdi.harvesterhci.io/filesystemOverhead: '0.05'
+----
+
+[CAUTION]
+====
+ストレージプロファイルやCDIを直接変更しないでください。代わりに、{harvester-product-name}コントローラーがCDIアノテーションを使用してストレージプロファイル設定を同期し、永続化できるようにします。
+====
+
+サポートされているStorageClassesのデフォルト値は以下の通りです:
+
+* Longhorn V2データエンジン
++
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`: `"copy"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`: `"longhorn-snapshot"`
+
+* LVM
+** `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`: `'{"Block":["ReadWriteOnce"]}'`
+** `cdi.harvesterhci.io/storageProfileCloneStrategy`: `"snapshot"`
+** `cdi.harvesterhci.io/storageProfileVolumeSnapshotClass`: `"lvm-snapshot"`
+
+* サードパーティのストレージ：CDIリポジトリの https://github.com/kubevirt/containerized-data-importer/blob/v1.61.1/pkg/storagecapabilities/storagecapabilities.go#L35-L127[`storagecapabilities.go`]を参照してください。プロビジョナーがリストにない場合は、`cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`アノテーションを指定する必要があります。
+
+== 使用例
+
+=== HDDシナリオ
+
+_StorageClass_の導入により、ユーザーは*HDDs*を階層型またはアーカイブ用のコールドストレージとして使用できるようになりました。
+
+[CAUTION]
+====
+HDDは、ゲストRKE2クラスターや高性能ディスク要件を持つVMには推奨されません。
+====
+
+==== 推奨される実践
+
+まず、`Host`ページにHDDを追加し、必要に応じてディスクタグを指定します。例えば、`HDD`や`ColdStorage`などです。追加のディスクやディスクタグの追加方法についての詳細は、xref:hosts/hosts.adoc#_multi_disk_management[Multi-disk Management]を参照してください。
+
+image::storageclass/add_hdd_on_host_page.png[]
+
+image::storageclass/add_tags.png[]
+
+次に、HDD用の新しい`StorageClass`を作成します（上記のディスクタグを使用してください）。大容量だが性能が遅いハードドライブの場合、パフォーマンスを向上させるためにレプリカの数を減らすことができます。
+
+image::storageclass/create_hdd_storageclass.png[]
+
+上記の`StorageClass`を使用して、主にコールドストレージやアーカイブ目的のHDDでボリュームを作成できるようになりました。
+
+image::storageclass/create_volume_hdd.png[]

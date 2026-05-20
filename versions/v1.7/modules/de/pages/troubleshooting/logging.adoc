@@ -1,0 +1,104 @@
+= Protokollierungsprobleme
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Aktivierung des `rancher-logging` Add-ons fehlgeschlagen
+
+=== Problembeschreibung
+
+Eine Fehlermeldung erscheint im {harvester-product-name} UI, wenn Sie versuchen, das `rancher-logging` Add-on zu aktivieren.
+
+image::troubleshooting/failed-to-enable-rancher-logging-addon.png[Fehler bei der Aktivierung des rancher-logging Add-ons]
+
+Protokollnachrichten aus dem `cattle-logging-system/helm-install-rancher-logging` Pod bestätigen, dass ein Fehler aufgetreten ist.
+
+Beispiel:
+
+[,shell]
+----
+...
+ echo 'Installing helm chart'
+...
++ helm install --version ... rancher-logging rancher-logging/rancher-logging ...
+...
+Error: INSTALLATION FAILED: Unable to continue with install: ClusterRole "logging-admin" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata;
+annotation validation error: key "meta.helm.sh/release-name" must equal "rancher-logging":
+current value is "hvst-upgrade-md54b-upgradelog-operator"
+----
+
+image::troubleshooting/logging-installation-failure-due-to-conflict.png[Fehler bei der Installation von rancher-logging aufgrund eines Konflikts]
+
+=== Hauptursache
+
+Wenn Sie das `rancher-logging` Add-on aktivieren, versucht {harvester-product-name}, das https://kube-logging.dev/docs/#overview[Logging Operator] zu installieren. Die Installation schlägt fehl, wenn der Operator bereits im Cluster vorhanden ist, was eine veraltete Ressource von früheren Upgrade-Versuchen oder durch das aktuelle laufende Upgrade sein kann.
+
+Der *Upgrade Software*-Bildschirm enthält eine Option *Logging aktivieren*, die ausgewählt werden muss, damit {harvester-product-name} Upgrade-Ereignisse protokollieren kann. Die Hintergrundverarbeitung hängt jedoch davon ab, ob das `rancher-logging` Add-on aktiviert ist.
+
+image::troubleshooting/upgrade-with-enable-logging.png[Protokollierung während des Upgrades aktiviert]
+
+Wenn das Add-on deaktiviert ist, erstellt der Upgrade Controller die folgenden `logging` und `managedchart` Objekte.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-hpfnw   36s
+
+$ kubectl get logging -A
+NAME                                          LOGGINGREF             CONTROLNAMESPACE
+hvst-upgrade-hpfnw-upgradelog-infra           harvester-upgradelog   harvester-system        // newly created by upgrade controller
+hvst-upgrade-hpfnw-upgradelog-operator-root                          cattle-logging-system   // newly created by upgrade controller, acts as logging-operator
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                                     AGE
+fleet-local   hvst-upgrade-hpfnw-upgradelog-operator   18s  // newly created by upgrade controller
+----
+
+Wenn das Add-on aktiviert ist, erstellt der Upgrade Controller das folgende `logging` Objekt.
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-9sn4x   14s
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                     AGE
+
+$ kubectl get logging -A
+NAME                                  LOGGINGREF                     CONTROLNAMESPACE
+hvst-upgrade-9sn4x-upgradelog-infra   harvester-upgradelog           harvester-system        // newly created by upgrade controller
+rancher-logging-kube-audit            harvester-kube-audit-log-ref   cattle-logging-system   // originally created by rancher-logging addon
+rancher-logging-root                                                 cattle-logging-system   // originally created by rancher-logging addon, acts as logging-operator
+----
+
+Sie können auf das Problem in den folgenden Situationen stoßen:
+
+* Das `rancher-logging` Add-on ist zunächst deaktiviert. Sie starten das Upgrade mit der *Logging aktivieren* Option ausgewählt. Ohne auf den Abschluss des Upgrades zu warten, aktivieren Sie das `rancher-logging` Add-on. Die {harvester-product-name} Benutzeroberfläche zeigt eine Fehlermeldung an.
+
+* Das `rancher-logging` Add-on ist zunächst deaktiviert. Sie starten das Upgrade mit der *Logging aktivieren* Option ausgewählt und warten, bis das Upgrade abgeschlossen ist. Die `managedchart` und `logging` Objekte werden nicht entfernt wegen eines https://github.com/harvester/harvester/issues/7654[bekannten Problems]. Als Nächstes aktivieren Sie das `rancher-logging` Add-on. Die {harvester-product-name} Benutzeroberfläche zeigt eine Fehlermeldung an.
+
+=== Umgehung des Problems
+
+. Wenn ein Upgrade im Gange ist, warten Sie, bis es erfolgreich abgeschlossen oder entfernt wurde.
++
+[IMPORTANT]
+====
+Um Protokollierungsprobleme zu vermeiden, aktivieren oder deaktivieren Sie das `rancher-logging` Add-on nicht, während ein Upgrade im Gange ist. Diese Aktion ist in {harvester-product-name} v1.7.0 und späteren Versionen blockiert.
+====
+
+. Wenn das `rancher-logging` Add-on aktiviert, aber in einem fehlerhaften Zustand ist, deaktivieren Sie es.
+
+. Überprüfen Sie die `logging` und `managedchart` Objekte. Wenn die Namen dieser Objekte mit `hvst-upgrade-` beginnen, löschen Sie sie manuell.
+
+. Aktivieren Sie das `rancher-logging` Add-on.
+
+[NOTE]
+====
+Alle Add-ons müssen sich in einem gesunden Zustand befinden, bevor ein Upgrade gestartet wird. Diese Voraussetzung wird automatisch in {harvester-product-name} v1.7.0 und späteren Versionen überprüft.
+====
+
+=== Verwandte Probleme
+
+https://github.com/harvester/harvester/issues/9289[#9289] und https://github.com/harvester/harvester/issues/9644[#9644]

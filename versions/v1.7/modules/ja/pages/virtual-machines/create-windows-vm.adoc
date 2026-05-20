@@ -1,0 +1,234 @@
+= Windows仮想マシンを作成する
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+*仮想マシン*ページから1つ以上の仮想マシンを作成します。
+
+[NOTE]
+====
+Linux仮想マシンを作成する場合は、xref:./create-vm.adoc[このページ]を参照してください。
+====
+
+== Windows仮想マシンのハウツー
+
+=== ヘッダーセクション
+
+. 単一の仮想マシンインスタンスまたは複数の仮想マシンインスタンスを作成します。
+. 仮想マシン名を設定します。
+. (オプション) 仮想マシンの説明を入力します。
+. (オプション) 仮想マシンテンプレート`windows-iso-image-base-template`を選択します。このテンプレートは、Windows用の`virtio`ドライバーを持つボリュームを追加します。
+
+=== 基本タブ
+
+. 仮想マシンに割り当てる`CPU`コアの数を設定します。
+. 仮想マシンに割り当てる`Memory`の量を設定します。
+
+image::vm/create-windows-vm.png[create-windows-vm]
+
+[NOTE]
+====
+上記のように、Windows仮想マシンテンプレートを使用することをお勧めします。`Volumes`セクションでは、Windows仮想マシンテンプレートが自動的に作成したオプションについて説明します。
+====
+
+[CAUTION]
+====
+`bootOrder`の値は、最初にインストールイメージで設定する必要があります。これを変更すると、仮想マシンがインストールディスクから起動しない可能性があります。
+====
+
+=== ボリュームタブ
+
+. *最初のボリューム*は、次の値を持つ`Image Volume`です：
+ .. `Name`:値`cdrom-disk`はデフォルトで設定されています。そのままにするか、変更することができます。
+ .. `Type`:`cd-rom`を選択します。
+ .. `Image`:インストールするWindowsイメージを選択してください。新しいイメージの作成方法についての詳細はxref:../virtual-machines/vm-images/upload-image.adoc[Upload Images]を参照してください。
+ .. `Size`:値`20`はデフォルトで設定されています。イメージのサイズが大きい場合は変更できます。
+ .. `Bus`:値`SATA`はデフォルトで設定されています。変更しないことをお勧めします。
+. *第二ボリューム*は、次の値を持つ`Volume`です：
+ .. `Name`:値`rootdisk`はデフォルトで設定されています。そのままにするか、変更することができます。
+ .. `Type`:`disk`を選択します。
+ .. `StorageClass`:デフォルトのStorageClass `harvester-longhorn`を使用するか、カスタムのものを指定できます。
+ .. `Size`:値`32`はデフォルトで設定されています。この値を変更する前に、 https://docs.microsoft.com/en-us/windows-server/get-started/hardware-requirements#storage-controller-and-disk-space-requirements[Windows Server]および https://docs.microsoft.com/en-us/windows/whats-new/windows-11-requirements#hardware-requirements[Windows 11]のディスクスペース要件を確認してください。
+ .. `Bus`:値`VirtIO`はデフォルトで設定されています。そのままにするか、他の利用可能なオプションである`SATA`または`SCSI`に変更できます。
+. *第三ボリューム*は、次の値を持つ`Container`です：
+ .. `Name`:値`virtio-container-disk`はデフォルトで設定されています。そのままにするか、変更することができます。
+ .. `Type`:`cd-rom`を選択します。
+ .. `Docker Image`:値`registry.suse.com/suse/vmdp/vmdp:2.5.4.2`はデフォルトで設定されています。この値を変更しないことをお勧めします。
+ .. `Bus`:値`SATA`はデフォルトで設定されています。この値を変更しないことをお勧めします。
+. ボタン`Add Volume`、`Add Existing Volume`、`Add VM Image`、または`Add Container`を使用して追加のディスクを追加できます。
+
+image::vm/create-windows-vm-volumes.png[create-windows-vm-volumes]
+
+=== ネットワークタブ
+
+. *管理ネットワーク*は、次の値でデフォルトで追加されます：
+ .. `Name`: 値`default`はデフォルトで設定されています。そのままにするか、変更することができます。
+ .. `Model`:値`e1000`はデフォルトで設定されています。そのままにするか、ドロップダウンから他の利用可能なオプションに変更できます。
+ .. `Network`:値`management Network`はデフォルトで設定されています。他のネットワークが作成されていない場合、このオプションを変更することはできません。新しいネットワークの作成方法についての詳細はxref:../networking/vm-network.adoc[VM Network]を参照してください。
+ .. `Type`:値`masquerade`はデフォルトで設定されています。そのままにするか、他の利用可能なオプションである`bridge`に変更できます。
+. `Add Network`をクリックすることで追加のネットワークを追加できます。
+
+image::vm/create-windows-vm-networks.png[create-windows-vm-networks]
+
+[CAUTION]
+====
+`Node Scheduling`の設定を変更すると、{harvester-product-name}の機能に影響を与える可能性があり、`Live migration`を無効にすることがあります。
+====
+
+=== ノードスケジューリングタブ
+
+. `Node Scheduling`はデフォルトで`Run VM on any available node`に設定されています。そのままにするか、ドロップダウンから他の利用可能なオプションに変更できます。
+
+image::vm/create-windows-vm-scheduling.png[create-windows-vm-scheduling]
+
+=== 詳細オプションタブ
+
+. `OS Type`:値`Windows`はデフォルトで設定されています。変更しないことをお勧めします。
+. `Machine Type`:値`None`はデフォルトで設定されています。変更しないことをお勧めします。この値を変更する前に、 https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#machine-type[KubeVirtマシンタイプ]のドキュメントを参照してください。
+. （オプション）`Hostname`:仮想マシンのホスト名を設定します。
+. （オプション）`Cloud Config`:`User Data`と`Network Data`の両方の値はデフォルト値で設定されています。現在、これらの設定はWindowsベースの仮想マシンには適用されていません。
+. （オプション）`Enable TPM`、`Booting in EFI mode`、`Secure Boot`:TPM 2.0デバイスとセキュアブートを備えたUEFIファームウェアは、Windows 11の必須要件です。
+
+[NOTE]
+====
+現在、非永続的vTPMのみがサポートされており、その状態は各仮想マシンのシャットダウン後に消去されます。したがって、 https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker]は有効にしないでください。
+====
+
+image::vm/create-windows-vm-advanced.png[create-windows-vm-advanced]
+
+=== フッターセクション
+
+すべての設定が完了したら、`Create`をクリックしてください。
+
+[NOTE]
+====
+高度な設定を追加する必要がある場合は、`Edit as YAML`をクリックして仮想マシンの設定を直接編集できます。
+すべての変更をキャンセルしたい場合は、`Cancel`をクリックしてください。
+====
+
+== Windowsのインストール
+
+. 作成したばかりの仮想マシンを選択し、`Start`をクリックしてください。
+. インストーラーにブートし、インストーラーの指示に従ってください。
+. （オプション）`virtio`ベースのボリュームを使用している場合は、インストーラーがそれらを検出できるように特定のドライバーをロードする必要があります。仮想マシンテンプレート`windows-iso-image-base-template`を使用している場合、手順は次のとおりです:
+ .. `Load driver`をクリックし、ダイアログで`Browse`をクリックして、`VMDP-WIN`プレフィックスのCD-ROMドライブを見つけてください。次に、インストールしているWindowsのバージョンに応じてドライバーディレクトリを見つけます。例えば、Windows Server 2012r2の場合は`win8.1-2012r2`を開き、その中の`pvvx`ディレクトリを選択してください。
+ image:vm/find-virtio-driver-directory.png[find-virtio-driver-directory]
+ .. `OK`をクリックして、インストーラーがこのディレクトリでドライバーをスキャンできるようにし、`SUSE Block Driver for Windows`を選択し、`Next`をクリックしてドライバーを読み込んでください。
+ image:vm/select-virtio-block-driver.png[select-virtio-block-driver]
+ .. インストーラーがドライバーを読み込むのを待ってください。正しいドライバーのバージョンを選択すると、ドライバーが読み込まれた後に`virtio`ボリュームが検出されます。
+ image:vm/installer-found-virtio-drive.png[installer-found-virtio-drive]
+. （オプション）ネットワークアダプターのような他の`virtio`ベースのハードウェアを使用している場合は、インストールを完了した後にそれらのドライバーを手動でインストールする必要があります。ドライバーをインストールするには、VMDPドライバーディスクを開き、プラットフォームに基づいてインストーラーを使用してください。
+
+Windows用のVMDPドライバーパックのサポートマトリックスは以下の通りです（VMDP CD-ROMドライブパスがEであると仮定します）：
+
+|===
+| バージョン | サポートされます | ドライバーパス
+
+| Windows 7
+| いいえ
+| `N/A`
+
+| Windows Server 2008
+| いいえ
+| `N/A`
+
+| Windows Server 2008r2
+| いいえ
+| `N/A`
+
+| Windows 8 x86(x64)
+| はい
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows Server 2012 x86(x64)
+| はい
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows 8.1 x86(x64)
+| はい
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows Server 2012r2 x86(x64)
+| はい
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows 10 x86(x64)
+| はい
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2016 x86(x64)
+| はい
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows Server 2019 x86(x64)
+| はい
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows 11 x86(x64)
+| はい
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2022 x86(x64)
+| はい
+| `E:\win10-11-server22\x86(x64)\pvvx`
+|===
+
+[NOTE]
+====
+`windows-iso-image-base-template`テンプレートを使用しなかった場合、まだ`virtio`デバイスが必要な場合は、ハードウェアを正しく検出できるようにカスタムWindows virtioドライバーを追加してください。
+====
+
+[NOTE]
+====
+VMDPゲストドライバーとツールのインストール方法についての詳細な手順は、 https://documentation.suse.com/sle-vmdp/2.5/html/vmdp/index.htmlのドキュメントを参照してください。
+====
+
+== 既知の問題
+
+=== EFIモードを使用しているときに、Windows ISOがブートできない。
+
+WindowsでEFIモードを使用している場合、以下のようにHDDやUEFIシェルなどの他のデバイスでシステムがブートされることがあります。
+
+image::vm/efi-shell.png[efi-shell]
+
+これは、Windowsがインストーラー.isoからブートするかどうかをユーザーに決定させるための`Press any key to boot from CD or DVD...`を表示し、CDまたはDVDからブートするためには人間の介入が必要だからです。
+
+image::vm/boot-from-cd.png[boot-from-cd]
+
+代わりに、システムがすでにUEFIシェルにブートしている場合は、`reset`と入力してシステムを再起動させることができます。プロンプトが表示されたら、任意のキーを押してシステムがWindows.isoからブートするようにします。
+
+=== 予約メモリが不足しているとVMがクラッシュする。
+
+予約メモリが十分に構成されていない状態で8GiBを超えるメモリが割り当てられたWindows仮想マシンに既知の問題があります。仮想マシンは警告なしにクラッシュします。
+
+これを修正するには、詳細オプションタブでテンプレートに少なくとも256MiBの予約メモリを割り当てる必要があります。`256MiB`が機能しない場合は、`512MiB`を試してください。
+
+image::vm/reserved-memory-config.png[reserved-memory-config]
+
+=== Windowsの初回起動時にBSoD（ブルースクリーンオブデス）が発生します。
+
+Windows Server 2016以降を使用しているWindows仮想マシンには既知の問題があり、Windowsの最初のブート時にエラーコード`KMODE_EXCEPTION_NOT_HANDLED`のBSoDが表示されることがあります。私たちはまだこの問題を調査中であり、今後のリリースで修正する予定です。
+
+回避策として、`/etc/modprobe.d/kvm.conf`のインストール内で{harvester-product-name}ファイルを作成または修正し、以下のように`/oem/99_custom.yaml`を更新することができます。
+
+[,YAML]
+----
+name: Harvester Configuration
+stages:
+  initramfs:
+  - commands: # ...
+    files:
+    - path: /etc/modprobe.d/kvm.conf
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+          options kvm ignore_msrs=1
+      encoding: ""
+      ownerstring: ""
+      # ...
+----
+
+[NOTE]
+====
+これはまだ実験的な解決策です。詳細については、 https://github.com/harvester/harvester/issues/276[この問題]を参照してください。また、この回避策を適用した後に問題が発生した場合はお知らせください。
+====

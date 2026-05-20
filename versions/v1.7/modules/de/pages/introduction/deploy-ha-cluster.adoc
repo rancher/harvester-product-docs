@@ -1,0 +1,105 @@
+= Cluster mit hoher Verfügbarkeit bereitstellen
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Ein {harvester-product-name} Cluster mit drei oder mehr Knoten ist erforderlich, um Multi-Node-Funktionen wie hohe Verfügbarkeit vollständig zu nutzen. Die neuesten Versionen ermöglichen es, Cluster mit zwei Verwaltungsknoten und einem xref:/hosts/witness-node.adoc[witness node] (und optional einem oder mehreren Arbeitsknoten) zu erstellen. Sie können auch xref:/installation-setup/single-node-clusters.adoc[Einzelknoten-Cluster] erstellen, die die meisten Funktionen unterstützen (außer hohe Verfügbarkeit, Multi-Replikat-Unterstützung und Live-Migration).
+
+Dieser Leitfaden führt Sie durch die erforderlichen Schritte, um einen *Cluster mit hoher Verfügbarkeit* und virtuelle Maschinen (VMs) bereitzustellen, die Gast-Cluster hosten und benutzerdefinierte Workloads ausführen können.
+
+== 1. Überprüfen Sie, ob die minimalen Hardware- und Netzwerkanforderungen erfüllt sind.
+
+{harvester-product-name} ist für Bare-Metal-Server unter Verwendung von Open-Source-Softwarekomponenten auf Unternehmensebene konzipiert. Der Installer überprüft automatisch die Hardware und zeigt Warnmeldungen an, wenn die minimalen xref:/installation-setup/requirements.adoc[Anforderungen] nicht erfüllt sind.
+
+== 2. Bereiten Sie die Installationsdateien basierend auf der Installationsmethode vor, die Sie verwenden möchten.
+
+Sie können die Installationsdateien von der https://github.com/harvester/harvester/releases[Releases] Seite herunterladen. Der *Downloads* Abschnitt der Versionshinweise enthält Links zu den ISO-Dateien und verwandten Artefakten. Die folgenden Arten von ISO-Dateien sind verfügbar:
+
+* *Vollständiges ISO-Image*: Enthält die Kernkomponenten des Betriebssystems und alle erforderlichen Container-Images, die während der Installation vorab geladen werden. Sie müssen ein vollständiges ISO-Image verwenden, wenn Sie {harvester-product-name} hinter einer Firewall oder einem Proxy installieren und in Umgebungen ohne Internetverbindung.
+* xref:/installation-setup/media/net-install.adoc[*Netzinstallations-ISO*]: Enthält nur die Kernkomponenten des Betriebssystems. Nach Abschluss der Installation zieht das Betriebssystem alle erforderlichen Container-Images aus dem Internet (hauptsächlich von Docker Hub).
+
+|===
+| Methode | Erforderliche Installationsdateien | Sonstige Anforderungen
+
+| xref:/installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| Nicht zutreffend
+
+| xref:/installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| USB-Speicherstick; Dienstprogramm wie https://etcher.balena.io/[balenaEtcher] oder das Linux https://man7.org/linux/man-pages/man1/dd.1.html[dd-Befehl]
+
+| xref:/installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO, Linux-Kernel-Image (vmlinuz), initrd, SquashFS-Image
+| Verzeichnis auf dem HTTP-Server (zum Bereitstellen von Bootdateien); iPXE-Bootskripte (für die automatische Installation); DHCP-Serverkonfiguration
+|===
+
+== 3. Bereiten Sie die Anforderungen an die Clusterkonfiguration vor.
+
+* Cluster-Token: ASCII-Zeichenfolge, die Knoten verwenden, wenn sie dem Cluster beitreten
+* Feste IP-Adresse für jeden Knoten: Kann statisch oder über DHCP (Hostreservierung) zugewiesen werden
+* Feste virtuelle IP-Adresse (VIP), die als Clusterverwaltungsadresse verwendet wird: VIP, auf den Knoten zeigen, wenn sie dem Cluster beitreten und mit dem Sie sich verbinden, wenn Sie Verwaltungsaufgaben nach der Bereitstellung des Clusters durchführen
+* Adressen der DNS-Server, NTP-Server und des Proxy-Servers (falls erforderlich)
+
+== 4. Stellen Sie den ersten Clusterknoten bereit.
+
+Die Bereitstellung umfasst die Installation des Betriebssystems und anderer Komponenten auf dem Host und dann einen Neustart, sobald die Installation abgeschlossen ist. Die Bereitstellung des ersten Knotens erstellt den Cluster, und der erste Knoten wird standardmäßig als Verwaltungsknoten zugewiesen.
+
+Während der Installation müssen Sie die Knoteneinstellungen konfigurieren, die Clusterverwaltungsadresse (VIP) und das Cluster-Token definieren und weitere Informationen angeben. Falls erforderlich, können Sie weitere Einstellungen mit einer xref:/installation-setup/config/configuration-file.adoc[Konfigurationsdatei] vornehmen.
+
+Sobald die Installation abgeschlossen ist, startet der Knoten neu und dann erscheint die Konsole. Die Konsole zeigt Informationen über den Cluster (Verwaltungs-URL und Status) und den Knoten (Hostname, IP-Adresse und Status) an. Nachdem der Cluster initialisiert ist und alle Dienste zu laufen beginnen, ändert sich der Clusterstatus in *Bereit*.
+
+== 5. Konfigurieren Sie ein starkes Passwort für den Standardbenutzer `admin`.
+
+Sobald der Clusterstatus auf *Bereit* wechselt, können Sie über die auf der Konsole angezeigte Verwaltungs-URL auf die xref:/installation-setup/authentication.adoc[UI] zugreifen.
+
+== 6. Stellen Sie die anderen Knoten bereit und fügen Sie sie dem Cluster hinzu.
+
+Die Bereitstellung umfasst die Installation des Betriebssystems und anderer Komponenten auf dem Host und dann einen Neustart, sobald die Installation abgeschlossen ist. Alle anderen Knoten treten dem Cluster bei, der erstellt wurde, als der erste Knoten bereitgestellt wurde.
+
+Während der Installation müssen Sie die Knoteneinstellungen konfigurieren und die Clusterverwaltungsadresse (virtuelle IP) sowie das Cluster-Token angeben, das Sie zuvor definiert haben. Falls erforderlich, können Sie weitere Einstellungen mit einer xref:/installation-setup/config/configuration-file.adoc[Konfigurationsdatei] vornehmen.
+
+Wenn der Cluster drei oder mehr Knoten hat, werden die beiden Knoten, die nach dem ersten Knoten hinzugefügt wurden, automatisch zu Verwaltungsknoten befördert, um einen Cluster mit hoher Verfügbarkeit zu bilden.
+
+== 7. Erstellen Sie ein benutzerdefiniertes Cluster-Netzwerk (optional) und ein VM-Netzwerk (erforderlich).
+
+Netzwerktechnologie umfasst drei Hauptkonzepte:
+
+* xref:/networking/cluster-network.adoc#_cluster_network[*Cluster-Netzwerk*]: Verkehrsisolierter Weiterleitungsweg für die Übertragung von Netzwerkverkehr im {harvester-product-name} Cluster.
++
+Während der Bereitstellung wird ein Cluster-Netzwerk mit dem Namen xref:/networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] für die internen Cluster-Kommunikationen erstellt. `mgmt` ermöglicht den Zugriff auf VMs vom Infrastruktur-Netzwerk (außerhalb des Clusters), an das jeder Knoten mit Verwaltungs-NICs für Clusterverwaltungszwecke angeschlossen ist. {harvester-product-name} ermöglicht es Ihnen auch, xref:/networking/cluster-network.adoc#_custom_cluster_network[benutzerdefinierte Cluster-Netzwerke] zu erstellen, die dem VM-Verkehr gewidmet werden können.
+
+* xref:/networking/cluster-network.adoc#_network_configuration[*Netzwerkkonfiguration*]: Definition, wie Cluster-Knoten mit einem bestimmten Cluster-Netzwerk verbunden sind.
++
+Jede Netzwerkkonfiguration entspricht einer Gruppe von Knoten mit einheitlichen Netzwerkspezifikationen. Nur Knoten, die von der Netzwerkkonfiguration abgedeckt sind, können auf das zugehörige Cluster-Netzwerk zugreifen. Diese Anordnung bietet Ihnen Flexibilität bei der Konfiguration eines heterogenen Clusters, insbesondere wenn die Namen der Netzwerkschnittstellen für jeden Knoten unterschiedlich sind.
+
+* xref:/networking/cluster-network.adoc#_vm_network[*VM-Netzwerk*]: Virtuelles Netzwerk, das VMs verwenden, um mit anderen VMs und dem externen Infrastruktur-Netzwerk zu kommunizieren.
++
+Jedes VM-Netzwerk ist mit einem bestimmten Cluster-Netzwerk verbunden, das für die Übertragung des VM-Verkehrs verwendet wird. Sie können entweder ein xref:/networking/vm-network.adoc#_vlan_network[VLAN-Netzwerk] oder ein xref:/networking/vm-network.adoc#_untagged_network[untagged Netzwerk] basierend auf Ihren Anforderungen erstellen, wie z.B. Verkehrsisolierung, Netzwerksegmentierung, einfache Verwaltung oder Anpassung an die externe Netzwerkumgebung.
+
+Bevor Sie VMs erstellen, erstellen Sie die erforderlichen Netzwerke. Wenn an jedem Cluster-Knoten mehr als eine Netzwerkschnittstelle angeschlossen ist, sollten Sie erwägen, xref:/networking/cluster-network.adoc#_create_a_new_cluster_network[benutzerdefinierte Cluster-Netzwerke] und Netzwerkkonfigurationen zu erstellen, um die Verkehrsisolierung zu verbessern. Andernfalls können Sie nur das Verwaltungsnetzwerk für die Übertragung des VM-Verkehrs verwenden. Als Nächstes xref:/networking/vm-network.adoc#_create_a_vm_network[erstellen Sie ein VM-Netzwerk], das entweder mit `mgmt` oder einem der benutzerdefinierten Cluster-Netzwerke, die Sie erstellt haben, verbunden ist.
+
+== 8. VM-Bilder importieren.
+
+Im UI können Sie ISO-, qcow2- und raw xref:/virtual-machines/vm-images/upload-image.adoc[Bilder] importieren, indem Sie ein Bild vom lokalen Dateisystem hochladen oder die URL eines Bildes angeben, das vom Cluster aus zugänglich ist.
+
+== 9. SSH-Schlüssel importieren. (empfohlen)
+
+Sie können SSH-öffentliche Schlüssel in {harvester-product-name} speichern. Wenn eine VM gestartet wird, kann ein gespeicherter Schlüssel in die VM xref:/virtual-machines/access-vm.adoc#_ssh_access[eingespeist] werden, um sicheren Zugriff über SSH zu ermöglichen. Validierte Schlüssel werden auf dem *SSH-Schlüssel*-Bildschirm im UI angezeigt.
+
+== 10. VMs erstellen.
+
+Sie können xref:/virtual-machines/create-vm.adoc[Linux-VMs] mit einer der folgenden Methoden erstellen:
+
+* UI: Auf dem *Bildschirm für virtuelle Maschinen* klicken Sie auf *Erstellen* und konfigurieren die Einstellungen auf jedem Tab.
+* Kubernetes API: Erstellen Sie ein `VirtualMachine`-Objekt.
+* xref:/integrations/terraform/terraform-provider.adoc[Terraform-Anbieter]: Definieren Sie einen `harvester_virtualmachine` Ressourcenblock.
+
+Das Erstellen von xref:/virtual-machines/create-windows-vm.adoc[Windows-VMs] im UI umfasst leicht unterschiedliche Schritte. {harvester-product-name} bietet eine VM-Vorlage namens `windows-iso-image-base-template`, die ein Volume mit den Virtio-Treibern für Windows hinzufügt, was den VM-Konfigurationsprozess vereinfacht. Wenn Sie Virtio-Geräte benötigen, aber die Vorlage nicht verwenden möchten, müssen Sie Ihre eigenen Virtio-Treiber für Windows hinzufügen, um eine korrekte Hardwareerkennung zu ermöglichen.
+
+== Weitere Schritte
+
+Die folgenden Abschnitte bieten Anleitungen, die Sie durch die Sicherung und Wiederherstellung von VMs, die Verwaltung von Hosts und die Verwendung von {rancher-product-name} mit {harvester-product-name} führen.
+
+* xref:/virtual-machines/backup-restore.adoc[VM-Sicherung, Snapshot & Wiederherstellung]
+* xref:/hosts/hosts.adoc[Hostverwaltung]
+* xref:/integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integration]

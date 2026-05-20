@@ -1,0 +1,195 @@
+= 实时迁移
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+实时迁移意味着将虚拟机移动到不同的主机而不产生停机时间。在后台执行一系列综合的处理和任务以实现实时迁移。
+
+== 先决条件
+
+当满足以下要求时，可以进行实时迁移：
+
+* 除了当前节点外，集群至少有一个可调度节点，符合所有虚拟机的调度规则。
+
+* 迁移目标节点有足够的可用资源来托管虚拟机。
+
+* 虚拟机请求的 CPU、内存、xref:virtual-machines/create-vm.adoc#_volumes[卷]、设备和其他资源可以在源虚拟机仍在运行时被复制或重建到迁移目标节点上。
+
+== 不可迁移的虚拟机
+
+如果虚拟机具有以下一个或多个特征，则被视为不可迁移：
+
+* 具有以下属性的卷：
+
+** 类型：`CD-ROM` 或 `Container Disk`
+** 访问模式：`ReadWriteOnce`
+** StorageClass 副本数量：`1`（并非在所有情况下都能检测到。）
+
+* 主机设备直通，例如 `PCI` 和 `vGPU`
+
+* 将虚拟机绑定到特定节点的 xref:virtual-machines/create-vm.adoc#_node_scheduling[节点选择器]
+
+* 仅匹配一个节点的 xref:virtual-machines/create-vm.adoc#_node_scheduling[调度规则]。
+
+以下是运行时检查的规则条件示例：
+
+* 虚拟机连接到仅覆盖一个节点的集群网络。
+
+* 虚拟机启用了 CPU 钉扎，并且 CPU 管理器仅在一个节点上启用。
+
+* 虚拟机具有严格的反亲和性规则，防止其与某些其他虚拟机共存。
+
+有关更多信息，请参见xref:virtual-machines/create-vm.adoc#_automatically_applied_affinity_rules[自动应用的亲和性规则]。
+
+[NOTE]
+====
+要进行虚拟机的实时迁移，您必须首先去除不可迁移的设备并添加可调度的节点。
+====
+
+== 可实时迁移的虚拟机
+
+不具备不可迁移虚拟机属性的虚拟机可以进行实时迁移。
+
+== 迁移工作原理
+
+=== `VirtualMachineInstanceMigration` 对象
+
+当触发虚拟机迁移操作时，会创建一个`VirtualMachineInstanceMigration`对象来跟踪操作的状态和进度。{harvester-product-name}控制器通过确保实例对象的身份反映在迁移对象中，将`VirtualMachineInstanceMigration`对象与`VirtualMachineInstance`对象关联起来。
+
+在以下示例中，名为`demo`的虚拟机有一个关联的迁移对象。此对象的UID在迁移过程中被添加到实例对象的`.status.migrationState.migrationUID`属性中。
+
+[bash, shell]
+----
+$ kubectl get vmi demo -ojsonpath={.status.migrationState.migrationUID}
+
+1d6d7273-275d-48e0-bb76-62e240b42aaf
+----
+
+实例对象的名称被添加到迁移对象的`.spec.vmiName`属性中。
+
+[bash, shell]
+----
+$ kubectl get vmim demo-6crrk -ojsonpath={.spec.vmiName}
+
+演示
+----
+
+`VirtualMachineInstanceMigration`对象名称的格式取决于迁移是手动触发还是自动触发。
+
+当从**迁移** xref:#_starting_a_migration[菜单项]触发迁移时，`VirtualMachineInstanceMigration`对象的名称以虚拟机的名称和一个随机字符串（例如，`vm1-a3d1f`）为前缀。
+
+当迁移xref:#_automatically_triggered_batch_migration[自动]触发时，`VirtualMachineInstanceMigration`对象的名称以`kubevirt-evacuation-`和一个随机字符串（例如，`kubevirt-evacuation-9c485`）为前缀。
+
+[NOTE]
+====
+{harvester-product-name}用户界面未指定迁移的来源。您必须检查`VirtualMachineInstanceMigration`对象的名称以检索此信息。
+====
+
+=== CPU 模型匹配
+
+每个节点都有多个 CPU 模型，这些模型用不同的键标记。
+
+* 主要 CPU 模型：`host-model-cpu.node.kubevirt.io/{cpu-model}`
+* 支持的 CPU 模型：`cpu-model.node.kubevirt.io/{cpu-model}`
+* 支持的迁移 CPU 模型：`cpu-model-migration.node.kubevirt.io/{cpu-model}`
+
+在实时迁移期间，控制器检查虚拟机实例 (VMI) CR 中 `spec.domain.cpu.model` 的值，该值源自虚拟机 (VM) CR 中的 `spec.template.spec.domain.cpu.model`。如果未设置 `spec.template.spec.domain.cpu.model` 的值，控制器将使用默认值 `host-model`。
+
+当使用 `host-model` 时，处理会获取主要 CPU 模型的值，并用标签 `cpu-model-migration.node.kubevirt.io/{cpu-model}` 填充新创建的 pod 的 `spec.NodeSelectors`。
+
+或者，您可以在 `spec.domain.cpu.model` 中自定义 CPU 模型。例如，如果 CPU 模型是 `XYZ`，则该处理会用标签 `cpu-model.node.kubevirt.io/XYZ` 填充新创建的 pod 的 `spec.NodeSelectors`。
+
+然而，`host-model` 仅允许将虚拟机迁移到具有相同 CPU 模型的节点。有关更多信息，请参见 xref:#_limitations[限制]。
+
+== 开始迁移
+
+. 转到 *虚拟机* 页面。
+. 找到您要迁移的虚拟机并选择 *⋮ > 迁移*。
+. 选择您要将虚拟机迁移到的节点。单击 *应用*。
+
+image::vm/migrate-action.png[]
+
+[NOTE]
+====
+在以下情况下，**迁移** 菜单选项不可用：
+
+* 集群只有一个节点。
+* 虚拟机是 [不可迁移的](#non-migratable-virtual-machines)。
+* 虚拟机已经有一个正在进行或待处理的迁移处理。
+====
+
+image::vm/migrate.png[]
+
+== 中止迁移
+
+. 转到 *虚拟机* 页面。
+. 找到您想要中止的、处于迁移状态的虚拟机。选择 *⋮ -> 中止迁移*。
+
+[NOTE]
+====
+* 当虚拟机已经有一个正在进行或待处理的迁移处理时，**中止迁移** 菜单项可用。
+
+* 如果迁移处理是使用 xref:#_automatically_triggered_batch_migration[批量迁移] 创建的，请不要使用此用户界面功能。有关更多信息，请参见 xref:#_virtualmachineinstancemigration_object[`VirtualMachineInstanceMigration` 对象]。
+====
+
+== 自动触发的批量迁移
+
+xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[升级] 和 xref:hosts/hosts.adoc#_node_maintenance[节点维护] 都受益于实时迁移。底层处理称为 *批量迁移*，与 xref:#_starting_a_migration[开始迁移] 中描述的处理略有不同。该处理包括下列步骤：
+
+. 控制器监视节点对象上的专用污点。
+
+. 控制器为当前节点上的每个 xref:#_live_migratable_virtual_machines[可实时迁移的虚拟机] 创建一个 `VirtualMachineInstanceMigration` 对象。
+
+. 迁移被排队、内部调度，并批量处理。{harvester-product-name} 用户界面显示状态 **待迁移** 和 **迁移中** 以指示进度。
+
+. 控制器监控处理，并等待直到所有迁移完成或超时。
+
+== 迁移超时
+
+=== 完成超时
+
+实时迁移过程将虚拟机内存页和磁盘块复制到目标。在某些情况下，虚拟机可以以比这些可以复制的速度更高的速率写入不同的内存页或磁盘块。因此，迁移过程无法在合理的时间内完成。
+
+如果实时迁移超过每 GiB 数据 800 秒的完成超时，则将中止。例如，具有 8 GiB 内存的虚拟机在 6400 秒后超时。
+
+=== 进展超时
+
+当复制内存在 150 秒内没有任何进展时，实时迁移也会被中止。
+
+== 局限性
+
+=== CPU 模型
+
+`host-model` 仅允许将虚拟机迁移到具有相同 CPU 模型的节点。然而，指定 CPU 模型并不是总是必需的。当未指定 CPU 模型时，您必须关闭虚拟机，分配一个所有节点都支持的 CPU 模型，然后重新启动虚拟机。
+
+示例：
+
+* 节点：`host-model-cpu.node.kubevirt.io/XYZ` `cpu-model-migration.node.kubevirt.io/XYZ` `cpu-model.node.kubevirt.io/123`
+* B 节点：`host-model-cpu.node.kubevirt.io/ABC` `cpu-model-migration.node.kubevirt.io/ABC` `cpu-model.node.kubevirt.io/123`
+
+由于 `host-model-cpu.node.kubevirt.io` 的值不相同，无法迁移具有 `host-model` 的虚拟机。然而，两个节点都支持 `123` CPU 模型，因此您可以使用以下任一方法迁移任何具有 `123` CPU 模型的虚拟机：
+
+* 集群级别：运行 `kubectl edit kubevirts.kubevirt.io -n harvester-system` 并添加 `spec.configuration.cpuModel: "123"`。此更改也会影响新创建的虚拟机。
+* 单独的虚拟机：修改虚拟机配置以包含 `spec.template.spec.domain.cpu.model: "123"`。
+
+这两种方法都要求您重新启动虚拟机。如果您确定集群中的所有节点都支持特定的 CPU 模型，则可以在创建任何虚拟机之前在集群级别定义此项。这样做可以消除在实时迁移期间为分配 CPU 模型而重新启动虚拟机的需要。
+
+=== 网络中断
+
+实时迁移对网络中断非常敏感。在迁移过程中，源节点和目标节点之间的网络连接任何中断都可能导致多种结果。
+
+==== `mgmt` 网络中断
+
+通过 `mgmt`（内置集群网络）进行的实时迁移依赖于源节点和目标节点上管理接口的可用性。`mgmt` 网络中断被视为关键，因为它们不仅会中断迁移过程，还会影响整体节点管理。
+
+==== 虚拟机迁移网络中断
+
+一个 xref:networking/vm-network.adoc[虚拟机迁移网络] 将迁移流量与其他网络活动隔离开。虽然这种设置提高了迁移性能和可靠性，特别是在网络流量高的环境中，但它也使迁移过程依赖于该特定网络的可用性。
+
+虚拟机迁移网络的中断可能会以以下方式影响迁移处理：
+
+* 短暂中断：迁移处理突然停止。一旦连接恢复，迁移处理将继续，并能成功完成，尽管会有延迟。
+* 长时间中断：迁移操作超时并失败。源虚拟机在源节点上继续正常运行。
+
+迁移处理以对等模式运行，这意味着源节点上的 libvirt 守护程序（libvirtd）通过直接调用目标守护程序来控制迁移。内置的保持活动机制确保在迁移处理期间客户端连接保持活动。如果连接在特定时间内保持不活动，则会关闭连接，迁移处理将被中止。
+
+默认情况下，保持活动间隔设置为 5 秒，重试次数设置为 5。考虑到这些默认值，如果连接在 30 秒内不活动，迁移处理将被中止。然而，迁移可能会更早或更晚失败，具体取决于实际的集群条件。

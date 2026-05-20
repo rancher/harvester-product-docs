@@ -1,0 +1,112 @@
+= Sécurité du volume{nbsp}:
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Harvester vous permet de chiffrer et de déchiffrer les images de machines virtuelles. Le mécanisme de chiffrement utilise le module du noyau Linux dm_crypt et l'utilitaire en ligne de commande cryptsetup.
+
+== Conditions préalables
+
+Préparez les ressources suivantes{nbsp}:
+
+* Secret : Un secret Kubernetes est utilisé comme phrase de passe de dm_crypt. Vous devez spécifier la valeur du champ `CRYPTO_KEY_VALUE`. Tous les autres champs sont fixes.
++
+image::vm/create-encryption-used-secret.png[]
++
+Exemple d'un secret{nbsp}:
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+L'exemple contient le code YAML par défaut pour les secrets Kubernetes. En plus de cela, vous pouvez utiliser https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[options de chiffrement pour le mode LUKS], qui est un mode de fonctionnement de cryptsetup. Harvester v1.4.1 et les versions ultérieures prennent en charge ces options, mais vous devez vérifier qu'elles sont prises en charge par vos nœuds.
+
+|===
+| Option | Valeurs possibles
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+Vous pouvez créer un secret dans l'espace de noms système en utilisant kubectl ou l'interface utilisateur de Harvester (*Edit as YAML* fonctionnalité). Les ressources dans l'espace de noms système ne sont pas affichées à l'écran *Secrets* de l'interface utilisateur de Harvester.
+====
++
+* StorageClass{nbsp}: Les images sont chiffrées à l'aide de Longhorn, donc les champs requis doivent être transmis au pilote CSI Longhorn. Vous pouvez spécifier le secret de chiffrement lors de la création d'une classe de stockage. Pour plus d'informations, voir xref:/virtual-machines/vm-images/upload-image.adoc#_image_storageclass[Image StorageClass].
++
+image::vm/create-storage-class.png[]
++
+Exemple d'un StorageClass{nbsp}:
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+Vous pouvez créer un secret dans l'espace de noms système en utilisant l'interface utilisateur de Harvester (*Edit as YAML* fonctionnalité) et kubectl. Les ressources dans l'espace de noms système ne sont pas affichées à l'écran *Secrets* de l'interface utilisateur de Harvester.
+====
+
+== Volumes chiffrés
+
+Vous pouvez créer un volume chiffré en utilisant un StorageClass chiffré aux emplacements suivants de l'interface utilisateur{nbsp}:
+
+* *Volumes{nbsp}: Créer* écran
++
+image::volume/volume-security-create-empty-volume.png[create-empty-volume]
++
+* Onglet *Volumes* sur la *Machine Virtuelle{nbsp}: Créer* écran
++
+image::volume/volume-security-create-empty-volume-in-vm.png[create-empty-volume-in-vm]
+
+== Utilisation avancée avec l'intégration Rancher
+
+Le secret est une chaîne non chiffrée encodée en Base64. Pour garder le secret en sécurité, vous pouvez utiliser des projets et des espaces de noms pour isoler les permissions. Pour plus d'informations, voir xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[Multi-Tenancy].
+
+== limites
+
+Vous ne pouvez pas effectuer les opérations suivantes{nbsp}:
+
+* Exporter un nouveau volume à partir d'un volume chiffré
+* Restaurer un volume chiffré vers un volume non chiffré
+* Restaurer un volume non chiffré vers un volume chiffré

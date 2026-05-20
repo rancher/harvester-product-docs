@@ -1,0 +1,88 @@
+= v1.2.2/v1.3.0からv1.3.1にアップグレードします。
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== 一般情報
+
+新しい{harvester-product-name}バージョンが利用可能になると、*ダッシュボード*画面に*アップグレード*ボタンが表示されます。詳細については、xref:./upgrades.adoc#_start_an_upgrade[アップグレードを開始する]を参照してください。
+
+エアギャップ環境については、xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[エアギャップ(された)アップグレードの準備]を参照してください。
+
+== 既知の問題
+
+=== 1.最初のノードがアップグレードされた後、クラスターのアップグレードが停止します。
+
+[TIP]
+====
+この問題が発生しないように、アップグレードプロセスを開始する前に`local-kubeconfig`シークレットにラベルを付けてください。`kubectl label secret local-kubeconfig -n fleet-local cluster.x-k8s.io/cluster-name=local`
+====
+
+v1.2.2またはv1.3.0からv1.3.1にHarvester clusterをアップグレードする際、最初のノードがアップグレードされた後にアップグレードプロセスが停止します。
+
+例:
+
+image::upgrade/known_issues/6041-stuck-on-first-node.png[]
+
+この問題を解決するには、次の手順を実行してください。
+
+. クラスターのステータスを確認します：
++
+[,sh]
+----
+ kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+出力の例：
++
+[,console]
+----
+...
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Updated
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Provisioned
+----
++
+出力にメッセージ`waiting for kubelet`が含まれている場合は、次のステップに進んでください。
++
+. capi-controller-managerポッドのログを確認します：
++
+[,sh]
+----
+kubectl logs -n cattle-provisioning-capi-system deployment/capi-controller-manager
+----
++
+出力が以下の例に似ている場合、問題はクラスター内に存在する可能性があります。
++
+[,console]
+----
+2024-06-19T08:54:22.407423986Z W0619 08:54:22.407257       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:54:22.407470069Z E0619 08:54:22.407283       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153396619Z W0619 08:55:05.153190       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153438978Z E0619 08:55:05.153217       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+----
++
+. アップグレードを再開するために、以下の回避策を適用してください：
++
+capi-controller-managerポッドを終了して再起動します。
++
+例:
++
+[,sh]
+----
+kubectl rollout restart deployment/capi-controller-manager -n cattle-provisioning-capi-system
+----
+
+関連する問題： https://github.com/harvester/harvester/issues/6041[#6041]
+
+'''
+
+=== 2.自動イメージクリーンアップが機能していません。
+
+公開されたHarvester .isoに不完全なイメージリストが含まれているため、v1.2.2からv1.3.1へのアップグレード中に自動イメージクリーンアップを実行できません。この問題はアップグレードを妨げるものではなく、アップグレードが完了した後に https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[このスクリプト]を使用してコンテナイメージを手動でクリーンアップできます。詳細については、 https://github.com/harvester/harvester/issues/6620[問題 #6620]を参照してください。

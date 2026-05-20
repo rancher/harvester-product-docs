@@ -1,0 +1,219 @@
+= Mise à niveau de v1.3.1 à v1.3.2
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== informations générales
+
+Un bouton *Mettre à niveau* apparaît sur l'écran *Dashboard* chaque fois qu'une nouvelle {harvester-product-name} version à laquelle vous pouvez mettre à niveau devient disponible. Pour plus d'informations, voir xref:./upgrades.adoc#_start_an_upgrade[Démarrer une mise à niveau].
+
+Pour les environnements isolés physiquement, voir xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Préparer une mise à niveau isolée physiquement].
+
+== Problèmes connus
+
+=== 1. La mise à niveau du cluster à deux nœuds est bloquée après que le premier nœud a été pré-drainé.
+
+[IMPORTANT]
+====
+
+Éteignez toutes les machines virtuelles de charge de travail avant de mettre à niveau *les clusters à deux nœuds* pour éviter toute perte de données.
+====
+
+Le nœud de travail peut faussement passer à un état non prêt lorsque RKE2 est mis à niveau sur le nœud de gestion. En conséquence, les pods existants sur le nœud de travail sont évincés et de nouveaux pods ne peuvent pas être programmés sur aucun nœud. Cela entraîne finalement un échec en chaîne dans l'ensemble du cluster et empêche l'achèvement du processus de mise à niveau.
+
+Vérifiez l'état du cluster lorsque les éléments suivants se produisent{nbsp}:
+
+* Le processus de mise à niveau est bloqué pendant un certain temps.
++
+* Vous ne pouvez pas accéder à l'interface utilisateur de Harvester et recevez une erreur HTTP 503.
+
+. Vérifiez les conditions et les états des nœuds de la dernière ressource personnalisée `Upgrade`.
++
+Passez à l'étape suivante si les conditions suivantes sont remplies{nbsp}:
++
+** `SystemServicesUpgraded` est défini sur `True`, indiquant que la mise à niveau des services système est terminée.
++
+** Dans `nodeStatuses`, l'état du nœud de gestion est soit `Pre-drained` soit `Waiting Reboot`.
++
+** Dans `nodeStatuses`, l'état du nœud de travail est `Images preloaded`.
++
+Exemple :
++
+----
+# Find out the latest Upgrade custom resource
+$ kubectl -n harvester-system get upgrades.harvesterhci -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-szlg8   48m
+
+# Check the conditions and node statuses
+$ kubectl -n harvester-system get upgrades hvst-upgrade-szlg8 -o yaml
+apiVersion: harvesterhci.io/v1beta1
+kind: Upgrade
+metadata:
+  ...
+  labels:
+    harvesterhci.io/latestUpgrade: "true"
+    harvesterhci.io/upgradeState: UpgradingNodes
+  name: hvst-upgrade-szlg8
+  namespace: harvester-system
+  ...
+spec:
+  image: ""
+  logEnabled: false
+  version: v1.3.2-rc2
+status:
+  conditions:
+  - status: Unknown
+    type: Completed
+  - lastUpdateTime: "2024-09-02T11:57:04Z"
+    message: Upgrade observability is administratively disabled
+    reason: Disabled
+    status: "False"
+    type: LogReady
+  - lastUpdateTime: "2024-09-02T11:58:01Z"
+    status: "True"
+    type: ImageReady
+  - lastUpdateTime: "2024-09-02T12:02:31Z"
+    status: "True"
+    type: RepoReady
+  - lastUpdateTime: "2024-09-02T12:18:44Z"
+    status: "True"
+    type: NodesPrepared
+  - lastUpdateTime: "2024-09-02T12:31:25Z"
+    status: "True"
+    type: SystemServicesUpgraded
+  - status: Unknown
+    type: NodesUpgraded
+  imageID: harvester-system/hvst-upgrade-szlg8
+  nodeStatuses:
+    harvester-c6phd:
+      state: Pre-drained
+    harvester-jkqhq:
+      state: Images preloaded
+  previousVersion: v1.3.1
+  ...
+----
++
+. Vérifiez l'état du nœud.
++
+Passez à l'étape suivante si les conditions suivantes sont remplies{nbsp}:
++
+** L'état du nœud de travail est `NotReady`.
+** L'état du nœud de gestion est `Ready,SchedulingDisabled`.
++
+Exemple :
++
+----
+$ kubectl get nodes
+NAME              STATUS                     ROLES                       AGE    VERSION
+harvester-c6phd   Ready,SchedulingDisabled   control-plane,etcd,master   174m   v1.28.12+rke2r1
+harvester-jkqhq   NotReady                   <none>                      166m   v1.27.13+rke2r1
+----
++
+. Vérifiez les pods sur le nœud de travail.
++
+Le problème existe dans le cluster si l'état de la plupart des pods est `Terminating`.
++
+Exemple :
++
+----
+# Assume harvester-jkqhq is the worker node
+$ kubectl get pods -A --field-selector spec.nodeName=harvester-jkqhq
+NAMESPACE                         NAME                                                    READY   STATUS        RESTARTS       AGE
+cattle-fleet-local-system         fleet-agent-6779fb5dd9-dkpjz                            1/1     Terminating   0              18m
+cattle-fleet-system               fleet-agent-86db8d9954-qgcpq                            1/1     Terminating   2 (18m ago)    61m
+cattle-fleet-system               fleet-controller-696d4b8878-ddctd                       1/1     Terminating   1 (19m ago)    29m
+cattle-fleet-system               gitjob-694dd97686-s4z68                                 1/1     Terminating   1 (19m ago)    29m
+cattle-provisioning-capi-system   capi-controller-manager-6f497d5574-wkrnf                1/1     Terminating   0              20m
+cattle-system                     cattle-cluster-agent-76db9cf9fc-5hhsx                   1/1     Terminating   0              20m
+cattle-system                     cattle-cluster-agent-76db9cf9fc-dnr6m                   1/1     Terminating   0              20m
+cattle-system                     harvester-cluster-repo-7458c7c69d-p982g                 1/1     Terminating   0              27m
+cattle-system                     rancher-7d65df9bd4-77n7w                                1/1     Terminating   0              31m
+cattle-system                     rancher-webhook-cfc66d5d7-fd6gm                         1/1     Terminating   0              28m
+harvester-system                  harvester-85ff674986-wxkl4                              1/1     Terminating   0              26m
+harvester-system                  harvester-load-balancer-54cd9754dc-cwtxg                1/1     Terminating   0              20m
+harvester-system                  harvester-load-balancer-webhook-c8699b786-x6clw         1/1     Terminating   0              20m
+harvester-system                  harvester-network-controller-manager-b69bf6b69-9f99x    1/1     Terminating   0              178m
+harvester-system                  harvester-network-controller-vs4jg                      1/1     Running       0              178m
+harvester-system                  harvester-network-webhook-7b98f8cd98-gjl8b              1/1     Terminating   0              20m
+harvester-system                  harvester-node-disk-manager-tbh4b                       1/1     Running       0              26m
+harvester-system                  harvester-node-manager-7pqcp                            1/1     Running       0              178m
+harvester-system                  harvester-node-manager-webhook-9cfccc84c-68tgp          1/1     Running       0              20m
+harvester-system                  harvester-node-manager-webhook-9cfccc84c-6bbvg          1/1     Running       0              20m
+harvester-system                  harvester-webhook-565dc698b6-np89r                      1/1     Terminating   0              26m
+harvester-system                  hvst-upgrade-szlg8-apply-manifests-4rmjw                0/1     Completed     0              33m
+harvester-system                  virt-api-6fb7d97b68-cbc5m                               1/1     Terminating   0              20m
+harvester-system                  virt-api-6fb7d97b68-gqg5c                               1/1     Terminating   0              23m
+harvester-system                  virt-controller-67d8b4c75c-5qz9x                        1/1     Terminating   0              24m
+harvester-system                  virt-controller-67d8b4c75c-bdf8w                        1/1     Terminating   2 (18m ago)    23m
+harvester-system                  virt-handler-xw98h                                      1/1     Running       0              24m
+harvester-system                  virt-operator-6c98db546-brgnx                           1/1     Terminating   2 (18m ago)    26m
+kube-system                       harvester-snapshot-validation-webhook-b75f94bcb-95zlb   1/1     Terminating   0              20m
+kube-system                       harvester-snapshot-validation-webhook-b75f94bcb-xfrmf   1/1     Terminating   0              20m
+kube-system                       harvester-whereabouts-tdr5g                             1/1     Running       1 (178m ago)   178m
+kube-system                       helm-install-rke2-ingress-nginx-4wt4j                   0/1     Terminating   0              15m
+kube-system                       helm-install-rke2-metrics-server-jn58m                  0/1     Terminating   0              15m
+kube-system                       kube-proxy-harvester-jkqhq                              1/1     Running       0              178m
+kube-system                       rke2-canal-wfpch                                        2/2     Running       0              178m
+kube-system                       rke2-coredns-rke2-coredns-864fbd7785-t7k6t              1/1     Terminating   0              178m
+kube-system                       rke2-coredns-rke2-coredns-autoscaler-6c87968579-rg6g4   1/1     Terminating   0              20m
+kube-system                       rke2-ingress-nginx-controller-d4h25                     1/1     Running       0              178m
+kube-system                       rke2-metrics-server-7f745dbddf-2mp5j                    1/1     Terminating   0              20m
+kube-system                       rke2-multus-fsp94                                       1/1     Running       0              178m
+kube-system                       snapshot-controller-65d5f465d9-5b2sb                    1/1     Terminating   0              20m
+kube-system                       snapshot-controller-65d5f465d9-c264r                    1/1     Terminating   0              20m
+longhorn-system                   backing-image-manager-c16a-7c90                         1/1     Terminating   0              54m
+longhorn-system                   csi-attacher-5fbd66cf8-674vc                            1/1     Terminating   0              20m
+longhorn-system                   csi-attacher-5fbd66cf8-725mn                            1/1     Terminating   0              20m
+longhorn-system                   csi-attacher-5fbd66cf8-85k5d                            1/1     Terminating   0              20m
+longhorn-system                   csi-provisioner-5b6ff8f4d4-97wsf                        1/1     Terminating   0              20m
+longhorn-system                   csi-provisioner-5b6ff8f4d4-cbpm9                        1/1     Terminating   0              20m
+longhorn-system                   csi-provisioner-5b6ff8f4d4-q7z58                        1/1     Terminating   0              19m
+longhorn-system                   csi-resizer-74c5555748-6rmbf                            1/1     Terminating   0              20m
+longhorn-system                   csi-resizer-74c5555748-fw2cw                            1/1     Terminating   0              20m
+longhorn-system                   csi-resizer-74c5555748-p4nph                            1/1     Terminating   0              20m
+longhorn-system                   csi-snapshotter-6bc4bcf4c5-6858b                        1/1     Terminating   0              20m
+longhorn-system                   csi-snapshotter-6bc4bcf4c5-cqkbw                        1/1     Terminating   0              20m
+longhorn-system                   csi-snapshotter-6bc4bcf4c5-mkqtg                        1/1     Terminating   0              20m
+longhorn-system                   engine-image-ei-b0369a5d-2t4k4                          1/1     Running       0              178m
+longhorn-system                   instance-manager-a5bd20597b82bcf3ba9d314620b7e670       1/1     Terminating   0              178m
+longhorn-system                   longhorn-csi-plugin-x6bdg                               3/3     Running       0              178m
+longhorn-system                   longhorn-driver-deployer-85cf4b4849-5lc52               1/1     Terminating   0              20m
+longhorn-system                   longhorn-loop-device-cleaner-hhvgv                      1/1     Running       0              178m
+longhorn-system                   longhorn-manager-5h2zw                                  1/1     Running       0              178m
+longhorn-system                   longhorn-ui-6b677889f8-hrg8j                            1/1     Terminating   0              20m
+longhorn-system                   longhorn-ui-6b677889f8-w5hng                            1/1     Terminating   0              20m
+----
+
+Pour résoudre le problème, vous devez redémarrer le service `rke2-agent` sur le nœud de travail.
+
+----
+# On the worker node
+sudo systemctl restart rke2-agent.service
+----
+
+La mise à niveau devrait reprendre après le redémarrage complet du service `rke2-agent`.
+
+[NOTE]
+====
+Ce problème se produit parce que l'équilibreur de charge de l'agent sur le nœud de travail ne peut pas se connecter au serveur API sur le nœud de gestion après le redémarrage du service `rke2-server`. Parce que le service `rke2-server` peut être redémarré plusieurs fois lors de la mise à niveau des nœuds, le processus de mise à niveau risque de se bloquer à nouveau. Vous devrez peut-être redémarrer le service `rke2-agent` plusieurs fois.
+
+Pour déterminer si l'équilibreur de charge de l'agent fonctionne, exécutez les commandes suivantes{nbsp}:
+
+----
+# On the management node, check if the `rke2-server` service is running.
+sudo systemctl status rke2-server.service
+
+# On the worker node, check if the agent load balancer is functioning.
+sudo /var/lib/rancher/rke2/bin/kubectl --kubeconfig=/var/lib/rancher/rke2/agent/kubelet.kubeconfig get nodes
+----
+
+Si la commande kubectl ne renvoie pas de réponse, le kubelet ne peut pas accéder au serveur API via l'équilibreur de charge de l'agent. Vous devez redémarrer le service `rke2-agent`.
+====
+
+Pour plus d'informations, voir https://github.com/harvester/harvester/issues/6432#issuecomment-2325488465[Problème #6432].
+
+'''
+
+=== 2. Le nettoyage automatique des images ne fonctionne pas
+
+Parce que l'ISO Harvester publié contient une liste d'images incomplète, le nettoyage automatique des images ne peut pas être effectué lors d'une mise à niveau de v1.3.1 à v1.3.2. Ce problème ne bloque pas la mise à niveau, et vous pouvez utiliser https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[ce script] pour nettoyer manuellement les images de conteneur après la fin de la mise à niveau. Pour plus d'informations, voir https://github.com/harvester/harvester/issues/6620[Problème #6620].

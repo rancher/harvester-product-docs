@@ -1,0 +1,101 @@
+= Cuotas de Recursos
+:revdate: 2025-06-18
+:page-revdate: {revdate}
+
+https://kubernetes.io/docs/concepts/policy/resource-quotas/[ResourceQuota] se utiliza para limitar el uso de recursos dentro de un espacio de nombres. Ayuda a los administradores a controlar y restringir la asignación de recursos del clúster para garantizar la equidad y una distribución controlada de recursos entre los espacios de nombres.
+
+En {harvester-product-name}, ResourceQuota puede definir límites de uso para los siguientes recursos:
+
+* *CPU*: Limita el uso de recursos de computación, incluyendo núcleos de CPU y tiempo de CPU.
+* *Memoria*: Limita el uso de recursos de memoria en bytes u otras unidades de memoria reconocibles.
+* *Almacenamiento*: Limita el uso de recursos de almacenamiento.
+
+== Establecer ResourceQuota a través de Rancher
+
+Los administradores pueden configurar cuotas de recursos para espacios de nombres realizando los siguientes pasos:
+
+. En la interfaz de usuario de {rancher-short-name}, ve a *≡ -> Gestión de Virtualización*.
+
+. Selecciona un clúster, ve a *Proyectos/Espacios de Nombres*, y luego haz clic en *Crear Proyecto*.
+
+. En la sección de información general, especifica un nombre y una descripción para el proyecto.
+
+. En la pestaña *Cuotas de Recursos*, haz clic en *Añadir Recurso*, selecciona un tipo de recurso y especifica los valores límite correspondientes.
++
+image::rancher/create-project.png[]
+
+. Haga clic en *Crear*.
+
+[NOTE]
+====
+La pestaña *Límite de Recursos por Defecto de VM* contiene configuraciones de reserva y límite de recursos que se aplican solo a las cargas de trabajo de pod que se ejecutan dentro del espacio de nombres. Los valores configurados en esta pestaña corresponden a los valores `defaultRequest` y `default` de la política https://kubernetes.io/docs/concepts/policy/limit-range/[`LimitRange`] del espacio de nombres. Estas configuraciones pueden ser eliminadas en una futura versión.
+====
+
+Puedes configurar los límites del *espacio de nombres* de la siguiente manera:
+
+. Encuentra el proyecto recién creado y selecciona *Crear espacio de nombres*.
+. Especifica el *Nombre* del espacio de nombres deseado y ajusta los límites.
+. Completa el proceso seleccionando *Crear*.
++
+image::rancher/create-namespace.png[]
+
+[NOTE]
+====
+Los intentos de aprovisionar máquinas virtuales para clústeres invitados se bloquean cuando se alcanzan las cuotas de recursos. {rancher-short-name} responde creando una nueva máquina virtual en un bucle, en el que cada intento de creación fallido es seguido inmediatamente por otro intento. Esto resulta en un estado de error transitorio en el clúster que no se registra ya que la máquina virtual se recrea.
+====
+
+== Memoria de sobrecarga de la máquina virtual
+
+Al crear una máquina virtual (VM), el controlador de VM incorpora sin problemas recursos de sobrecarga en la configuración de la VM. Estos recursos adicionales tienen la intención de garantizar el funcionamiento consistente e ininterrumpido de la VM. Es importante tener en cuenta que configurar límites de memoria requiere una reserva de memoria más alta debido a la inclusión de estos recursos de sobrecarga.
+
+Por ejemplo, considera la creación de una nueva VM con la siguiente configuración:
+
+* CPU: 8 núcleos
+* Memoria: 16Gi
+
+[NOTE]
+====
+El sistema operativo, ya sea Linux o Windows, no afecta los cálculos de sobrecarga.
+====
+
+La sobrecarga de memoria se calcula en las siguientes secciones:
+
+* *Sobrecarga de Tablas de Páginas de Memoria:* Esto cuenta un bit por cada 512b de tamaño de RAM. Por ejemplo, una memoria de 16Gi requiere una sobrecarga de 32Mi.
+* *Sobrecarga Fija de VM:* Esto consiste en varios componentes:
+ ** `VirtLauncherMonitorOverhead`: 25Mi  (el `ps` RSS para virt-launcher-monitor)
+ ** `VirtLauncherOverhead`: 75Mi  (el `ps` RSS para el proceso virt-launcher)
+ ** `VirtlogdOverhead`: 17Mi  (el `ps` RSS para virtlogd)
+ ** `LibvirtdOverhead`: 33Mi (el `ps` RSS para libvirtd)
+ ** `QemuOverhead` : 30Mi (el `ps` RSS para qemu, menos la RAM de su invitado (estresado), menos la tabla de páginas virtuales)
+* *8Mi por CPU (vCPU) Sobrecarga:* Además, se añade una sobrecarga de 8Mi por vCPU, junto con una sobrecarga fija de 8Mi para IOThread.
+* *Sobrecarga adicional añadida:* Esto abarca varios factores como la sobrecarga de la RAM de video y la sobrecarga de la arquitectura. Consulta https://github.com/kubevirt/kubevirt/blob/2bb88c3d35d33177ea16c0f1e9fffdef1fd350c6/pkg/virt-controller/services/template.go#L1853-L1890[Sobrecarga adicional] para más detalles.
+
+Este cálculo demuestra que la instancia de la VM requiere una sobrecarga de memoria adicional de aproximadamente 276Mi.
+
+Para más información, consulta https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#memory-overhead[Sobrecarga de memoria].
+
+Para más información sobre cómo se calcula la sobrecarga de memoria en Kubevirt, consulta https://github.com/kubevirt/kubevirt/blob/v0.54.0/pkg/virt-controller/services/template.go#L1804[kubevirt/pkg/virt-controller/services/template.go].
+
+== Ajuste automático de ResourceQuota durante la migración
+
+Cuando la cuota de recursos asignada controlada por el objeto `ResourceQuota` alcanza su límite, migrar una VM se vuelve inviable. El proceso de migración crea automáticamente un nuevo pod que refleja los requisitos de recursos de la VM de origen. Si estos requisitos previos para la creación de pods superan la cuota definida, la operación de migración no puede continuar.
+
+En {harvester-product-name}, los valores `ResourceQuota` se expandirán dinámicamente antes de la migración para acomodar las necesidades de recursos de la máquina virtual de destino. Después de la migración, las cuotas de recursos se restablecerán a sus configuraciones anteriores.
+
+Por favor, ten en cuenta las siguientes restricciones del redimensionamiento automático de `ResourceQuota`:
+
+* `ResourceQuota` no puede ser cambiado durante la migración de la VM.
+* Al aumentar el valor de `ResourceQuota`, si creas, inicias o restauras otras VMs, {harvester-product-name} verificará si los recursos son suficientes en función del `ResourceQuota` original. Si no se cumplen las condiciones, el sistema alertará que el proceso de migración no es viable.
+* Después de expandir `ResourceQuota`, puede ocurrir una posible contención de recursos entre los pods no-VM y los pods de VM, lo que puede llevar a fallos en la migración. Por lo tanto, no se recomienda desplegar cargas de trabajo de contenedores personalizadas y VMs en el mismo espacio de nombres.
+* Debido a la limitación concurrente del validador de webhook, el controlador de VM ejecutará una validación secundaria para confirmar la suficiencia de recursos. Si el recurso es insuficiente, configurará automáticamente el `RunStrategy` de la VM a `Halted`, y se añadirá una nueva anotación `harvesterhci.io/insufficient-resource-quota` al objeto de la VM, informándote que la VM fue apagada debido a recursos insuficientes.
++
+image::rancher/vm-annotation-insufficient-resource-quota.png[]
+
+=== Desactivar el Ajuste Automático de ResourceQuota Durante la Migración
+
+Cuando un objeto `ResourceQuota` tiene la anotación `harvesterhci.io/skipResourceQuotaAutoScaling: "true"`, {harvester-product-name} no ajusta automáticamente los valores de ese objeto. Esta función es útil para depuración, resolución de problemas y otras tareas.
+
+[IMPORTANT]
+====
+Debes establecer la anotación antes de que comience la migración. Si la anotación se establece mientras los valores ya están siendo ajustados, {harvester-product-name} no puede restaurar automáticamente la configuración anterior.
+====

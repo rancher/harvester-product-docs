@@ -1,0 +1,35 @@
+= NVIDIA 驱动工具包
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+`nvidia-driver-toolkit` 附加产品允许您将带外 NVIDIA GRID KVM 驱动程序部署到现有的 {harvester-product-name} 集群中。
+
+[NOTE]
+====
+该工具包仅包含正确的 {harvester-product-name} 操作系统映像、构建工具和内核头文件，这些文件允许从容器中编译和加载 NVIDIA 驱动程序。您必须使用有效的 NVIDIA 订阅下载 NVIDIA KVM 驱动程序。有关识别适合您 NVIDIA GPU 的正确驱动程序的指导，请参见 https://www.nvidia.com/en-au/drivers/vgpu-software-driver/[NVIDIA 文档]。
+
+每个新版本的 {harvester-product-name} 都会发布正确的 `nvidia-driver-toolkit` 映像，以确保安装 NVIDIA vGPU KVM 驱动程序所需的所有依赖项都可在该映像中获得。
+====
+
+{harvester-product-name} .iso 映像 不包括 `nvidia-driver-toolkit` 容器映像。由于其大小，默认情况下该映像从 Docker Hub 拉取。如果您有一个隔离的环境，可以下载并将映像推送到您的私有注册表。*储存库* 和 *映像标签* 字段在 *nvidia-driver-toolkit* 界面上提供有关您必须下载的映像的信息。
+
+image::advanced/nvidia-driver-toolkit.png[]
+
+要启用该附加产品，您必须指定 NVIDIA vGPU KVM 驱动程序文件所在的 HTTP 位置。如果需要，您还可以更新储存库和映像标签。一旦启用该附加产品，将向集群部署一个 `nvidia-driver-toolkit` 守护程序集。
+
+在 Pod 启动时，ENTRYPOINT 脚本从指定的驱动程序位置下载 NVIDIA 驱动程序。安装驱动程序并加载内核驱动程序。
+
+现在，`pcidevices-controller` 附加产品可以利用此附加产品来管理包含受支持 GPU xref:../hosts/vgpu-support.adoc[设备] 的节点上的 vGPU 设备的生命周期。
+
+== 安装不同的 NVIDIA 驱动程序版本
+
+NVIDIA 驱动程序版本在集群节点之间可能会有所不同。如果您想在节点上安装特定的驱动程序版本，必须在启动 `nvidia-driver-toolkit` 附加产品之前对节点进行注释。
+
+[,shell]
+----
+kubectl annotate nodes {node name} sriovgpu.harvesterhci.io/custom-driver=https://[driver location]
+----
+
+该附加产品在启动时安装指定的驱动程序。
+
+如果之前安装了 NVIDIA 驱动程序，您必须重新启动 Pod 以再次触发安装过程。

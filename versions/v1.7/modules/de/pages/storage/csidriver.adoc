@@ -1,0 +1,347 @@
+= Unterstützung für Speicher von Drittanbietern
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+{harvester-product-name} unterstützt die Bereitstellung von Root-Volumes und Daten-Volumes unter Verwendung externer https://kubernetes-csi.github.io/docs/introduction.html[Container Storage Interface (CSI)]-Treiber. Diese Verbesserung ermöglicht es Ihnen, Treiber auszuwählen, die spezifische Anforderungen erfüllen, wie z.B. Leistungsoptimierung oder nahtlose Integration mit bestehenden internen Speicherlösungen.
+
+Das {harvester-product-name} Team hat die folgenden CSI-Treiber validiert:
+
+* Longhorn V2 Daten-Engine: `driver.longhorn.io`
+* LVM: `lvm.driver.harvesterhci.io`
+* NFS: `nfs.csi.k8s.io`
+* Rook (RADOS-Blockgerät): `rook-ceph.rbd.csi.ceph.com`
+
+Diese validierten CSI-Treiber haben die folgenden Fähigkeiten:
+
+|===
+| Speicherlösung | VM-Image | VM-Root-Disk | VM-Daten-Disk | Volume-Export zu VM-Image | VM-Vorlagengenerator | VM-Live-Migration | VM Snapshot | VM-Backup
+
+| Longhorn V2 Data Engine
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+
+| LVM
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10004;
+| &#10006;
+
+| NFS
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+| &#10006;
+
+| Rook (RADOS-Blockgerät)
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10004;
+| &#10006;
+|===
+
+[NOTE]
+====
+Die Unterstützung für Speicher von Drittanbietern entspricht der Unterstützung für die Bereitstellung von Root-Volumes und Daten-Volumes unter Verwendung externer Container Storage Interface (CSI) Treiber. Das bedeutet, dass Speicheranbieter ihre Speichergeräte mit {harvester-product-name} validieren können, um eine größere Interoperabilität sicherzustellen. 
+
+Informationen über unternehmensweite Speicherlösungen, die als kompatibel mit {harvester-product-name} zertifiziert sind, finden Sie in der {rancher-product-name} Dokumentation, die über das https://scc.suse.com/home[SUSE Customer Center] zugänglich ist.
+====
+
+== Voraussetzungen
+
+Um sicherzustellen, dass {harvester-product-name} gut funktioniert, verwenden Sie CSI-Treiber, die die folgenden Fähigkeiten unterstützen:
+
+* Volumenerweiterung (Online-Größenänderung)
+* Snapshot-Erstellung (Volumen- und virtuelle Maschinen-Snapshots)
+* Klonen (Volumen- und virtuelle Maschinen-Klone)
+* Verwendung von Read-Write-Many (RWX)-Volumes für xref:../virtual-machines/live-migration.adoc[Live Migration]
+
+== Erstellen Sie einen {harvester-product-name} Cluster
+
+Das Betriebssystem von {harvester-product-name} folgt einem unveränderlichen Design, was bedeutet, dass die meisten OS-Dateien nach einem Neustart in ihren vorkonfigurierten Zustand zurückkehren. Daher müssen Sie möglicherweise zusätzliche Konfigurationen vornehmen, bevor Sie den {harvester-product-name} Cluster für Drittanbieter-CSI-Treiber installieren.
+
+Einige CSI-Treiber erfordern zusätzliche persistente Pfade auf dem Host. Sie können diese Pfade zu xref:../installation-setup/config/configuration-file.adoc#_os_persistent_state_paths[`os.persistent_state_paths`] hinzufügen.
+
+Einige CSI-Treiber erfordern zusätzliche Softwarepakete auf dem Host. Sie können diese Pakete mit xref:../installation-setup/config/configuration-file.adoc#_os_after_install_chroot_commands[`os.after_install_chroot_commands`] installieren.
+
+[NOTE]
+====
+Ein Upgrade von {harvester-product-name} führt dazu, dass die Änderungen am OS in der `after-install-chroot` Phase verloren gehen. Sie müssen auch die `after-upgrade-chroot` konfigurieren, um Ihre Änderungen über ein Upgrade hinweg persistent zu machen. Verweisen Sie auf https://rancher.github.io/elemental-toolkit/docs/customizing/runtime_persistent_changes/[Laufzeit-persistente Änderungen], bevor Sie {harvester-product-name} aktualisieren.
+====
+
+== Installieren Sie den CSI-Treiber
+
+Nach Abschluss der Installation des {harvester-product-name} Clusters verweisen Sie auf xref:../troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[Wie kann ich auf die kubeconfig-Datei zugreifen?], um die kubeconfig des Clusters zu erhalten.
+
+Mit der kubeconfig des {harvester-product-name} Clusters können Sie die Drittanbieter-CSI-Treiber in den Cluster installieren, indem Sie die Installationsanweisungen für jeden CSI-Treiber befolgen. Sie müssen auch auf die Dokumentation des CSI-Treibers verweisen, um die `StorageClass` und `VolumeSnapshotClass` im {harvester-product-name}-Cluster zu erstellen.
+
+== Konfigurieren Sie den {harvester-product-name}-Cluster
+
+Bevor Sie die Funktionen *Backup & Snapshot* von {harvester-product-name} nutzen können, müssen Sie einige wesentliche Konfigurationen über die Einstellung {harvester-product-name} xref:../installation-setup/config/settings.adoc#_csi_driver_config[csi-driver-config] vornehmen. Befolgen Sie diese Schritte, um diese Konfigurationen vorzunehmen:
+
+. Melden Sie sich bei der {harvester-product-name}-UI an und navigieren Sie dann zu *Erweiterte Einstellungen ->*.
+. Suchen und wählen Sie *csi-driver-config* aus, und wählen Sie dann *⋮ -> Einstellung bearbeiten*, um auf die Konfigurationsoptionen zuzugreifen.
+. Setzen Sie den *Provisioner* auf den Drittanbieter-CSI-Treiber in den Einstellungen.
+. Als Nächstes konfigurieren Sie den *Volume Snapshot Class Name*. Diese Einstellung verweist auf den Namen des `VolumeSnapshotClass`, der zum Erstellen von Volume-Snapshots oder VM-Snapshots verwendet wird.
+
+image::third-party-storage/csi-driver-config-external.png[]
+
+[NOTE]
+====
+Backup funktioniert derzeit nur mit den folgenden:
+
+* Longhorn V1 Data Engine
+* Longhorn V2 Daten-Engine (nur Nicht-Root-Datenträger)
+
+Wenn Sie andere Speicheranbieter verwenden, können Sie die Konfiguration des *Backup VolumeSnapshot Class Name* überspringen. Für weitere Informationen siehe https://documentation.suse.com/cloudnative/virtualization/v1.4/en/storage/csidriver.html#_virtual_machine_backup_compatibility[Kompatibilität von Virtual Machine Backup].
+
+Wenn der StorageClass-Provisioner nicht in der Liste der https://github.com/kubevirt/containerized-data-importer/blob/v1.61.1/pkg/storagecapabilities/storagecapabilities.go#L35-L127[Provisioner mit Standardzugriffs- und Volumenmodi] des CDI enthalten ist, müssen Sie die StorageClass mit `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` annotieren. Ohne diese Annotation kann die Helm-Installation fehlschlagen. Überprüfen Sie die Dokumentation des Helm-Charts des CSI-Treibers für Anweisungen zur Annotation der StorageClass. Für weitere Informationen siehe xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[Containerized Data Importer (CDI) Einstellungen].
+====
+
+== Verwenden Sie den CSI-Treiber
+
+Sobald der CSI-Treiber installiert und der {harvester-product-name}-Cluster konfiguriert ist, kann eine externe Speicherlösung in Aufgaben verwendet werden, die das Speichermanagement betreffen.
+
+=== Erstellung von virtuellen Maschinenbildern
+
+Sie können eine externe Speicherlösung verwenden, um virtuelle Maschinenbilder zu speichern und zu verwalten.
+
+Beim xref:../virtual-machines/vm-images/upload-image.adoc[Hochladen eines virtuellen Maschinenbildes] über die {harvester-product-name} Benutzeroberfläche (*Bild -> Erstellen*) müssen Sie die StorageClass für die externe Speicherlösung im Tab "Speicher" auswählen. Im folgenden Beispiel ist die StorageClass *nfs-csi*.
+
+image::third-party-storage/create-image-with-nfs-csi.png[]
+
+{harvester-product-name} speichert das erstellte Bild in der externen Speicherlösung.
+
+image::third-party-storage/created-image-with-nfs-csi.png[]
+
+=== Erstellung von virtuellen Maschinen
+
+Ihre virtuellen Maschinen können Root- und Datenvolumes in externem Speicher verwenden.
+
+Beim xref:../virtual-machines/create-vm.adoc[Erstellen einer virtuellen Maschine] über die {harvester-product-name} Benutzeroberfläche (*Virtuelle Maschine -> Erstellen*) müssen Sie die folgenden Aktionen im Tab "Volumes" durchführen:
+
+* Wählen Sie ein in der externen Speicherlösung gespeichertes virtuelles Maschinenbild aus und konfigurieren Sie die erforderlichen Einstellungen.
+* Fügen Sie ein Datenvolumen hinzu.
+
+image::third-party-storage/various-volumes-for-vm-creating.png[]
+
+Im folgenden Beispiel wird das Root-Volume mit NFS erstellt, und das Datenvolumen wird mit der Longhorn V2 Daten-Engine erstellt.
+
+image::third-party-storage/various-volumes-for-vm-created.png[]
+
+=== Erstellung von Volumes
+
+Sie können Volumes in Ihrer externen Speicherlösung erstellen.
+
+Beim xref:./volumes/create-volume.adoc[Erstellen eines Volumes] über die {harvester-product-name} Benutzeroberfläche (*Volumes -> Erstellen*) müssen Sie die folgenden Aktionen durchführen:
+
+* *Speicherklasse*: Wählen Sie die Ziel-StorageClass aus (zum Beispiel *nfs-csi*).
+* *Volume-Modus*: Wählen Sie den entsprechenden Volume-Modus aus (zum Beispiel *Dateisystem*).
+
+image::third-party-storage/create-fs-volume.png[]
+
+== Weitere Themen
+
+=== Speicherprofile
+
+Sie können jetzt die CDI-API verwenden, um benutzerdefinierte https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[Speicherprofile] zu erstellen, die die Definition von Datenvolumen vereinfachen. Speicherprofile ermöglichen es mehreren Datenvolumen, die gleichen Bereitstellungseinstellungen zu teilen.
+
+Das folgende ist ein Beispiel für ein LVM-Speicherprofil:
+
+[,yaml]
+----
+apiVersion: cdi.kubevirt.io/v1beta1
+kind: StorageProfile
+metadata:
+  name: lvm-node-1-striped
+spec:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+status:
+  claimPropertySets:
+  - accessModes:
+    - ReadWriteOnce
+    volumeMode: Block
+  cloneStrategy: snapshot
+  dataImportCronSourceFormat: pvc
+  provisioner: lvm.driver.harvesterhci.io
+  snapshotClass: lvm-snapshot
+  storageClass: lvm-node-1-striped
+----
+
+Sie können die Felder definieren, um die Standardkonfiguration zu überschreiben. Für weitere Informationen siehe https://github.com/kubevirt/containerized-data-importer/blob/main/doc/storageprofile.md[Speicherprofile] in der CDI-Dokumentation.
+
+[CAUTION]
+====
+Vermeiden Sie es, das Speicherprofil oder CDI direkt zu ändern. Erlauben Sie stattdessen dem {harvester-product-name} Controller, die Konfiguration des Speicherprofils durch die Verwendung von xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[CDI-Anmerkungen] zu synchronisieren und zu speichern.
+====
+
+=== Nutzungsbeschränkungen
+
+* Die Unterstützung für Sicherungen ist derzeit auf {longhorn-product-name} Volumes beschränkt. {harvester-product-name} kann keine Sicherungen von Volumes im externen Speicher erstellen. 
+* Es gibt eine Einschränkung in der CDI, die verhindert, dass {harvester-product-name} angehängte PVCs in virtuelle Maschinenbilder konvertiert. Stellen Sie vor dem Exportieren eines Volumens im externen Speicher sicher, dass das PVC nicht an Arbeitslasten angehängt ist. Dies verhindert, dass das resultierende Bild im Zustand *Exportieren* stecken bleibt.
+
+image::third-party-storage/convert-pvc-to-image-stuck.png[]
+
+=== Bereitstellung des NFS-CSI-Treibers
+
+[NOTE]
+====
+Sie können den NFS-CSI-Treiber nur bereitstellen, wenn der NFS-Server bereits installiert und aktiv ist.
+Wenn der Server bereits läuft, überprüfen Sie die `squash` Option. Sie müssen das Squashing von Remote-Root-Benutzern (`no_root_squash` oder `no_all_squash`) deaktivieren, da KubeVirt die QEMU UID/GID benötigt, um sicherzustellen, dass das Volumen ordnungsgemäß synchronisiert werden kann.
+====
+
+. Installieren Sie den Treiber mit dem `csi-driver-nfs` Helm-Chart.
++
+[,shell]
+----
+$ helm repo add csi-driver-nfs https://raw.githubusercontent.com/kubernetes-csi/csi-driver-nfs/master/charts
+$ helm install csi-driver-nfs csi-driver-nfs/csi-driver-nfs --namespace kube-system --version v4.10.0
+----
+
+. Erstellen Sie die StorageClass für NFS.
++
+Für weitere Informationen zu Parametern siehe https://github.com/kubernetes-csi/csi-driver-nfs/blob/master/docs/driver-parameters.md[Treiberparameter: Verwendung der Storage Class] in der Dokumentation des Kubernetes NFS-CSI-Treibers.
++
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: nfs-csi
+provisioner: nfs.csi.k8s.io
+parameters:
+  server: <your-nfs-server-ip>
+  share: <your-nfs-share>
+  # csi.storage.k8s.io/provisioner-secret is only needed for providing mountOptions in DeleteVolume
+  # csi.storage.k8s.io/provisioner-secret-name: "mount-options"
+  # csi.storage.k8s.io/provisioner-secret-namespace: "default"
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+allowVolumeExpansion: true
+mountOptions:
+  - nfsvers=4.2
+----
++
+Sobald erstellt, können Sie die StorageClass verwenden, um virtuelle Maschinenbilder, Root-Volumes und Datenvolumen zu erstellen.
+
+== Hinweise
+
+* https://harvesterhci.io/kb/use_rook_ceph_external_storage[Verwenden Sie Rook Ceph External Storage mit Harvester]
+* https://harvesterhci.io/kb/install_netapp_trident_csi[NetApp-Speicher auf Harvester verwenden]
+* https://github.com/harvester/harvester/blob/master/enhancements/20250203-third-party-storage-support.md[Unterstützung für Speicher von Drittanbietern]
+
+== Bekannte Probleme
+
+=== 1. Unendliche Bilddownload-Schleife
+
+Der Bilddownload-Prozess läuft endlos, wenn die StorageClass für das Bild den LVM-CSI-Treiber verwendet. Dieses Problem hängt mit dem Scratch-Volume zusammen, das von CDI erstellt wird und zur temporären Speicherung der Bilddaten verwendet wird. Wenn das Problem in Ihrer Umgebung auftritt, finden Sie möglicherweise die folgenden Fehlermeldungen in den `importer-prime-xxx` Pod-Protokollen:
+
+[,shell]
+----
+E0418 01:59:51.843459       1 util.go:98] Unable to write file from dataReader: write /scratch/tmpimage: no space left on device
+E0418 01:59:51.861235       1 data-processor.go:243] write /scratch/tmpimage: no space left on device
+unable to write to file
+kubevirt.io/containerized-data-importer/pkg/importer.streamDataToFile
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/util.go:101
+kubevirt.io/containerized-data-importer/pkg/importer.(*HTTPDataSource).Transfer
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/http-datasource.go:162
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).initDefaultPhases.func2
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:173
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessDataWithPause
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:240
+kubevirt.io/containerized-data-importer/pkg/importer.(*DataProcessor).ProcessData
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/pkg/importer/data-processor.go:149
+main.handleImport
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:188
+main.main
+    /home/abuild/rpmbuild/BUILD/go/src/kubevirt.io/containerized-data-importer/cmd/cdi-importer/importer.go:148
+runtime.main
+----
+
+Die Nachricht `no space left on device` zeigt an, dass das Dateisystem, das mit dem Scratch-Volume erstellt wurde, nicht ausreicht, um die Bilddaten zu speichern. CDI erstellt das Scratch-Volume basierend auf der Größe des Zielvolumes, aber ein gewisser Speicherplatz geht für den Dateisystem-Overhead verloren. Der Standardwert für den Overhead beträgt `0.055` (entspricht 5,5 %), was in den meisten Fällen ausreichend ist. Wenn die Bildgröße jedoch weniger als 1 GB beträgt und die virtuelle Größe sehr nah an der Bildgröße liegt, ist der Standard-Overhead wahrscheinlich unzureichend.
+
+Die Lösung besteht darin, den Dateisystem-Overhead auf 20 % zu erhöhen, indem Sie den folgenden Befehl verwenden:
+
+[,shell]
+----
+# kubectl patch cdi cdi --type=merge -p '{"spec":{"config":{"filesystemOverhead":{"global":"0.2"}}}}'
+----
+
+Das Bild sollte heruntergeladen werden, sobald der Dateisystem-Overhead erhöht wurde.
+
+[NOTE]
+====
+Die Erhöhung des Overhead-Werts hat keinen Einfluss auf die Größe des PVC des Bildes. Das Scratch-Volume wird gelöscht, nachdem das Bild importiert wurde.
+====
+
+Verwandtes Problem: https://github.com/harvester/harvester/issues/7993[#7993] (Siehe https://github.com/harvester/harvester/issues/7993#issuecomment-2790260841[diesen Kommentar].)
+
+=== 2. Multipfad-Unterstützung
+
+Der `multipathd` Dienst ist standardmäßig in {harvester-product-name} deaktiviert. Einige Drittanbieter-CSIs erfordern jedoch möglicherweise, dass Sie den Dienst aktivieren.
+
+Nach der Installation von {harvester-product-name} können Sie `multipathd` aktivieren und starten, indem Sie sich bei jedem Clusterknoten anmelden und die folgenden Befehle ausführen:
+
+[,shell]
+----
+systemctl enable multipathd
+systemctl start multipathd
+----
+
+Alternativ können Sie eine {elemental-product-name} CloudInit-Datei im `/oem` Verzeichnis auf jedem Host (zum Beispiel `/oem/99-start-multipathd.yaml`) mit folgendem Inhalt erstellen:
+
+[,yaml]
+----
+stages:
+   default:
+   - name: "start multipathd"
+     systemctl:
+       enable:
+         - multipathd
+       start:
+         - multipathd
+----
+
+Dieser Prozess kann über den Harvester cluster mithilfe einer `CloudInit` CRD automatisiert werden.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-mutlitpathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-mutlitpathd
+  contents: |
+    stages:
+      default:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----

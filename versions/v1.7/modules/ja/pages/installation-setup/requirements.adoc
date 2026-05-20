@@ -1,0 +1,247 @@
+= ハードウェアとネットワークの要件
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+ベアメタルサーバー上のHCIソリューションとして、{harvester-product-name}をインストールおよび実行するための最小ノードハードウェアおよびネットワーク要件があります。
+
+マルチノード機能を完全に実現するには、3ノードのクラスターが必要です。クラスターに追加される最初のノードは、デフォルトで管理ノードとなります。クラスターに3ノード以上がある場合、最初のノードの後に追加された2ノードは自動的に管理ノードに昇格し、高可用性（HA）クラスターを形成します。
+
+最新のバージョンは、xref:installation-setup/single-node-clusters.adoc[シングルノードクラスター]のデプロイメントをサポートしています。このようなクラスターは、高可用性、複数のレプリカ、およびライブマイグレーションをサポートしていません。
+
+== ハードウェア要件
+
+{harvester-product-name}ノードには、インストールおよびテストのための以下のハードウェア要件と推奨事項があります。
+
+|===
+| Hardware (ハードウェア) | 開発/テスト | 実稼働
+
+| CPU
+| AMD64またはARM64（ハードウェア支援仮想化付き）；最小8コア
+| AMD64またはARM64（ハードウェア支援仮想化付き）；最小16コア
+
+| メモリ
+| 最小32GB
+| 最小64GB
+
+| ディスク容量
+| 最小250GB（xref:hosts/witness-node.adoc[ウィットネスノード]または複数のディスクを使用する場合は最小180GB）
+| 最小500GB；1TB以上を推奨
+
+| ディスクパフォーマンス
+| ディスクごとに5,000以上のランダムIOPS（SSD/NVMe）；管理ノードのストレージは https://support.scc.suse.com/s/kb/360045276411[etcd]の速度要件を満たす必要があります。ローカルディスクとハードウェアRAIDのみがサポートされています。
+| ディスクごとに5,000以上のランダムIOPS（SSD/NVMe）；管理ノードのストレージは https://support.scc.suse.com/s/kb/360045276411[etcd]の速度要件を満たす必要があります。ローカルディスクとハードウェアRAIDのみがサポートされています。
+
+| ネットワークカードの数
+| 管理クラスタネットワーク：1つのNICが必要で、2つのNICを推奨します；VMワークロードネットワーク：1つのNICが必要で、少なくとも2つのNICを推奨します（xref:hosts/witness-node.adoc[ウィットネスノード]には適用されません）
+| 管理クラスタネットワーク：1つのNICが必要で、2つのNICを推奨します；VMワークロードネットワーク：1つのNICが必要で、少なくとも2つのNICを推奨します（xref:hosts/witness-node.adoc[ウィットネスノード]には適用されません）
+
+| ネットワークカードの速度
+| 最低1 Gbpsのイーサネット
+| 最低10 Gbpsのイーサネット
+
+| ネットワークスイッチ
+| VLANサポートのためのポートトランキング
+| VLANサポートのためのポートトランキング
+|===
+
+[IMPORTANT]
+====
+* 混合アーキテクチャのクラスタはサポートされていません。予期しないシステム動作を避けるために、別々のクラスタをデプロイしてください。
+* 最良の結果を得るために、SUSE Linux Micro 5.5/6.0/6.1には https://www.suse.com/yesCertified/home#search?platforms=1361&platforms=1360&platforms=1355[YES認証ハードウェア]を使用してください。{harvester-product-name}はSUSE Linux Enterprise技術に基づいており、YES認証ハードウェアはドライバとシステムボードの互換性に関する追加の検証があります。ノートパソコンとネストされた仮想化はサポートされていません。
+* ネストされた仮想化は{harvester-product-name}上で実行されている仮想マシンではサポートされていません。
+* 各ノードは、VMのライブマイグレーションやその他の操作中にエラーが発生しないように、ユニークな`product_uuid`（`/sys/class/dmi/id/product_uuid`から取得）を持っている必要があります。詳細については、 https://github.com/harvester/harvester/issues/4025[問題 #4025]を参照してください。
+* {harvester-product-name}にはxref:networking/cluster-network.adoc#_built_in_cluster_network[ビルトイン管理クラスタネットワーク]（`mgmt`）があります。高可用性と生産環境での最良のパフォーマンスを達成するために、各ノードに少なくとも2つのNICを使用して管理ネットワーク用のボンドNICを設定してください（xref:installation-setup/methods/iso-install.adoc#_installation_steps[ISOインストール]のステップ6を参照）。VMワークロード用にxref:networking/cluster-network.adoc#_custom_cluster_network[カスタムクラスタネットワーク]を作成することもできます。各カスタムクラスタネットワークは、クラスタのすべての関与ノードでボンドNICを設定するために、少なくとも2つの追加のNICを必要とします。xref:hosts/witness-node.adoc[ウィットネスノード]には追加のNICは必要ありません。詳細については、xref:networking/cluster-network.adoc#_concepts[クラスタネットワーク]を参照してください。
+* テスト中は、xref:networking/cluster-network.adoc#_built_in_cluster_network[ビルトイン管理クラスタネットワーク]（`mgmt`）に対して1つのNICのみを使用でき、`mgmt`によって運ばれるxref:networking/vm-network.adoc#_create_a_vm_network[VMネットワーク]のテストにも使用します。高可用性と最適なパフォーマンスは保証されません。
+* ディスクが最小必要容量を満たすだけの場合、アップグレード中にxref:upgrades/upgrades.adoc#_free_system_partition_space_requirement[空きシステムパーティションスペース要件]に関連する問題が発生する可能性があります。
+* レガシーBIOSブートのサポートはv1.7.0で廃止され、後のリリースで削除されます。このブートモードを使用している既存の{harvester-product-name}クラスタは引き続き機能しますが、後のバージョンにアップグレードするにはUEFIモードでの再インストールが必要になる場合があります。問題や中断を避けるために、新しいインストールではUEFIを使用してください。
+====
+
+
+=== CPU仕様
+
+xref:virtual-machines/live-migration.adoc[ライブマイグレーション]は、クラスタ内のすべての物理サーバーのCPUが同じ仕様である場合にのみ正しく機能します。この要件は、xref:hosts/hosts.adoc#_node_maintenance[メンテナンスモード]が有効なときの自動VMマイグレーションなど、ライブマイグレーション機能に依存するすべての操作に適用されます。
+
+新しいCPU（同じベンダー、世代、ファミリーのものであっても）は、VMオペレーティングシステムに対して異なる機能が公開される場合があります。VMの安定性を確保するために、ライブマイグレーションはCPUの機能が一貫しているかを確認し、ソースと宛先が互換性がない場合はマイグレーションの試行をブロックします。
+
+クラスタを作成する際、クラスタにホストを追加する際、ホストを交換する際には、常に同じ仕様のCPUを使用して運用上の制約を防いでください。
+
+== ネットワーク要件
+
+ノードには、インストールのための以下のネットワーク要件があります。
+
+=== ノードのポート要件
+
+ノードには、以下のポート接続または受信ルールが必要です。通常、すべてのアウトバウンドトラフィックが許可されます。
+
+|===
+| プロトコル | ポート | ソース | 説明
+
+| TCP
+| 2379
+| 管理ノード
+| Etcdクライアントポート
+
+| TCP
+| 2381
+| 管理ノード
+| Etcdメトリクス収集
+
+| TCP
+| 2380
+| 管理ノード
+| Etcdピアポート
+
+| TCP
+| 2382
+| 管理ノード
+| Etcdクライアントポート（HTTPのみ）
+
+| TCP
+| 10010
+| 管理ノードと計算ノード
+| Containerd
+
+| TCP
+| 6443
+| 管理ノード
+| Kubernetes API
+
+| TCP
+| 9345
+| 管理ノード
+| Kubernetes API
+
+| TCP
+| 10252
+| 管理ノード
+| Kube-controller-managerのヘルスチェック
+
+| TCP
+| 10257
+| 管理ノード
+| Kube-controller-managerのセキュアポート
+
+| TCP
+| 10251
+| 管理ノード
+| Kube-schedulerのヘルスチェック
+
+| TCP
+| 10259
+| 管理ノード
+| Kube-schedulerのセキュアポート
+
+| TCP
+| 10250
+| 管理ノードと計算ノード
+| Kubelet
+
+| TCP
+| 10256
+| 管理ノードと計算ノード
+| Kube-proxyのヘルスチェック
+
+| TCP
+| 10258
+| 管理ノード
+| cloud-controller-manager
+
+| TCP
+| 10260
+| 管理ノード
+| cloud-controller-manager
+
+| TCP
+| 9091
+| 管理ノードと計算ノード
+| Canal calico-node felix
+
+| TCP
+| 9099
+| 管理ノードと計算ノード
+| Canal CNIヘルスチェック
+
+| UDP
+| 8472
+| 管理ノードと計算ノード
+| VXLANを使用したCanal CNI
+
+| TCP
+| 2112
+| 管理ノード
+| Kube-vip
+
+| TCP
+| 6444
+| 管理ノードと計算ノード
+| RKE2エージェント
+
+| TCP
+| 10246/10247/10248/10249
+| 管理ノードと計算ノード
+| Nginxワーカープロセス
+
+| TCP
+| 8181
+| 管理ノードと計算ノード
+| Nginx-ingress-controller
+
+| TCP
+| 8444
+| 管理ノードと計算ノード
+| Nginx-ingress-controller
+
+| TCP
+| 10245
+| 管理ノードと計算ノード
+| Nginx-ingress-controller
+
+| TCP
+| 80
+| 管理ノードと計算ノード
+| Nginx
+
+| TCP
+| 9796
+| 管理ノードと計算ノード
+| Node-exporter
+
+| TCP
+| 30000-32767
+| 管理ノードと計算ノード
+| NodePortポート範囲
+
+| TCP
+| 22
+| 管理ノードと計算ノード
+| sshd
+
+| UDP
+| 68
+| 管理ノードと計算ノード
+| NetworkManager
+
+| TCP
+| 3260
+| 管理ノードと計算ノード
+| iscsid
+|===
+
+=== {rancher-product-name}との統合に必要なポート要件
+
+xref:integrations/rancher/rancher-integration.adoc[統合する場合は{rancher-product-name}]、すべての{harvester-product-name}ノードが{rancher-product-name}ロードバランサーのTCPポート*443*に接続できることを確認する必要があります。
+
+Kubernetesクラスターを持つVMを{rancher-product-name}から{harvester-product-name}にプロビジョニングする際は、{rancher-product-name}ロードバランサーのTCPポート*443*に接続できる必要があります。そうでないと、クラスターは{rancher-product-name}によって管理できなくなります。詳細については、 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/about-rancher/architecture/communicating-with-downstream-clusters.html[Rancher Architecture]を参照してください。
+
+=== K3sおよびRKE2クラスターのポート要件
+
+{harvester-product-name} VM内にデプロイされたゲストクラスターのポート要件については、以下のリンクを参照してください。
+
+* https://documentation.suse.com/cloudnative/k3s/latest/en/networking/networking.html[K3s Networking]
+* https://documentation.suse.com/cloudnative/rke2/latest/en/install/requirements.html#_networking[RKE2 Networking]
+
+== 時間要件
+
+信頼性の高いネットワーク時間プロトコル（NTP）サーバーは、Kubernetesクラスター内のすべてのノードで正しいシステム時間を維持するために重要です。特に{harvester-product-name}を実行しているときはなおさらです。Kubernetesは、分散型キー・バリューストアであるetcdに依存しており、データの整合性を確保し、リーダー選出、ログ複製、クラスターの安定性に関する問題を防ぐために、正確な同期が必要です。
+
+クラスター全体で正確かつ一貫した時間を確保することは、信頼性、安全性、全体的なシステムの整合性にとって不可欠です。

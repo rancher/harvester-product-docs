@@ -1,0 +1,49 @@
+= インストール後のタスク
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+インストールが完了した後、{harvester-product-name} クラスターのセキュリティとパフォーマンスを向上させるために、以下の手順を実行できます。
+
+== SSH パスワード認証を無効にしてください。
+
+デフォルトでは、インストール中に {harvester-product-name} ノードで SSH パスワード認証が有効になっています。これにより、管理者はインストール後の診断のためにノードにアクセスできます。
+
+しかし、インストールが完了したら、SSH パスワード認証を無効にすることをお勧めします。SSH パスワード認証をすべての ノードで無効にするために、`kubectl` を使用して https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`] 設定を適用する以下のコマンドを実行できます：{harvester-product-name}
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* `matchSelector` フィールドは、特定のラベルを持つ {harvester-product-name} ノードを選択するために使用されます。
+* 影響を受けるすべてのノードは、`CloudInit` 設定が有効になるために再起動する必要があります。
+====
+
+設定が適用されると、SSH パスワードを使用して {harvester-product-name} ノードにアクセスしようとする試みは拒否されます。
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----

@@ -1,0 +1,143 @@
+= ネットワーキングディープダイブ
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== ネットワークトポロジー
+
+以下のネットワークトポロジーは、Harvesterネットワークの実装方法を示しています。
+
+image::networking/topology.png[]
+
+この図には、xref:./cluster-network.adoc#_built_in_cluster_network[ビルトインのクラスターネットワーク管理]と、xref:./cluster-network.adoc#_custom_cluster_network[カスタムクラスターネットワーク]である`oob`が含まれています。
+
+上記のように、Harvesterネットワークは主にOSIモデルのレイヤー2に焦点を当てています。私たちは、VMからVM、VMからホスト、VMから外部ネットワークデバイス間の通信のために、Linuxネットワークデバイスとプロトコルを活用してトラフィックパスを構築します。
+
+Harvesterネットワークは、以下の3つの階層で構成されています：
+
+* KubeVirtネットワーキング階層
+* Harvesterネットワーキング階層
+* 外部ネットワーキング階層
+
+== KubeVirtネットワーキング
+
+KubeVirtの一般的な目的は、Kubernetesポッド内でVMを実行することです。KubeVirtネットワークは、ポッドとVMの間のネットワークパスを構築します。
+詳細については、 https://kubevirt.io/2018/KubeVirt-Network-Deep-Dive.html[KubeVirt公式ドキュメント]を参照してください。
+
+== Harvesterネットワーキング
+
+Harvesterネットワーキングは、ポッドとホストネットワーク間のネットワークパスを構築するように設計されています。管理ネットワーク、VLANネットワーク、タグなしネットワークを実装します。最後の2つのネットワークは、ブリッジがその実装において重要な役割を果たすため、*ブリッジネットワーク*と呼ぶことができます。
+
+=== ブリッジネットワーク
+
+私たちは https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI]と https://www.cni.dev/plugins/current/main/bridge/[bridge CNI]を活用して、ブリッジネットワークを実装します。
+
+* Multus CNIは、Kubernetesのためのコンテナネットワークインターフェース（CNI）プラグインで、ポッドに複数のネットワークインターフェースを接続できます。その機能により、仮想マシンは管理ネットワーク用の1つのNICと、ブリッジネットワーク用の複数のNICを持つことができます。
+
+* ブリッジCNIを使用することで、VMポッドはネットワークアタッチメント定義構成で指定されたL2ブリッジに接続されます。
++
+[,json]
+----
+ # Example 1
+ {
+     "cniVersion": "0.3.1",
+     "name": "vlan100",
+     "type": "bridge",
+     "bridge": "mgmt-br",
+     "promiscMode": true,
+     "vlan": 100,
+ }
+----
++
+[,json]
+----
+ # Example 2
+ {
+     "cniVersion": "0.3.1",
+     "name": "untagged-network",
+     "type": "bridge",
+     "bridge": "oob-br",
+     "promiscMode": true,
+     "ipam": {}
+ }
+----
++
+例1はVLAN ID 100を持つ典型的なVLAN設定であり、例2はVLAN IDを持たないタグなしネットワーク設定です。例1を使用して構成されたVMポッドはブリッジ`mgmt-br`に接続され、例2を使用するVMポッドはブリッジ`oob-br`に接続されます。
+
+* 高可用性と耐障害性を実現するために、実際のNICがバインドされるボンドデバイスが作成され、ブリッジのアップリンクとして機能します。デフォルトでは、このボンドデバイスはターゲットタグ付きトラフィック/パケットを通過させることができます。
++
+[,shell]
+----
+ harvester-0:/home/rancher # bridge -c vlan show dev oob-bo
+ port       vlan ids
+ oob-bo       1 PVID Egress Untagged
+            100
+            200
+----
++
+上記の例は、ボンド`oob-bo`がタグ1、100、または200のパケットを許可することを示しています。
+
+* 仮想マシンを作成し、VMネットワーク（VLAN）またはストレージネットワークに接続すると、{harvester-product-name}は自動的にホスト上にポッドに直接接続される仮想イーサネット（veth）インターフェースを作成します。
++
+以前のバージョンでは、これらのvethインターフェースはVLAN ID 1とVMネットワークに割り当てられたVLAN IDの両方に関連付けられていました。これにより、{harvester-product-name}ブリッジは未タグ付け（VLAN 1）および外部スイッチからvethインターフェースへのタグ付きトラフィックを正しく転送できました。
++
+[,shell]
+----
+vethaf720855      1 Egress Untagged
+                  66 PVID Egress Untagged
+----
++
+この動作は、CNIブリッジプラグインのv1.8.0を使用する{harvester-product-name} v1.6.1で変更されました。デフォルトのVLAN ID 1はもはやvethインターフェースに追加されません。VMネットワークに割り当てられたVLAN IDのみが構成されます。
++
+[,shell]
+----
+vethaf720855      66 PVID Egress Untagged
+----
++
+未タグ付けVLANの処理がもはや適用されないため、{harvester-product-name}ホストに接続された物理スイッチはトランクポートとして構成する必要があります。これらのポートはタグ付きトラフィックを受け入れ、VMネットワークで使用されるVLAN IDでタグ付けされたトラフィックを送信する必要があります。
++
+VLANタグ付きvethインターフェースのために{harvester-product-name}ネットワークブリッジに到着する未タグ付けトラフィックはドロップされます。これは、ブリッジがvethインターフェースにトラフィックを転送できないために発生します。vethインターフェースはVMネットワークからのVLAN IDのみを受け入れるように構成されています。
+
+=== 管理ネットワーク
+
+管理ネットワークは https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal]に基づいています。
+
+HarvesterがノードIPを設定するCanalインターフェースは、ブリッジ`mgmt-br`または`mgmt-br`のVLANサブインターフェースであることは言及する価値があります。この設計には2つの利点があります：
+
+* ビルトインの`mgmt`クラスタネットワークは、管理ネットワークとブリッジネットワークの両方をサポートしています。
+* VLANネットワークインタフェースを使用すると、管理ネットワークにVLAN IDを割り当てることができます。
+
+mgmtクラスタネットワークの構成要素として、ブリッジmgmt-br、ボンドmgmt-bo、およびVLANデバイスを削除または変更することは許可されていません。
+
+== 外部ネットワーキング
+
+外部ネットワークデバイスは通常、スイッチやDHCPサーバーを指します。クラスタネットワークを使用すると、ホストNICをグループ化し、異なるスイッチに接続してトラフィックの分離を行うことができます。以下は使用手順です。
+
+* タグ付きパケットを通過させるには、外部スイッチまたは他のデバイス（DHCPサーバーなど）のポートタイプをトランクまたはハイブリッドモードに設定し、指定されたVLANタグを許可する必要があります。
+* スイッチでリンクアグリゲーションを構成する必要があります。これは、ピアホストのボンドモードに基づいています。リンクアグリゲーションは、手動モードまたはLACPモードで動作することができます。以下は、ボンドモードとリンクアグリゲーションモードの対応関係を示しています。
++
+|===
+| ボンドモード | リンクアグリゲーションモード
+
+| モード0（バランス-rr）
+| manual
+
+| モード1（アクティブ-バックアップ）
+| none
+
+| モード2（バランス-oxr）
+| manual
+
+| モード3（ブロードキャスト）
+| manual
+
+| モード4（802.3ad）
+| LACP
+
+| モード5（バランス-TLB）
+| none
+
+| モード6（バランス-ALB）
+| none
+|===
+
+* VLAN内のVMがDHCPプロトコルを通じてIPアドレスを取得できるようにするには、そのVLANのためにDHCPサーバーでIPプールを構成してください。

@@ -1,0 +1,573 @@
+= 群集网络
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== 概念
+
+=== 群集网络
+
+下图描述了一个典型的网络架构，该架构将数据中心（DC）流量与带外（OOB）流量分开。
+
+image::networking/traffic-isolation.png[网络流量隔离]
+
+我们将{harvester-product-name}上流量隔离转发路径的设备、链接和配置的总和抽象为一个群集网络。
+
+在上述情况下，将有两个群集网络对应于两个流量隔离的转发路径。
+
+=== 网络配置
+
+{harvester-product-name}主机的网络设备规格可以不同。为了与这样的异构群集兼容，我们设计了网络配置。
+
+网络配置仅在特定的群集网络下有效。每个网络配置对应一组具有统一网络规格的主机。因此，对于非统一主机的群集网络，需要多个网络配置。
+
+=== 虚拟机网络
+
+虚拟机网络是虚拟机中的一个接口，用于连接到主机网络。与网络配置一样，除了内置的xref:./vm-network.adoc#_management_network[管理网络]外，所有网络必须在群集网络下。
+
+{harvester-product-name}支持向一个虚拟机添加多个网络。如果某些主机上未启用网络的群集网络，则拥有该网络的虚拟机将不会被调度到这些主机上。
+
+有关网络的更多详细信息，请参阅xref:./vm-network.adoc[网络部分]。
+
+=== 群集网络、网络配置、虚拟机网络之间的关系
+
+下图显示了群集网络、网络配置和虚拟机网络之间的关系。
+
+image::networking/relation.png[{harvester-product-name} 网络概念]
+
+所有`Network Configs`和`VM Networks`都被归类在一个群集网络下。
+
+* 可以为每个主机分配一个标签，以根据其网络规格对主机进行分类。
+* 可以使用节点选择器为每组主机添加网络配置。
+
+例如，在上面的图中，`ClusterNetwork-A`中的主机被分为以下三组：
+
+* 第一组包括主机0，对应于`network-config-A`。
+* 第二组包括主机1和主机2，对应于`network-config-B`。
+* 第三组包括剩余的主机（主机3、主机4和主机5），它们没有任何相关的网络配置，因此不属于`ClusterNetwork-A`。
+
+群集网络仅在受网络配置覆盖的主机上有效。在特定群集网络下使用`VM network`的虚拟机只能在群集网络处于活动状态的主机上调度。
+
+在上面的图中，我们可以看到：
+
+* `ClusterNetwork-A`在主机0、主机1和主机2上处于活动状态。`VM0`使用`VM-network-A`，因此可以在这些主机中任一台上调度。
+* `VM1`同时使用`VM-network-B`和`VM-network-C`，因此只能在主机2上调度，在那里`ClusterNetwork-A`和`ClusterNetwork-B`都处于活动状态。
+* `VM0`、`VM1`和`VM2`不能在主机3上运行，因为那里的两个群集网络处于非活动状态。
+
+总体而言，这个图提供了群集网络、网络配置和虚拟机网络之间关系的清晰可视化，以及它们如何影响主机上的虚拟机调度。
+
+== 群集网络详细信息
+
+群集网络是用于在{harvester-product-name}群集内传输网络流量的流量隔离转发路径。
+
+当部署{harvester-product-name}群集时，会自动创建一个名为`mgmt`的群集网络。您还可以创建自定义群集网络，专门用于虚拟机流量。
+
+=== 内置群集网络
+
+当部署{harvester-product-name}群集时，会自动创建一个名为`mgmt`的群集网络，用于群集内通信。`mgmt`由与每个{harvester-product-name}主机通过管理NIC连接的外部基础设施网络相同的桥接、绑定和NIC组成。由于此设计，`mgmt`还允许从外部基础设施网络访问虚拟机以进行群集管理。
+
+`mgmt` 不需要网络配置，并始终在所有主机上启用。您无法禁用和删除 `mgmt`。
+
+[NOTE]
+====
+在 {harvester-product-name} v1.5.x 及更早版本中，整个 VLAN ID 范围（2 到 4094）被分配给 `mgmt` 接口。然而，这超出了某些网络卡支持的 VLAN 上限，因此硬件 VLAN 卸载停止正常工作。
+
+有关更多信息，请参见 https://github.com/harvester/harvester/issues/7650[问题 #7650]。
+====
+
+从 v1.6.0 开始，安装期间提供的唯一 xref:installation-setup/config/configuration-file.adoc#_install_management_interface[主 VLAN ID] 会自动添加到 `mgmt-br` 桥接和 `mgmt-bo` 接口。安装完成后，您可以 <<Add secondary VLAN interfaces,添加辅助 VLAN 接口>>。
+
+在第一个群集节点的安装过程中，您可以使用xref:../installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`]设置为`mgmt`配置MTU值。`mtu` 字段的默认值为 `1500`，这是 `mgmt` 通常使用的值。然而，如果您指定的MTU值不是`0`或`1500`，则必须在群集部署后xref:#_annotate_a_non_default_mtu_value_to_mgmt_after_installation[添加相应的注释]。
+
+[CAUTION]
+====
+* 某些 https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt[ARP设置]可能会破坏群集通信。例如，使用 `arp_ignore=2` 时，仅当发送方 IP 地址与请求 MAC 地址的目标 IP 地址在同一子网中时，才会发送回复。在{harvester-product-name}群集中情况并非如此，因此在所有接口上使用`arp_ignore=2`会导致连接检查失败，并阻止{longhorn-product-name} pod（特别是`backing-image`和`instance-manager`）转变为`Ready`状态。如果这些 {longhorn-product-name} pod 未准备好，则无法将卷附加到虚拟机。
+* 在{harvester-product-name}群集中，所有节点必须使用相同的MTU值。由于 {harvester-product-name} 在节点加入时不会自动检测差异，因此您必须手动确保值相同，以防止意外的系统行为。
+====
+
+=== 添加辅助 VLAN 接口
+
+. 检查 `bond-mgmt` 和 `bridge-mgmt` 连接控制文件的当前 VLAN 设置。
++
+示例（主 VLAN ID 为 2017）：
++
+[,shell]
+----
+$ nmcli -f bridge-port.vlans con show bond-mgmt
+bridge-port.vlans:                      1 pvid untagged, 2017
+$ nmcli -f bridge.vlans con show bridge-mgmt
+bridge.vlans:                           2017
+----
+
+. 更新 `bond-mgmt` 和 `bridge-mgmt` 连接控制文件以添加辅助 VLAN ID。
++
+示例（主 VLAN ID 为 2017，辅助 VLAN ID 为 2018）：
++
+[,shell]
+----
+$ nmcli con modify bond-mgmt bridge-port.vlans '1 pvid untagged, 2017, 2018'
+$ nmcli con modify bridge-mgmt bridge.vlans 2017,2018
+----
+
+. 重启每个节点以应用更改。
+
+=== 在安装后为 `mgmt` 注释非默认 MTU 值 
+
+如果您在 xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] 设置的 `mtu` 字段中指定了与 `0` 或 `1500` 不同的值，则必须将此值注释到 `mgmt` `clusternetwork` 对象中。没有注释，所有创建的 xref:./vm-network.adoc#_create_a_vm_network[VM 网络] 使用默认 MTU 值 `1500`，而不是自动继承您指定的值。
+
+*示例*
+
+[bash, shell]
+----
+$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
+
+[CAUTION]
+====
+您必须确保以下事项：
+
+* 注释中的 `uplink-mtu` 值与 xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] 设置中的 `mtu` 值相同。
+* 所有群集节点使用相同的MTU值。
+====
+
+=== 在安装后更改 `mgmt` 的 MTU 值
+
+. 停止所有附加到 `mgmt` 网络的虚拟机。
+
+. （可选）如果 xref:networking/storage-network.adoc#_storage_network_setting[存储网络] 使用 `mgmt` 并且已启用，则禁用它。
+
+. 更改 `bond-mgmt`、`bridge-mgmt` 和 `vlan-mgmt`（如果您使用 VLAN）连接控制文件的 MTU 值。
++
+示例：
++
+[,shell]
+----
+$ nmcli con modify bond-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify bridge-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify vlan-mgmt 802-3-ethernet.mtu 9000
+$ nmcli device reapply mgmt-bo
+$ nmcli device reapply mgmt-br
+----
+
+. 使用 `ip link` 命令检查 MTU 值。
+
+. 用新的 MTU 值注释 `mgmt` `clusternetwork` 对象。
++
+示例：
++
+[,shell]
+----
+$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
++
+所有附加到 `mgmt` 的 VM 网络自动继承新的 MTU 值。
+
+. （可选）启用您在更改 MTU 值之前禁用的 xref:networking/storage-network.adoc#_storage_network_setting[存储网络]。
+
+. 启动所有附加到 `mgmt` 的虚拟机。
+
+. 验证虚拟机工作负载是否正常运行。
+
+有关详细信息，请访问 <<Change the MTU of a network configuration with an attached storage network>>。
+
+=== 自定义群集网络
+
+如果每个主机连接了多个网络接口，您可以创建自定义群集网络以更好地隔离流量。每个群集网络必须至少有一个具有定义范围和绑定模式的网络配置。
+
+[NOTE]
+====
+xref:../hosts/witness-node.adoc[见证节点] 通常不参与自定义群集网络。
+====
+
+== 配置
+
+=== 创建一个新的群集网络
+
+[TIP]
+====
+为了简化群集维护，为每个节点或节点组创建一个网络配置。没有专用网络配置的情况下，某些维护任务（例如，用不同插槽的NIC替换旧NIC）将要求您在更新网络配置之前停止和/或迁移受影响的虚拟机。
+====
+
+. 确保满足 xref:../installation-setup/requirements.adoc#_hardware_requirements[硬件要求]。
+
+. 转到 *网络 -> 群集网络/配置*，然后单击 *创建*。
+
+. 为群集网络指定一个名称。
++
+image::networking/create-clusternetwork.png[创建群集网络]
+
+. 在 *群集网络/配置* 屏幕上，单击您创建的群集网络的 *创建网络配置* 按钮。
++
+image::networking/create-network-config-button.png[创建网络配置]
+
+. 在 *网络配置：创建* 屏幕上，为配置指定一个名称。
+
+. 在 *节点选择器* 选项卡上，选择定义此特定网络配置范围的方法。
++
+image::networking/select-nodes.png[网络配置节点选择器]
++
+[NOTE]
+====
+* 方法 *Select all nodes* 仅在所有节点为此特定自定义群集网络使用完全相同的NIC时有效。在其他情况下（例如，当群集有一个 xref:../hosts/witness-node.adoc[见证节点] 时），您必须选择剩余方法中的任意一个。
+* 如果您希望配置适用于未被所选方法覆盖的节点，则必须创建另一个网络配置。
+====
+
+. 在 *上行链路* 选项卡上，配置以下设置：
++
+** *NICs*：该列表包含所有选定节点共有的NIC。无法选择的NIC在一个或多个节点上不可用，必须进行配置。故障排除完成后，刷新屏幕并验证NIC是否可以被选择。
+** *绑定选项*：默认绑定模式为`active-backup`。
+** *属性*：您必须在自定义群集网络的所有网络配置中使用相同的MTU。如果您未指定MTU，则使用默认值`1500`。如果{harvester-product-name} webhook的MTU与现有网络配置的MTU不匹配，则会拒绝新的网络配置。
++
+image::networking/config-uplink.png[网络配置上行设置]
++
+[NOTE]
+====
+连接到绑定接口的物理交换机必须配置为干线端口。这些端口必须接受标记流量，并发送带有虚拟机网络使用的VLAN ID的标记流量。
+====
+
+. 单击*保存*。
+
+=== 更改网络配置
+
+对现有网络配置的更改可能会影响{harvester-product-name}虚拟机和工作负载，以及交换机和路由器等外部设备。有关更多信息，请参见xref:./deep-dive.adoc#_network_topology[网络拓扑]。
+
+[IMPORTANT]
+====
+在更改网络配置之前，您必须停止所有受影响的虚拟机。
+====
+
+以下部分概述了您必须执行的步骤，以更改网络配置的MTU。这些部分中使用的示例群集网络具有`cn-data`，其MTU值为`1500`，并计划更改为`9000`。
+
+image::networking/set-a-new-mtu-value.png[新的MTU值]
+
+==== 一般更改
+
+. 定位目标群集网络和网络配置。
++
+在以下示例中，群集网络为 `cn-data`，网络配置为 `nc-1`。
++
+image::networking/network-configuration-1.png[示例网络配置]
+
+. 选择 *⋮ -> 编辑配置*，然后更改相关字段。
++
+** *节点选择器* 选项卡：
++
+image::networking/network-configuration-2.png[网络配置节点选择器]
++
+** *上行链路* 选项卡：
++
+image::networking/network-configuration-3.png[网络配置上行设置]
++
+[IMPORTANT]
+====
+在自定义群集网络的所有网络配置中，*绑定选项* 和 *属性* 字段必须使用相同的值。
+====
+
+. 单击*保存*。
+
+==== 更改没有附加存储网络的网络配置的MTU
+
+在这种情况下，xref:./storage-network.adoc#_storage_network_setting[存储网络设置] 既未启用也未附加到目标集群网络。
+
+[CAUTION]
+====
+* MTU 影响 {harvester-product-name} 节点和网络设备，如交换机和路由器。需要仔细规划和测试，以确保更改 MTU 不会对系统产生不利影响。有关更多信息，请参见xref:./deep-dive.adoc#_network_topology[网络拓扑]。
+* 您必须在自定义群集网络的所有网络配置中使用相同的MTU。
+* 在配置更改期间，群集操作会被中断。
+* 本节中的信息不适用于内置的 `mgmt` 群集网络。
+====
+
+如果必须更改 MTU，请执行以下步骤：
+
+. 停止所有附加到目标集群网络的虚拟机。
++
+您可以使用 xref:./vm-network.adoc#_create_a_vm_network[虚拟机网络] 和您可能使用的任何 xref:../virtual-machines/create-vm.adoc#_secondary_network[辅助网络] 来检查这一点。在任何连接的虚拟机仍在运行时，请勿更改 MTU。
+
+. 检查目标集群网络的网络配置。
++
+如果存在多个网络配置，请记录每个节点选择器，并删除配置，直到只剩下一个。
+
+. <<General changes,更改剩余网络配置的MTU>>。
++
+[IMPORTANT]
+====
+您还必须更改对等外部交换机或路由器上的MTU。
+====
+
+. 使用Linux `ip link`命令验证MTU是否已更改。
++
+如果网络配置选择了多个 {harvester-product-name} 节点，请在每个节点上运行该命令。
++
+输出必须显示相关 `*-br` 设备的新MTU和状态 `UP`。在以下示例中，设备是 `cn-data-br`，新MTU是 `9000`。
++
+[,console]
+----
+Harvester node $ ip link show dev cn-data-br
+                                              |new MTU|              |state UP|
+3: cn-data-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:6e:5c:2a brd ff:ff:ff:ff:ff:ff
+----
++
+[NOTE]
+====
+当状态为 `UNKNOWN` 时，{harvester-product-name} 和外部交换机或路由器上的MTU值可能不匹配。
+====
+
+. 使用诸如 `ping` 的命令在 {harvester-product-name} 节点上测试新MTU。
++
+您必须将消息发送到具有新MTU的 {harvester-product-name} 节点或具有外部IP的节点。
++
+在以下示例中，网络是 `cn-data`，CIDR是 `192.168.100.0/24`，网关是 `192.168.100.1`。
++
+.. 在桥接设备上设置IP `192.168.100.100`。
++
+[,console]
+----
+$ ip addr add dev cn-data-br 192.168.100.100/24
+----
++
+.. 通过网关为目标IP（例如，`8.8.8.8`）添加路由。
++
+[,console]
+----
+$ ip route add 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. 从新IP `192.168.100.100` 对目标IP进行ping测试。
++
+[,console]
+----
+$ ping 8.8.8.8 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=59 time=8.52 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=59 time=8.90 ms
+...
+----
++
+.. 使用不同的包大小ping目标IP以验证新MTU。
++
+[,console]
+----
+$ ping 8.8.8.8 -s 8800 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 8800(8828) bytes of data
+The param `-s` specify the ping packet size, which can test if the new MTU really works
+----
++
+.. 去除您用于测试的路由。
++
+[,console]
+----
+$ ip route delete 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. 去除您用于测试的IP。
++
+[,console]
+----
+$ ip addr delete 192.168.100.100/24 dev cn-data-br
+----
+
+. 恢复您删除的网络配置。
++
+[IMPORTANT]
+====
+您必须在每个网络配置中更改MTU，并验证新MTU是否已应用。如果 {harvester-product-name} webhook 的MTU与现有网络配置的MTU不匹配，则会拒绝新的网络配置。
+====
+
+所有连接到目标群集网络的虚拟机网络会自动继承新的MTU值。
+
+在以下示例中，网络名称为`vm100`。运行命令`kubectl get NetworkAttachmentDefinition.k8s.cni.cncf.io vm100 -oyaml`以验证MTU值是否已更新：
++
+[,console]
+----
+    apiVersion: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    metadata:
+      annotations:
+        network.harvesterhci.io/route: '{"mode":"auto","serverIPAddr":"","cidr":"","gateway":""}'
+      creationTimestamp: '2025-04-25T10:21:01Z'
+      finalizers:
+        - wrangler.cattle.io/harvester-network-nad-controller
+        - wrangler.cattle.io/harvester-network-manager-nad-controller
+      generation: 1
+      labels:
+        network.harvesterhci.io/clusternetwork: cn-data
+        network.harvesterhci.io/ready: 'true'
+        network.harvesterhci.io/type: L2VlanNetwork
+        network.harvesterhci.io/vlan-id: '100'
+      name: vm100
+      namespace: default
+      resourceVersion: '1525839'
+      uid: 8dacf415-ce90-414a-a11b-48f041d46b42
+    spec:
+      config: >-
+        {"cniVersion":"0.3.1","name":"vm100","type":"bridge","bridge":"cn-data-br","promiscMode":true,"vlan":100,"ipam":{},"mtu":9000} // MTU has been updated
+----
+
+. 启动所有连接到目标群集网络的虚拟机。
++
+虚拟机应该已经继承了新的MTU。您可以在客户操作系统中使用命令`ip link`和`ping 8.8.8.8 -s 8800`进行验证。
+
+. 验证虚拟机工作负载是否正常运行。
+
+[IMPORTANT]
+====
+{harvester-product-name}不对更改MTU值时可能发生的任何损坏或数据丢失负责。
+====
+
+==== 更改附加存储网络的网络配置的MTU。
+
+在此场景中，xref:./storage-network.adoc#_storage_network_setting[存储网络设置]已启用并连接到目标群集网络。
+
+存储网络由`driver.longhorn.io`使用，这是{harvester-product-name}的默认CSI驱动程序。{longhorn-product-name}负责配置xref:../virtual-machines/create-vm.adoc#_volumes[根卷]，因此更改MTU会影响所有虚拟机。
+
+[CAUTION]
+====
+* MTU 影响 {harvester-product-name} 节点和网络设备，如交换机和路由器。需要仔细规划和测试，以确保更改 MTU 不会对系统产生不利影响。有关更多信息，请参见xref:./deep-dive.adoc#_network_topology[网络拓扑]。
+* 您必须在自定义群集网络的所有网络配置中使用相同的MTU。
+* 在配置更改期间，所有群集操作都会中断。
+* 本节中的信息不适用于内置的 `mgmt` 群集网络。
+====
+
+如果必须更改 MTU，请执行以下步骤：
+
+. 停止所有虚拟机。
+
+. 禁用xref:./storage-network.adoc#_storage_network_setting[存储网络设置]。
++
+允许一些时间来禁用该设置，然后xref:./storage-network.adoc#_verify_configuration_is_completed[验证更改是否已应用]。
+
+. 检查目标集群网络的网络配置。
++
+如果存在多个网络配置，请记录每个节点选择器，并删除配置，直到只剩下一个。
+
+. <<General changes,更改剩余网络配置的MTU>>。
++
+[IMPORTANT]
+====
+您还必须更改对等外部交换机或路由器上的MTU。
+====
+
+. 使用`ip link`命令验证MTU是否已更改。
++
+如果网络配置选择了多个 {harvester-product-name} 节点，请在每个节点上运行该命令。
++
+输出必须显示相关 `*-br` 设备的新 MTU 和状态 `UP`。在以下示例中，设备是 `cn-data-br`，新 MTU 是 `9000`。
++
+[,console]
+----
+Harvester node $ ip link show dev cn-data-br
+                                              |new MTU|              |state UP|
+3: cn-data-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:6e:5c:2a brd ff:ff:ff:ff:ff:ff
+----
++
+[NOTE]
+====
+当状态为 `UNKNOWN` 时，{harvester-product-name} 和外部交换机或路由器上的 MTU 值可能不匹配。
+====
+
+. 使用诸如 {harvester-product-name} 的命令在 `ping` 节点上测试新 MTU。
++
+您必须将消息发送到具有新 MTU 的 {harvester-product-name} 节点或具有外部 IP 的节点。
++
+在以下示例中，网络是 `cn-data`，CIDR 是 `192.168.100.0/24`，网关是 `192.168.100.1`。
++
+.. 在桥接设备上设置 IP `192.168.100.100`。
++
+[,console]
+----
+$ ip addr add dev cn-data-br 192.168.100.100/24
+----
++
+.. 通过网关为目标 IP（例如，`8.8.8.8`）添加路由。
++
+[,console]
+----
+$ ip route add 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. 从新 IP `192.168.100.100` ping 目标 IP。
++
+[,console]
+----
+$ ping 8.8.8.8 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=59 time=8.52 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=59 time=8.90 ms
+...
+----
++
+.. 使用不同的包大小 ping 目标 IP 以验证新 MTU。
++
+[,console]
+----
+$ ping 8.8.8.8 -s 8800 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 8800(8828) bytes of data
+The param `-s` specify the ping packet size, which can test if the new MTU really works
+----
++
+.. 删除您用于测试的路由。
++
+[,console]
+----
+$ ip route delete 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. 删除您用于测试的 IP。
++
+[,console]
+----
+$ ip addr delete 192.168.100.100/24 dev cn-data-br
+----
+
+. 恢复您删除的网络配置。
++
+[IMPORTANT]
+====
+您必须在每个网络配置中更改 MTU，并验证新 MTU 是否已应用。如果 {harvester-product-name} webhook 的 MTU 与现有网络配置的 MTU 不匹配，则会拒绝新的网络配置。
+====
+
+. 启用并配置xref:./storage-network.adoc#_storage_network_setting[存储网络设置]，确保满足xref:./storage-network.adoc#_prerequisites[先决条件]。
+
+. 允许一些时间来启用该设置，然后xref:./storage-network.adoc#_prerequisites[验证更改是否已应用]。`storagenetwork`以新的MTU值运行。
+
+所有连接到目标集群网络的虚拟机网络会自动继承新的MTU值。
++
+在以下示例中，网络名称为 `vm100`。运行命令 `kubectl get NetworkAttachmentDefinition.k8s.cni.cncf.io vm100 -oyaml` 以验证 MTU 值是否已更新。
++
+[console]
+----
+    apiVersion: k8s.cni.cncf.io/v1
+    kind:网络附件定义 +
+    元数据： +
+      注解： +
+        network.harvesterhci.io/route: '{"mode":"auto","serverIPAddr":"","cidr":"","gateway":""}' +
+      创建时间戳：'2025-04-25T10:21:01Z' +
+      终结器： +
+        - wrangler.cattle.io/harvester-network-nad-controller +
+        - wrangler.cattle.io/harvester-network-manager-nad-controller +
+      代：1 +
+      标签： +
+        network.harvesterhci.io/clusternetwork: cn-data +
+        network.harvesterhci.io/ready: 'true' +
+        network.harvesterhci.io/type:L2VlanNetwork
+        network.harvesterhci.io/vlan-id:'100' +
+      名称： vm100 +
+      名称空间： default +
+      资源版本：'1525839' +
+      uid:8dacf415-ce90-414a-a11b-48f041d46b42 +
+    规格： +
+      配置： >- +
+        {"cniVersion":"0.3.1","name":"vm100","type":"bridge","bridge":"cn-data-br","promiscMode":true,"vlan":100,"ipam":{},"mtu":9000} // MTU 已更新
+----
+
+. 启动所有连接到目标集群网络的虚拟机。
++
+虚拟机应该已经继承了新的MTU。您可以在来宾操作系统中使用 Linux `ip link` 命令和 `ping 8.8.8.8 -s 8800` 命令来验证此信息。
+
+. 验证虚拟机工作负载是否正常运行。
+
+[IMPORTANT]
+====
+{harvester-product-name}不对更改MTU值时可能发生的任何损坏或数据丢失负责。
+====

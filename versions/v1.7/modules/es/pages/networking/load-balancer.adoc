@@ -1,0 +1,102 @@
+= Balanceador de carga
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+El balanceador de carga Harvester (LB) es un balanceador de carga de Capa 4 integrado que distribuye el tráfico entrante entre las cargas de trabajo desplegadas en máquinas virtuales (VMs) de Harvester o en clústeres de Kubernetes invitados.
+
+== Balanceador de carga de VM
+
+=== Funciones
+
+El balanceador de carga de VM de Harvester admite las siguientes características:
+
+* *Asignación de direcciones:* Obtén la dirección IP del LB de un servidor DHCP o de un grupo de IP predefinido.
+* *Compatibilidad con protocolos:* Admite tanto los protocolos TCP como UDP para el balance de la carga.
+* *Varios oyentes:* Crea varios oyentes para manejar el tráfico entrante en diferentes puertos o con otros protocolos.
+* *Selector de etiquetas:* El LB utiliza selectores de etiquetas para hacer coincidir los servidores backend. Por lo tanto, debes configurar las etiquetas correspondientes para las VMs backend que deseas añadir al LB.
+* *Comprobación de actividad:* Solo envía tráfico a instancias backend saludables.
+
+=== limitaciones
+
+El balanceador de carga de VM de Harvester tiene las siguientes limitaciones:
+
+* *Restricción de espacio de nombres:* Esta restricción facilita la gestión de permisos y asegura que el LB solo utilice VMs en el mismo espacio de nombres que los servidores backend.
+* *Solo IPv4:* El LB solo es compatible con direcciones IPv4 para las VMs.
+* *Instalación del agente invitado:* Es necesario instalar el agente invitado en cada VM de backend para obtener direcciones IP.
+* *Requisito de conectividad:* Se debe establecer conectividad de red entre las VMs de backend y los hosts de Harvester. Cuando una VM tiene múltiples direcciones IP, el LB seleccionará la primera como la dirección de backend.
+* *Restricción de acceso:* La dirección LB de la VM solo se expone dentro de la misma red que los hosts de Harvester. Para acceder al LB desde fuera de la red, debes proporcionar una ruta desde el exterior a la dirección LB.
+
+[NOTE]
+====
+El balanceador de carga de VM de Harvester no soporta VMs de Windows porque el agente invitado no está disponible para VMs de Windows.
+====
+
+
+=== Cómo crear
+
+Para crear un nuevo balanceador de carga de VM de Harvester:
+
+. Ve a la página **Redes > Balanceadores de carga** y selecciona *Crear*.
+. Selecciona el *espacio de nombres* y especifica el *Nombre*.
+. Ve a la pestaña *Básico* para elegir el modo IPAM, que puede ser *DHCP* o *Grupo de IP*. Si seleccionas *Grupo de IP*, prepara primero un grupo de IP, especifica el nombre del grupo de IP o elige *auto*. Si eliges *auto*, el LB selecciona automáticamente un grupo de IP según xref:./ip-pool.adoc#_selection_policy[la política de selección de grupo de IP].
++
+image::networking/create-lb-01.png[]
+. Ve a la pestaña *Oyentes* para añadir oyentes. Debes especificar el *Puerto*, *Protocolo* y *Puerto de backend* para cada oyente.
++
+image::networking/create-lb-02.png[]
+. Ve a la pestaña *Selector de servidor de backend* para añadir selectores de etiquetas. Para añadir la VM al LB, ve a la pestaña **Máquina Virtual > Etiquetas de Instancia** para añadir las etiquetas correspondientes a la VM.
++
+image::networking/create-lb-03.png[]
+. Ve a la pestaña *Comprobación de actividad* para habilitar la comprobación de actividad y especificar los parámetros, incluyendo el *Puerto*, *Umbral de Éxito*, *Umbral de Fallo*, *Intervalo* y *Tiempo de Espera* si el servicio de backend soporta la comprobación de actividad. Consulte <<Health Checks>> para obtener más información.
++
+image::networking/create-lb-04.png[]
+
+=== Comprobaciones de actividad
+
+El balanceador de carga Harvester soporta comprobaciones de actividad TCP. Puedes especificar los parámetros en la interfaz de usuario de Harvester si has habilitado la opción `Health Check`.
+
+image::networking/health-check.png[]
+
+|===
+| Nombre | Tipo de valor | required | Default | Descripción
+
+| Puerto de Comprobación de Actividad
+| int
+| true
+| N/D
+| Especifica el puerto. El comprobador accederá a la dirección compuesta por la IP del servidor de backend y el puerto.
+
+| Umbral de Éxito de Comprobación de Actividad
+| int
+| false
+| 1
+| Especifica el umbral de éxito de la comprobación de actividad. Deshabilitada por defecto. El servidor de backend comenzará a redirigir el tráfico si el número de veces que el comprobador detecta continuamente una dirección con éxito alcanza el umbral.
+
+| Umbral de Fallo de Comprobación de Actividad
+| int
+| false
+| 3
+| Especifica el umbral de fallo de la comprobación de actividad. Deshabilitada por defecto. El servidor de backend dejará de redirigir el tráfico si el número de fallos de comprobación de actividad alcanza el umbral.
+
+| Período de Comprobación de Actividad
+| int
+| false
+| 5
+| Especifica el período de comprobación de actividad en segundos. Deshabilitada por defecto.
+
+| Tiempo de Espera de Comprobación de Actividad
+| int
+| false
+| 3
+| Especifica el tiempo de espera de cada comprobación de actividad en segundos. Deshabilitada por defecto.
+|===
+
+== Balanceador de carga del clúster de Kubernetes invitado
+
+En conjunto con el Proveedor de Nube Harvester, el balanceador de carga Harvester proporciona balance de la carga para los servicios LB en el clúster invitado.
+
+image::networking/guest-kubernetes-cluster-lb.png[]
+
+Cuando creas, actualizas o eliminas un servicio LB en un clúster de invitados con el Proveedor de Nube Harvester, el Proveedor de Nube Harvester creará automáticamente un LB de Harvester.
+
+Para más detalles, consulta xref:../integrations/rancher/cloud-provider.adoc[Harvester Cloud Provider].

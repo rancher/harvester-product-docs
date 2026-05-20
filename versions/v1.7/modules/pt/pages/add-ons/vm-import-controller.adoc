@@ -1,0 +1,332 @@
+= Controlador de Importação de VM
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+Você pode importar máquinas virtuais do VMware, OpenStack e pacotes Open Virtual Appliance (OVA) para {harvester-product-name} usando o complemento vm-import-controller. O complemento deve ser ativado antes de começar a importar máquinas virtuais.
+
+image::vm-import-controller/EnableAddon.png[]
+
+Por padrão, o vm-import-controller utiliza armazenamento efêmero, que é montado a partir de /var/lib/kubelet.
+
+Durante a migração, um nó de uma VM grande pode ficar sem espaço nessa montagem, resultando em falhas subsequentes de agendamento.
+
+Para evitar isso, os usuários são aconselhados a habilitar armazenamento baseado em PVC e personalizar a quantidade de armazenamento necessária. De acordo com a melhor prática, o tamanho do PVC deve ser o dobro do tamanho da maior VM sendo migrada. Isso é essencial, pois o PVC é usado como espaço temporário para baixar a VM e converter os discos em arquivos de imagem bruta.
+
+image::vm-import-controller/ConfigureAddon.png[]
+
+== vm-import-controller
+
+Atualmente, os seguintes provedores de origem são suportados:
+
+* VMware
+* OpenStack
+* Open Virtual Appliance (OVA)
+
+== API
+
+O vm-import-controller introduz dois CRDs.
+
+=== Origens
+
+As fontes permitem que os usuários definam clusters de origem válidos.
+
+Por exemplo:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VmwareSource
+metadata:
+  name: vcsim
+  namespace: default
+spec:
+  endpoint: "https://vscim/sdk"
+  dc: "DCO"
+  credentials:
+    name: vsphere-credentials
+    namespace: default
+----
+
+O segredo contém as credenciais para o endpoint do vCenter:
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+----
+
+Como parte do processo de reconciliação, o controlador fará login no vCenter e verificará se o `dc` especificado na especificação de origem é válido.
+
+Uma vez que essa verificação seja aprovada, a origem é marcada como pronta e pode ser usada para migrações de VM.
+
+[,shell]
+----
+$ kubectl get vmwaresource.migration
+NAME    STATUS
+vcsim   clusterReady
+----
+
+Para clusters de origem baseados em OpenStack, uma definição de exemplo é a seguinte:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OpenstackSource
+metadata:
+  name: devstack
+  namespace: default
+spec:
+  endpoint: "https://devstack/identity"
+  region: "RegionOne"
+  credentials:
+    name: devstack-credentials
+    namespace: default
+----
+
+O segredo contém as credenciais para o endpoint do OpenStack:
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devstack-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "project_name": "admin"
+  "domain_name": "default"
+  "ca_cert": "pem-encoded-ca-cert"
+----
+
+Como parte do processo de reconciliação, o controlador tenta listar as máquinas virtuais no projeto e marca a origem como pronta.
+
+[,shell]
+----
+$ kubectl get openstacksource.migration
+NAME       STATUS
+devstack   clusterReady
+----
+
+Para fontes baseadas em OVA, uma definição de exemplo é a seguinte:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OvaSource
+metadata:
+  name: example
+  namespace: default
+spec:
+  url: "http://192.168.0.1:8080/example.ova"
+  httpTimeoutSeconds: 300
+  credentials:
+    name: example-ova-credentials
+    namespace: default
+----
+
+O campo opcional `httpTimeoutSeconds` permite especificar o tempo máximo (em segundos) que {harvester-product-name} aguarda para que uma solicitação HTTP seja concluída. Esse período abrange toda a transação, incluindo o estabelecimento da conexão, o tratamento de redirecionamentos e a leitura do corpo da resposta. Quando o valor é `0`, o recurso de timeout é desativado. O valor padrão é `600` (10 minutos).
+
+Ao configurar o segredo, você pode incluir credenciais de autenticação básica para a URL e um certificado CA se o endpoint usar HTTPS.
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata: 
+  name: example-ova-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "ca.crt": "pem-encoded-ca-cert"
+----
+
+Como parte do processo de reconciliação, o controlador emite uma solicitação HEAD para a URL especificada para confirmar sua validade antes de marcar a origem como pronta.
+
+[,shell]
+----
+$ kubectl get ovasource.migration
+NAME      STATUS
+example   clusterReady
+----
+
+=== VirtualMachineImport
+
+O CRD VirtualMachineImport fornece uma maneira para os usuários definirem uma VM de origem e mapearem para o cluster de origem real para realizar a exportação/importação de VM.
+
+Um exemplo de VirtualMachineImport é assim:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: alpine-export-test
+  namespace: default
+spec:
+  virtualMachineName: "alpine-export-test"
+  folder: "Discovered VM"
+  networkMapping:
+  - sourceNetwork: "dvSwitch 1"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "dvSwitch 2"
+    destinationNetwork: "default/vlan2"
+    networkInterfaceModel: "e1000"
+  defaultNetworkInterfaceModel: "virtio"
+  skipPreflightChecks: false
+  storageClass: "my-storage-class"
+  defaultDiskBusType: "scsi"
+  sourceCluster:
+    name: vcsim
+    namespace: default
+    kind: VmwareSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+  forcePowerOff: false
+  gracefulShutdownTimeoutSeconds: 30
+----
+
+Isso solicita ao controlador que exporte a máquina virtual chamada `alpine-export-test` no cluster VMware de origem para ser exportada, processada e recriada no cluster {harvester-product-name}.
+
+O controlador verifica a configuração antes de iniciar o processo de importação e cancela a importação quando detecta erros, como xref:storage/storageclass.adoc[StorageClasses] ou redes desconhecidas. Essas verificações estão habilitadas por padrão, mas podem ser desativadas definindo `skipPreflightChecks` como `true`.
+
+A duração do processo de importação depende do tamanho da máquina virtual. Embora o processo de importação possa levar algum tempo, você deve ver `VirtualMachineImages` criado para cada disco na máquina virtual definida.
+
+Se a máquina virtual de origem estiver colocada em uma pasta, você pode especificar o nome da pasta no campo opcional `folder`.
+
+A lista de itens em `networkMapping` definirá como as interfaces de rede de origem são mapeadas para as Redes {harvester-product-name}.
+
+Se necessário, você pode especificar o modelo de cada interface de rede de origem individualmente usando o campo `networkInterfaceModel`. Os valores válidos são `e1000`, `e1000e`, `ne2k_pci`, `pcnet`, `rtl8139` e `virtio`.
+
+Especificar o modelo de interface padrão usando o campo `defaultNetworkInterfaceModel` é particularmente útil nas seguintes situações:
+
+* Você deseja substituir o modelo padrão usado quando a detecção automática não funciona para importações do VMware ou o modelo padrão usado para todas as interfaces de rede para importações do OpenStack.
+* Nenhum mapeamento de rede é fornecido e a interface de rede `pod-network` é criada automaticamente.
+
+Se você não especificar um valor, `virtio` é usado por padrão.
+
+Se uma correspondência não for encontrada, cada interface de rede não correspondida é anexada ao `managementNetwork` padrão.
+
+O campo `storageClass` especifica a xref:storage/storageclass.adoc[StorageClass] a ser usada para imagens e provisionamento de volumes persistentes durante o processo de importação. Se nenhum valor for especificado, {harvester-product-name} usa a StorageClass padrão.
+
+O campo `defaultDiskBusType` permite que você especifique o tipo de barramento para discos importados. {harvester-product-name} usa este campo da seguinte forma:
+
+* Fontes do VMware: O valor é usado apenas se {harvester-product-name} não conseguir detectar automaticamente o tipo de barramento.
+* Fontes do OpenStack: O valor é usado para todos os discos importados.
+* Fontes de Open Virtual Appliance (OVA): O valor é usado apenas se {harvester-product-name} não conseguir detectar automaticamente o tipo de barramento.
+
+Os valores válidos são `sata`, `scsi`, `usb` e `virtio`. Se você não especificar um valor, `virtio` é usado por padrão.
+
+Por padrão, o controlador de importação de VM tenta desligar graciosamente o sistema operacional convidado da máquina virtual de origem antes de iniciar o processo de importação. Se a máquina virtual não for desligada graciosamente dentro de um período específico, um desligamento forçado é realizado. Você pode ajustar esse período de tempo para o desligamento gracioso alterando o valor do campo `gracefulShutdownTimeoutSeconds`, que é definido como `60` segundos por padrão. Um desligamento forçado sem tentar um desligamento gracioso pode ser realizado definindo o campo `forcePowerOff` como `true`.
+
+Se você estiver importando uma máquina virtual baseada em VMware, o comportamento do controlador de importação de VM depende de https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools] estar instalado na máquina virtual.
+
+|===
+| Status do VMware Tools | Comportamento do vm-import-controller
+
+| Instalado
+| Tenta o desligamento gracioso descrito antes de iniciar o processo de importação.
+
+| Não instalado
+| Exibe logs semelhantes a `handler virtualmachine-import-job-change: failed to shutdown the guest OS of the source VM: ServerFaultCode: Cannot complete operation because VMware Tools is not running in this virtual machine., requeuing`
+|===
+
+[NOTE]
+====
+O vm-import-controller suporta apenas os campos `forcePowerOff` e `gracefulShutdownTimeoutSeconds` para VMware, pois o OpenStack realiza automaticamente uma combinação de desligamento gracioso e desligamento forçado.
+====
+
+Uma vez que a máquina virtual tenha sido importada com sucesso, o objeto refletirá o status:
+
+[,shell]
+----
+$ kubectl get virtualmachineimport.migration
+NAME                    STATUS
+alpine-export-test      virtualMachineRunning
+openstack-cirros-test   virtualMachineRunning
+----
+
+Da mesma forma, os usuários podem definir um VirtualMachineImport para uma fonte OpenStack também:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: openstack-demo
+  namespace: default
+spec:
+  virtualMachineName: "openstack-demo" #Name or UUID for instance
+  networkMapping:
+  - sourceNetwork: "shared"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "public"
+    destinationNetwork: "default/vlan2"
+  sourceCluster:
+    name: devstack
+    namespace: default
+    kind: OpenstackSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+----
+
+[NOTE]
+====
+O OpenStack permite que os usuários tenham várias instâncias com o mesmo nome. Em tal cenário, os usuários são aconselhados a usar o ID da Instância. A lógica de reconciliação tenta realizar uma busca de nome para ID quando um nome é utilizado.
+====
+
+==== Problemas conhecidos
+
+===== O nome da máquina virtual de origem não está em conformidade com o RFC1123
+
+Ao criar um objeto de máquina virtual, o complemento vm-import-controller usa o nome da máquina virtual de origem, que pode não atender aos critérios de nomenclatura do objeto Kubernetes https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names[naming criteria]. Você pode precisar renomear a máquina virtual de origem para permitir a conclusão bem-sucedida da importação.
+
+===== Máquina virtual baseada em VMware sem VMware Tools não é migrada
+
+Quando você tenta importar uma máquina virtual baseada em VMware na versão {harvester-product-name} v1.6.0, os seguintes problemas ocorrem se https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools] não estiver instalado na máquina virtual:
+
+* O vm-import-controller não desliga graciosamente o sistema operacional convidado.
+* Quando o período de desligamento gracioso (`gracefulShutdownTimeoutSeconds`) expira, o vm-import-controller não força um desligamento forçado.
+* A máquina virtual não é migrada do VMware.
+
+Para resolver o problema, execute uma das seguintes soluções alternativas:
+
+* Desligue a máquina virtual antes de migrá-la para {harvester-product-name}. 
+* Na especificação CRD `VirtualMachineImport`, defina o campo `forcePowerOff` para `true`.
+* Instale o VMware Tools ou https://knowledge.broadcom.com/external/article?legacyId=2073803[open-vm-tools].
+
+===== A estratégia de despejo não está definida.
+
+O campo `evictionStrategy` não é configurado automaticamente durante o processo de importação da máquina virtual. Isso impede a migração ao vivo da máquina virtual.
+
+Para resolver o problema, execute o seguinte comando:
+
+[,shell]
+----
+kubectl patch VirtualMachine <vm-name> -n <namespace> --type=merge -p '{
+  "spec": {
+    "template": {
+      "spec": {
+        "evictionStrategy": "LiveMigrateIfPossible"
+      }
+    }
+  }
+}'
+----
+
+Para atualizar todas as máquinas virtuais com uma configuração `evictionStrategy` ausente, execute o seguinte comando:
+
+[,shell]
+----
+for vm in $(kubectl get VirtualMachine -A -o json | jq -r '.items[] | select(.spec.template.spec.evictionStrategy == null) | "\(.metadata.namespace):\(.metadata.name)"'); do \
+  kubectl patch VirtualMachine ${vm#*:} -n ${vm%:*} --type=merge -p '{"spec":{"template":{"spec":{"evictionStrategy":"LiveMigrateIfPossible"}}}}'; \
+done
+----
+
+Você deve reiniciar a máquina virtual para aplicar as alterações.

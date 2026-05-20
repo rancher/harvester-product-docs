@@ -1,0 +1,146 @@
+= Création d'un cluster Kubernetes RKE2
+:revdate: 2025-06-09
+:page-revdate: {revdate}
+
+Vous pouvez désormais provisionner des clusters Kubernetes {rke2-product-name} au-dessus du cluster {harvester-product-name} dans {rancher-product-name} en utilisant le pilote de nœud Harvester intégré.
+
+image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+
+[NOTE]
+====
+
+* Un réseau xref:../../../networking/vm-network.adoc#_vlan_network[VLAN] est requis pour le pilote de nœud Harvester.
+* Le provisionnement des clusters Kubernetes RKE2 implique la configuration de l'adresse IP des machines virtuelles sous-jacentes. Vous pouvez le faire en utilisant un serveur DHCP sur le réseau VLAN auquel les machines virtuelles sont connectées. Si un tel serveur n'existe pas sur le réseau, vous pouvez utiliser la fonction xref:../../../add-ons/vm-dhcp-controller.adoc[DHCP géré] pour configurer l'adresse IP.
+* Le pilote de nœud Harvester ne prend en charge que les images cloud.
+* Pour les exigences de port des clusters invités déployés dans {harvester-product-name}, veuillez vous référer à la documentation xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[ici].
+* Pour la matrice de support de RKE2 avec le fournisseur de cloud Harvester, veuillez vous référer au site web https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[ici].
+====
+
+== Avis de compatibilité descendante
+
+[NOTE]
+====
+Veuillez noter un problème de compatibilité descendante connu si vous utilisez la version du fournisseur de cloud Harvester *v0.2.2* ou supérieure.  Si votre version {harvester-product-name} est inférieure à *v1.2.0* et que vous avez l'intention d'utiliser des versions RKE2 plus récentes (c'est-à-dire, >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`), il est essentiel de mettre à niveau votre cluster {harvester-product-name} vers v1.2.0 ou une version supérieure avant de procéder à la mise à niveau du cluster Kubernetes invité ou du fournisseur de cloud Harvester.
+
+Pour une matrice de support détaillée, veuillez vous référer à la section *Pilote Harvester CCM & CSI avec les versions RKE2* du https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[site officiel].
+====
+
+== Créez vos identifiants cloud
+
+. Cliquez sur *☰ > Gestion des clusters*.
+. Cliquez sur *Identifiants cloud*.
+. Cliquez sur *Create*.
+. Cliquez sur *Harvester*.
+. Entrez le nom de votre identifiant cloud
+. Sélectionnez "Cluster Harvester importé".
+. Cliquez sur *Create*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Créez un cluster Kubernetes RKE2
+
+Les utilisateurs peuvent créer un cluster Kubernetes RKE2 depuis la page *Gestion des clusters* via le pilote de nœud RKE2.
+
+. Sélectionnez le menu *Clusters*.
+. Cliquez sur le bouton *Créer*.
+. Basculez l'interrupteur vers *RKE2/K3s*.
+. Sélectionnez le pilote de nœud Harvester.
+. Sélectionnez un *Identifiant Cloud*.
+. Entrez le *Nom du cluster* (obligatoire).
+. Entrez l'*Espace de noms* (obligatoire).
+. Entrez l'*Image* (obligatoire).
+. Entrez le *Nom du réseau* (obligatoire).
+. Entrez *Utilisateur SSH* (obligatoire).
+. (optionnel) Configurez le menu:Afficher les options avancées[Données utilisateur] pour installer les paquets requis de la VM.
++
+[,yaml]
+----
+#cloud-config
+packages:
+  - iptables
+----
++
+[NOTE]
+====
+Les réseaux Calico et Canal nécessitent que le paquet `iptables` ou `xtables-nft` soit installé sur le nœud. Pour plus d'informations, voir https://documentation.suse.com/cloudnative/rke2/latest/en/known_issues.html#_canal_and_ip_exhaustion[Canal et épuisement des adresses IP] dans la documentation RKE2.
+====
+
+. Cliquez sur *Create*.
++
+image:rancher/create-rke2-harvester-cluster-1.png[créer-cluster-harvester-rke2-1]
+image:rancher/create-rke2-harvester-cluster-2.png[créer-cluster-harvester-rke2-2]
+image:rancher/create-rke2-harvester-cluster-3.png[créer-cluster-harvester-rke2-3]
++
+[NOTE]
+====
+* RKE2 v1.21.5+rke2r2 ou supérieur intègre le fournisseur de cloud Harvester et le pilote CSI invité.
+* Seuls les clusters {harvester-product-name} importés sont pris en charge par le pilote de nœud Harvester.
+====
+
+=== Ajouter une affinité de nœud
+
+Le pilote de nœud Harvester prend désormais en charge la planification d'un groupe de machines sur des nœuds particuliers grâce aux règles d'affinité des nœuds, ce qui peut offrir une haute disponibilité et une meilleure utilisation des ressources.
+
+L'affinité des nœuds peut être ajoutée aux pools de machines lors de la création du cluster{nbsp}:
+
+. Cliquez sur le bouton `Show Advanced` et cliquez sur le `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Définissez la priorité à `Required` si vous souhaitez que le planificateur ne programme les machines que lorsque les règles sont respectées.
+. Cliquez sur `Add Rule` pour spécifier les règles d'affinité des nœuds, par exemple, pour le cas d'utilisation xref:./node-driver.adoc#_topology_spread_constraints[topology spread constraints], vous pouvez ajouter les étiquettes `region` et `zone` comme suit{nbsp}:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+=== Ajouter l'affinité de charge de travail
+
+Les règles d'affinité de charge de travail vous permettent de contraindre sur quels nœuds vos machines peuvent être programmées en fonction des étiquettes des charges de travail (VMs et Pods) déjà en cours d'exécution sur ces nœuds, au lieu des étiquettes des nœuds.
+
+Les règles d'affinité de charge de travail peuvent être ajoutées aux pools de machines lors de la création du cluster{nbsp}:
+
+. Sélectionnez *Afficher les options avancées* et choisissez *Ajouter un sélecteur de charge de travail*.
+image:rancher/affinity-rke2-add-workload-selector.png[affinity-add-workload-selector]
+. Sélectionnez *Type*, *Affinity* ou *Anti-Affinity*.
+. Sélectionnez *Priorité*. *Préféré* signifie que c'est une règle optionnelle, et *Requis* signifie une règle obligatoire.
+. Sélectionnez les espaces de noms pour les charges de travail cibles.
+. Sélectionnez *Add Rule* pour spécifier les règles d'affinité de charge de travail.
+. Définissez *Topology Key* pour spécifier la clé d'étiquette qui divise {harvester-product-name} hôtes en différentes topologies.
+
+Consultez la https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod Affinity and Anti-Affinity Documentation] pour plus de détails.
+
+== Mettre à jour le cluster Kubernetes RKE2
+
+Les champs mis en évidence ci-dessous du pool de machines RKE2 représentent les configurations de VM {harvester-product-name}. Toute modification de ces champs déclenchera le reprovisionnement des nœuds.
+
+image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+== Utilisation du pilote de nœud Harvester RKE2 dans un environnement isolé physiquement
+
+Le provisionnement RKE2 repose sur le paquet `qemu-guest-agent` pour obtenir l'adresse IP de la machine virtuelle.
+
+Calico et Canal nécessitent que le paquet `iptables` ou `xtables-nft` soit installé sur le nœud.
+
+Cependant, il se peut qu'il ne soit pas possible d'installer des paquets dans un environnement isolé physiquement.
+
+Vous pouvez aborder les contraintes d'installation avec les options suivantes{nbsp}:
+
+* Option 1. Utilisez une image de VM préconfigurée avec les paquets requis (par exemple, `iptables`, `qemu-guest-agent`).
+* Option 2. Allez à *Afficher les options avancées* > *Données utilisateur* pour permettre aux VM d'installer les paquets requis via un proxy HTTP(S).
+
+Exemple de données utilisateur dans le modèle de nœud {harvester-product-name}{nbsp}:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

@@ -1,0 +1,92 @@
+= Creando un clúster de Kubernetes K3s
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Ahora puedes aprovisionar clústeres de Kubernetes K3s sobre el clúster de Harvester en Rancher utilizando el controlador de nodo de Harvester integrado.
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* El controlador de nodo de Harvester K3s está en *Tech Preview*.
+* Aprovisionar clústeres de Kubernetes K3s implica configurar la dirección IP de las máquinas virtuales subyacentes. Puedes hacerlo utilizando un servidor DHCP en la red VLAN a la que están conectadas las máquinas virtuales. Si no existe un servidor así en la red, puedes utilizar la función xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] para configurar la dirección IP.
+* xref:../../../networking/vm-network.adoc#_vlan_network[La red VLAN] es necesaria para el controlador de nodo de Harvester.
+* El controlador de nodo de Harvester solo admite imágenes en la nube.
+* Para los requisitos de puertos de los clústeres invitados desplegados dentro de Harvester, consulta los xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[requisitos de puertos para clústeres invitados].
+====
+
+== Crea tus credenciales en la nube
+
+. Haz clic en *☰ > Gestión de Clústeres*.
+. Haz clic en *Credenciales en la nube*.
+. Haga clic en *Crear*.
+. Haz clic en *Harvester*.
+. Introduce el nombre de tu credencial en la nube
+. Selecciona "Clúster Harvester Importado".
+. Haga clic en *Crear*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Crea un clúster de Kubernetes K3s
+
+Puedes crear un clúster de Kubernetes K3s desde la página de *Gestión de Clústeres* a través del controlador de nodo K3s.
+
+. Haz clic en el menú *Clústeres*.
+. Haz clic en el botón *Crear*.
+. Alternar el interruptor a *RKE2/K3s*.
+. Haz clic en el controlador de nodo Harvester.
+. Haz clic en una *credencial en la nube*.
+. Introduce *Nombre del clúster* (requerido).
+. Introduce *Espacio de nombres* (requerido).
+. Introduce *Imagen* (requerido).
+. Introduce *Nombre de red* (requerido).
+. Introduce *Usuario SSH* (requerido).
+. Haga clic en *Crear*.
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== Añadir afinidad de nodo
+
+El controlador de nodo Harvester ahora admite la programación de un grupo de máquinas en nodos particulares a través de las reglas de afinidad de nodo. Esto proporciona alta disponibilidad y mejor utilización de recursos.
+
+La afinidad de nodo se puede añadir a los grupos de máquinas durante la creación del clúster:
+
+. Haz clic en el botón `Show Advanced` y haz clic en el `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Establecer la prioridad a `Required` si deseas que el programador asigne las máquinas solo cuando se cumplan las reglas.
+. Haz clic en `Add Rule` para especificar las reglas de afinidad de nodo, por ejemplo, para el caso de uso de xref:./node-driver.adoc#_topology_spread_constraints[restricciones de dispersión de topología], puedes añadir las etiquetas `region` y `zone` de la siguiente manera:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+. Haz clic en `Create` para guardar la plantilla de nodo. Después de que el clúster esté instalado, puedes comprobar si sus nodos de máquina están programados de acuerdo con las reglas de afinidad.
+
+== Usando el controlador de nodo Harvester K3s en un entorno aislado
+
+La provisión de K3s depende del paquete `qemu-guest-agent` para obtener la IP de la máquina virtual.
+
+Sin embargo, puede que no sea factible instalar paquetes en un entorno aislado.
+
+Puedes abordar las limitaciones de instalación con las siguientes opciones:
+
+* Opción 1. Usa una imagen de VM preconfigurada con los paquetes requeridos (por ejemplo, `iptables`, `qemu-guest-agent`).
+* Opción 2. Ve a *Mostrar Avanzado* > *Datos del Usuario* para permitir que las VMs instalen los paquetes requeridos a través de un proxy HTTP(S).
+
+Ejemplo de `user data` en la plantilla de nodo Harvester:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

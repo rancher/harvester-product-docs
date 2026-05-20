@@ -1,0 +1,140 @@
+= CloudInit CRD
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+您可以使用 `CloudInit` CRD 手动或通过 GitOps 解决方案配置 {harvester-product-name} 操作系统设置。
+
+== 背景
+
+{harvester-product-name} 操作系统使用 https://github.com/rancher/elemental-toolkit[elemental-toolkit]，它具有独特的 https://rancher.github.io/elemental-toolkit/docs/reference/cloud_init/[cloud-init 支持] 形式。
+
+在安装过程中配置的设置会写入 `elemental` cloud-init 文件，位于 `/oem` 目录中。由于操作系统是不可变的，cloud-init 文件确保每次重启时应用节点特定的设置。
+
+`CloudInit` CRD 通过 Kubernetes CRD 暴露 cloud-init 文件。这使您可以在安装后修改节点特定的设置，而无需采取措施使根文件系统可写。
+
+此外，`CloudInit` CRD 会持久化并与底层主机同步，以便在节点重启和升级时不会丢失直接对操作系统所做的更改。
+
+[NOTE]
+====
+
+`CloudInit` CRD 是一个集群范围的资源。确保您的用户帐户具有访问该资源所需的权限（通过 {rancher-product-name} 基于角色的访问控制）。
+====
+
+
+== 入门
+
+以下示例将 SSH 密钥添加到现有 {harvester-product-name} 集群中的所有节点。
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: my-ssh-keys
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-my-ssh-keys
+  contents: |
+    stages:
+      network:
+        - name: "add my ssh keys"
+          authorized_keys:
+            rancher:
+            - ssh-rsa key1
+            - ssh-rsa key2
+  paused: false
+----
+
+`spec` 字段包含以下内容：
+
+* `matchSelector (required)`：用于识别必须应用更改的节点的标签选择器。您可以使用 `harvesterhci.io/managed: "true"` 标签选择所有节点。
+* `filename (required)`：`/oem` 中的文件名。`/oem` 中的 cloud-init 文件按字母顺序应用。这可以确保在启动期间应用文件更改。
+* `content (required)`：写入目标节点的 Elemental cloud-init 资源的内联内容。
+* `paused (optional)`：用于暂停 `CloudInit` CRD 的协调。{harvester-product-name} 控制器监视由 `CloudInit` CRD 管理的 Elemental cloud-init 文件。对这些文件所做的直接更改会立即恢复到定义状态，除非 CRD 被暂停。
+
+一旦对象创建完成，您可以登录目标节点以验证结果。
+
+在以下示例中，创建了一个名为 `/oem/99-my-ssh-keys.yaml` 的文件，并由 {harvester-product-name} 控制器进行监控。
+
+----
+harvester-qhgd4:/oem # more 99-my-ssh-keys.yaml
+stages:
+  network:
+    - name: "add my ssh keys"
+      authorized_keys:
+        rancher:
+        - ssh-rsa key1
+        - ssh-rsa key2
+----
+
+`status` 子资源可用于跟踪对底层节点更改的推出。
+
+在以下示例中，`status` 的值表示该更改已应用于集群中的所有三个节点。
+
+----
+status:
+  rollouts:
+    harvester-kfs2c:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-qhgd4:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-rmvzg:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+[NOTE]
+====
+
+一旦应用了 cloud-init 更改，您必须重启节点以确保 `elemental-toolkit` 将所请求的更改应用于操作系统。
+====
+
+
+删除`CloudInit` CRD会导致从底层节点中移除相关文件。与其他 cloud-init 资源一样，直到受影响的节点重启后，此更改的效果才会显现。
+
+您被鼓励利用 https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] 和 `CloudInit` CRD 来管理对 {harvester-product-name} 操作系统的更改。

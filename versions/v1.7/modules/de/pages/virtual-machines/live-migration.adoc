@@ -1,0 +1,195 @@
+= Live-Migration
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+Die Live-Migration bedeutet, eine virtuelle Maschine ohne Ausfallzeit auf einen anderen Host zu verschieben. Ein paar umfassende Prozesse und Aufgaben werden im Hintergrund durchgeführt, um die Live-Migration zu erfüllen.
+
+== Voraussetzungen
+
+Die Live-Migration kann erfolgen, wenn die folgenden Anforderungen erfüllt sind:
+
+* Zusätzlich zum aktuellen Knoten hat der Cluster mindestens einen planbaren Knoten, der allen Planungsregeln der virtuellen Maschine entspricht.
+
+* Der Zielknoten der Migration hat genügend verfügbare Ressourcen, um die virtuelle Maschine zu hosten.
+
+* Die CPU, der Speicher, xref:virtual-machines/create-vm.adoc#_volumes[Volumes], Geräte und andere Ressourcen, die von der virtuellen Maschine angefordert werden, können auf dem Zielknoten der Migration kopiert oder neu erstellt werden, während die Quell-VM weiterhin läuft.
+
+== Nicht migrierbare virtuelle Maschinen
+
+Eine virtuelle Maschine wird als nicht migrierbar betrachtet, wenn sie eines oder mehrere der folgenden Merkmale aufweist:
+
+* Volume mit den folgenden Eigenschaften:
+
+** Typ: `CD-ROM` oder `Container Disk`
+** Zugriffsmodus: `ReadWriteOnce`
+** Anzahl der Replikate der StorageClass: `1` (Dies wird nicht in allen Fällen erkannt.)
+
+* Hostgeräte-Passthrough wie `PCI` und `vGPU`
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Node-Selector], der die virtuelle Maschine an einen bestimmten Knoten bindet
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Planungsregeln], die nur für einen Knoten zutreffen.
+
+Die folgenden sind Beispiele für Regelbedingungen, die zur Laufzeit überprüft werden:
+
+* Die virtuelle Maschine ist an ein Cluster-Netzwerk angeschlossen, das nur einen Knoten abdeckt.
+
+* CPU-Pinning ist auf der virtuellen Maschine aktiviert, und der CPU-Manager ist nur auf einem Knoten aktiviert.
+
+* Die virtuelle Maschine hat strenge Anti-Affinitätsregeln, die verhindern, dass sie zusammen mit bestimmten anderen virtuellen Maschinen platziert wird.
+
+Für weitere Informationen siehe xref:virtual-machines/create-vm.adoc#_automatically_applied_affinity_rules[Automatisch angewendete Affinitätsregeln].
+
+[NOTE]
+====
+Um die virtuelle Maschine live zu migrieren, müssen zunächst nicht migrierbare Geräte entfernt und planbare Knoten hinzugefügt werden.
+====
+
+== Live-migrierbare virtuelle Maschinen
+
+Virtuelle Maschinen, die nicht die Eigenschaften nicht migrierbarer virtueller Maschinen haben, können live migriert werden.
+
+== Wie Migration funktioniert
+
+=== `VirtualMachineInstanceMigration` Objekt
+
+Wenn eine Migration der virtuellen Maschine ausgelöst wird, wird ein `VirtualMachineInstanceMigration` Objekt erstellt, um den Zustand und den Fortschritt der Operation zu verfolgen. Der {harvester-product-name} Controller korreliert das `VirtualMachineInstanceMigration` Objekt mit dem `VirtualMachineInstance` Objekt, indem sichergestellt wird, dass die Identität des Instanzobjekts im Migrationsobjekt widergespiegelt wird.
+
+Im folgenden Beispiel hat die virtuelle Maschine mit dem Namen `demo` ein zugehöriges Migrationsobjekt. Die UID dieses Objekts wird während der Migration zur `.status.migrationState.migrationUID` Eigenschaft des Instanzobjekts hinzugefügt.
+
+[bash, shell]
+----
+$ kubectl get vmi demo -ojsonpath={.status.migrationState.migrationUID}
+
+1d6d7273-275d-48e0-bb76-62e240b42aaf
+----
+
+Der Name des Instanzobjekts wird zur `.spec.vmiName` Eigenschaft des Migrationsobjekts hinzugefügt.
+
+[bash, shell]
+----
+$ kubectl get vmim demo-6crrk -ojsonpath={.spec.vmiName}
+
+Demo
+----
+
+Das Format des Namens des `VirtualMachineInstanceMigration` Objekts variiert, je nachdem, ob die Migration manuell oder automatisch ausgelöst wird.
+
+Wenn eine Migration über den **Migrieren** xref:#_starting_a_migration[Menüeintrag] ausgelöst wird, wird der Name des `VirtualMachineInstanceMigration` Objekts mit dem Namen der virtuellen Maschine und einer zufälligen Zeichenfolge (zum Beispiel `vm1-a3d1f`) vorangestellt.
+
+Wenn eine Migration xref:#_automatically_triggered_batch_migration[automatisch] ausgelöst wird, wird der Name des `VirtualMachineInstanceMigration`-Objekts mit `kubevirt-evacuation-` und einer zufälligen Zeichenfolge (zum Beispiel `kubevirt-evacuation-9c485`) vorangestellt.
+
+[NOTE]
+====
+Die {harvester-product-name} Benutzeroberfläche gibt die Quelle der Migration nicht an. Sie müssen den Namen des `VirtualMachineInstanceMigration`-Objekts überprüfen, um diese Informationen abzurufen.
+====
+
+=== CPU-Modell-Abgleich
+
+Jeder Knoten hat mehrere CPU-Modelle, die mit verschiedenen Schlüsseln gekennzeichnet sind.
+
+* Primäres CPU-Modell: `host-model-cpu.node.kubevirt.io/{cpu-model}`
+* Unterstützte CPU-Modelle: `cpu-model.node.kubevirt.io/{cpu-model}`
+* Unterstützte CPU-Modelle für die Migration: `cpu-model-migration.node.kubevirt.io/{cpu-model}`
+
+Während der Live-Migration überprüft der Controller den Wert von `spec.domain.cpu.model` im VirtualMachineInstance (VMI) CR, der von `spec.template.spec.domain.cpu.model` im VirtualMachine (VM) CR abgeleitet ist. Wenn der Wert von `spec.template.spec.domain.cpu.model` nicht gesetzt ist, verwendet der Controller den Standardwert `host-model`.
+
+Wenn `host-model` verwendet wird, ruft der Prozess den Wert des primären CPU-Modells ab und füllt `spec.NodeSelectors` des neu erstellten Pods mit dem Label `cpu-model-migration.node.kubevirt.io/{cpu-model}`.
+
+Alternativ können Sie das CPU-Modell in `spec.domain.cpu.model` anpassen. Wenn das CPU-Modell beispielsweise `XYZ` ist, füllt der Prozess `spec.NodeSelectors` des neu erstellten Pods mit dem Label `cpu-model.node.kubevirt.io/XYZ`.
+
+Allerdings erlaubt `host-model` nur die Migration der VM zu einem Knoten mit demselben CPU-Modell. Weitere Informationen finden Sie unter xref:#_limitations[Einschränkungen].
+
+== Starten einer Migration
+
+. Gehen Sie zur Seite *Virtuelle Maschinen*.
+. Suchen Sie die virtuelle Maschine, die Sie migrieren möchten, und wählen Sie *⋮ > Migrieren* aus.
+. Wählen Sie den Knoten aus, zu dem Sie die virtuelle Maschine migrieren möchten. Klicken Sie auf *Anwenden*.
+
+image::vm/migrate-action.png[]
+
+[NOTE]
+====
+Die Menüoption **Migrieren** ist in den folgenden Situationen nicht verfügbar:
+
+* Der Cluster hat nur einen Knoten.
+* Die virtuelle Maschine ist [nicht migrierbar](#non-migratable-virtual-machines).
+* Die virtuelle Maschine hat bereits einen laufenden oder ausstehenden Migrationsprozess.
+====
+
+image::vm/migrate.png[]
+
+== Abbrechen einer Migration
+
+. Gehen Sie zur Seite *Virtuelle Maschinen*.
+. Suchen Sie die virtuelle Maschine im Status "Migration", die Sie abbrechen möchten. Wählen Sie *⋮ -> Migration abbrechen*.
+
+[NOTE]
+====
+* Der Menüpunkt **Migration abbrechen** ist verfügbar, wenn die virtuelle Maschine bereits einen laufenden oder ausstehenden Migrationsprozess hat.
+
+* Verwenden Sie diese UI-Funktion nicht, wenn der Migrationsprozess mit xref:#_automatically_triggered_batch_migration[Batch-Migration] erstellt wurde. Weitere Informationen finden Sie unter xref:#_virtualmachineinstancemigration_object[`VirtualMachineInstanceMigration` Objekt].
+====
+
+== Automatisch ausgelöste Batch-Migration
+
+xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[Upgrades] und xref:hosts/hosts.adoc#_node_maintenance[Knotenwartung] profitieren beide von der Live-Migration. Der zugrunde liegende Prozess, der als *Batch-Migration* bezeichnet wird, unterscheidet sich geringfügig von dem, der in xref:#_starting_a_migration[Starten einer Migration] beschrieben ist. Dieser Prozess umfasst die folgenden Schritte:
+
+. Der Controller überwacht eine spezielle Markierung im Knotenobjekt.
+
+. Der Controller erstellt ein `VirtualMachineInstanceMigration` Objekt für jede xref:#_live_migratable_virtual_machines[live-migrierbare virtuelle Maschine] auf dem aktuellen Knoten.
+
+. Die Migrationen werden in Warteschlangen gestellt, intern geplant und in Chargen verarbeitet. Die {harvester-product-name} UI zeigt die Status **Ausstehende Migration** und **Migrierend** an, um den Fortschritt anzuzeigen.
+
+. Der Controller überwacht die Verarbeitung und wartet, bis alle abgeschlossen sind oder abgelaufen sind.
+
+== Migrationszeitüberschreitungen
+
+=== Abschlusszeitüberschreitung
+
+Der Live-Migrationsprozess kopiert die Arbeitsspeicherseiten und Festplattenblöcke der virtuellen Maschine zum Ziel. In bestimmten Fällen kann die virtuelle Maschine mit einer höheren Rate auf verschiedene Arbeitsspeicherseiten oder Festplattenblöcke schreiben, als diese kopiert werden können. Infolgedessen wird der Migrationsprozess daran gehindert, in einem angemessenen Zeitrahmen abgeschlossen zu werden.
+
+Die Live-Migration wird abgebrochen, wenn sie die Abschlusszeitüberschreitung von 800 s pro GiB Daten überschreitet. Beispielsweise läuft eine virtuelle Maschine mit 8 GiB Arbeitsspeicher nach 6400 Sekunden ab.
+
+=== Zeitüberschreitung bei Fortschritt
+
+Die Live-Migration wird ebenfalls abgebrochen, wenn das Kopieren des Speichers in 150 Sekunden keinen Fortschritt macht.
+
+== Nutzungsbeschränkungen
+
+=== CPU-Modelle
+
+`host-model` erlaubt nur die Migration der virtuellen Maschine zu einem Knoten mit demselben CPU-Modell. Das Festlegen eines CPU-Modells ist jedoch nicht immer erforderlich. Wenn kein CPU-Modell angegeben ist, müssen Sie die virtuelle Maschine herunterfahren, ein CPU-Modell zuweisen, das von allen Knoten unterstützt wird, und dann die virtuelle Maschine neu starten.
+
+Beispiel:
+
+* Ein Knoten: `host-model-cpu.node.kubevirt.io/XYZ` `cpu-model-migration.node.kubevirt.io/XYZ` `cpu-model.node.kubevirt.io/123`
+* Knoten B: `host-model-cpu.node.kubevirt.io/ABC` `cpu-model-migration.node.kubevirt.io/ABC` `cpu-model.node.kubevirt.io/123`
+
+Die Migration einer virtuellen Maschine mit `host-model` ist nicht möglich, da die Werte von `host-model-cpu.node.kubevirt.io` nicht identisch sind. Beide Knoten unterstützen jedoch das CPU-Modell `123`, sodass Sie jede virtuelle Maschine mit dem CPU-Modell `123` mit einer der folgenden Methoden migrieren können:
+
+* Cluster-Ebene: Führen Sie `kubectl edit kubevirts.kubevirt.io -n harvester-system` aus und fügen Sie `spec.configuration.cpuModel: "123"` hinzu. Diese Änderung betrifft auch neu erstellte virtuelle Maschinen.
+* Einzelne virtuelle Maschinen: Ändern Sie die Konfiguration der virtuellen Maschine, um `spec.template.spec.domain.cpu.model: "123"` einzuschließen.
+
+Beide Methoden erfordern, dass Sie die VMs neu starten. Wenn Sie sicher sind, dass alle Knoten im Cluster ein bestimmtes CPU-Modell unterstützen, können Sie dies auf Cluster-Ebene festlegen, bevor Sie VMs erstellen. Damit vermeiden Sie die Notwendigkeit, die VMs während der Live-Migration neu zu starten (um das CPU-Modell zuzuweisen).
+
+=== Netzwerkausfälle
+
+Die Live-Migration ist sehr empfindlich gegenüber Netzwerkausfällen. Jede Unterbrechung der Netzwerkverbindung zwischen den Quell- und Zielknoten während der Migration kann eine Vielzahl von Ergebnissen haben.
+
+==== `mgmt` Netzwerkausfälle
+
+Die Live-Migration über `mgmt` (das integrierte Cluster-Netzwerk) ist auf die Verfügbarkeit der Verwaltungsoberflächen an den Quell- und Zielknoten angewiesen. `mgmt` Netzwerkausfälle werden als kritisch angesehen, da sie nicht nur den Migrationsprozess stören, sondern auch das gesamte Knotenmanagement beeinträchtigen.
+
+==== VM-Migrationsnetzwerkausfälle
+
+Ein xref:networking/vm-network.adoc[VM-Migrationsnetzwerk] isoliert den Migrationsverkehr von anderen Netzwerkaktivitäten. Während dieses Setup die Migrationsleistung und -zuverlässigkeit verbessert, insbesondere in Umgebungen mit hohem Netzwerkverkehr, macht es den Migrationsprozess auch von der Verfügbarkeit dieses spezifischen Netzwerks abhängig.
+
+Ein Ausfall im VM-Migrationsnetzwerk kann den Migrationsprozess auf folgende Weise beeinflussen:
+
+* Kurze Unterbrechung: Der Migrationsprozess wird abrupt beendet. Sobald die Konnektivität wiederhergestellt ist, wird der Migrationsprozess fortgesetzt und kann erfolgreich abgeschlossen werden, wenn auch mit einer Verzögerung.
+* Längere Unterbrechung: Der Migrationsprozess läuft ab und schlägt fehl. Die Quell-virtuelle Maschine läuft weiterhin normal auf dem Quellknoten.
+
+Der Migrationsprozess läuft im Peer-to-Peer-Modus, was bedeutet, dass der libvirt-Daemon (libvirtd) auf dem Quellknoten die Migration steuert, indem er den Ziel-Daemon direkt aufruft. Ein integrierter Keepalive-Mechanismus stellt sicher, dass die Clientverbindung während des Migrationsprozesses aktiv bleibt. Wenn die Verbindung für einen bestimmten Zeitraum inaktiv bleibt, wird sie geschlossen und der Migrationsprozess wird abgebrochen.
+
+Standardmäßig ist das Keepalive-Intervall auf 5 Sekunden eingestellt, und die Anzahl der Wiederholungen ist auf 5 festgelegt. Angesichts dieser Standardwerte wird der Migrationsprozess abgebrochen, wenn die Verbindung 30 Sekunden lang inaktiv ist. Der Migrationsprozess kann jedoch früher oder später scheitern, abhängig von den tatsächlichen Clusterbedingungen.

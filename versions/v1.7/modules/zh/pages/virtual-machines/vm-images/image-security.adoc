@@ -1,0 +1,168 @@
+= 图像安全
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+{harvester-product-name} 允许您加密和解密虚拟机镜像。加密机制利用 Linux 内核模块 dm_crypt 和命令行工具 cryptsetup。
+
+[NOTE]
+====
+此功能仅支持 Longhorn V1 数据引擎。您无法加密和解密存储在其他存储解决方案中的镜像。
+====
+
+== 先决条件
+
+准备以下资源：
+
+* 源虚拟机 image: You can xref:./upload-image.adoc[上传或创建镜像]，使用任何支持的方法。
++
+[CAUTION]
+====
+请勿上传加密的镜像。
+====
++
+* 机密:Kubernetes密钥用作dm_crypt的密码短语。您必须指定`CRYPTO_KEY_VALUE`字段的值。所有其他字段都是固定的。
++
+image::vm/create-encryption-used-secret.png[]
++
+密钥示例：
++
+[,YAML]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: encryption
+  namespace: default
+data:
+  CRYPTO_KEY_CIPHER: aes-xts-plain64
+  CRYPTO_KEY_HASH: sha256
+  CRYPTO_KEY_PROVIDER: secret
+  CRYPTO_KEY_SIZE: 256
+  CRYPTO_KEY_VALUE: "Your encryption passphrase"
+  CRYPTO_PBKDF: argon2i
+----
++
+[IMPORTANT]
+====
+该示例包含Kubernetes密钥的默认YAML代码。除此之外，您可以使用 https://wiki.archlinux.org/title/Dm-crypt/Device_encryption#Encryption_options_for_LUKS_mode[用于LUKS模式的加密选项]，这是cryptsetup的操作模式。Harvester v1.4.1及更高版本支持这些选项，但您必须验证您的节点是否支持这些选项。
+
+|===
+| 选项 | 可能值
+
+| CRYPTO_KEY_CIPHER
+| aes-xts-plain, aes-xts-plain64, aes-cbc-plain, aes-cbc-plain64, aes-cbc-essiv:sha256
+
+| CRYPTO_KEY_HASH
+| sha256, sha384, sha512
+
+| CRYPTO_KEY_SIZE
+| 256, 384, 512
+
+| CRYPTO_PBKDF
+| argon2i, argon2id, pbkdf2
+|===
+
+您可以使用 kubectl 和 {harvester-product-name} UI（*以 YAML 编辑* 功能）在系统名称空间中创建一个密钥。系统名称空间中的资源不会显示在 *密钥* 屏幕上。
+====
++
+* 存储类：图像使用 Longhorn 加密，因此必须将所需字段传递给 Longhorn CSI 驱动程序。创建存储类时，您可以指定加密密钥。有关更多信息，请参见 xref:./upload-image.adoc#_image_storageclass[图像存储类]。
++ 
+image::vm/create-storage-class.png[]
++
+存储类示例：
++
+[,YAML]
+----
+allowVolumeExpansion: true
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: encryption
+parameters:
+  csi.storage.k8s.io/node-publish-secret-name: encryption
+  csi.storage.k8s.io/node-publish-secret-namespace: default
+  csi.storage.k8s.io/node-stage-secret-name: encryption
+  csi.storage.k8s.io/node-stage-secret-namespace: default
+  csi.storage.k8s.io/provisioner-secret-name: encryption
+  csi.storage.k8s.io/provisioner-secret-namespace: default
+  encrypted: "true"
+  migratable: "true"
+  numberOfReplicas: "3"
+  staleReplicaTimeout: "2880"
+provisioner: driver.longhorn.io
+reclaimPolicy: Delete
+volumeBindingMode: Immediate
+----
++
+[IMPORTANT]
+====
+您可以使用 kubectl 和 {harvester-product-name} UI（*以 YAML 编辑* 功能）在系统名称空间中创建一个密钥。系统名称空间中的资源不会显示在 *密钥* 屏幕上。
+====
+
+== 加密虚拟机镜像
+
+. 在 {harvester-product-name} UI 上，转到 *图像*。
++
+. 单击*创建*。
++
+. 指定名称空间和名称。
++
+. 在 *基本* 选项卡上，选择 *加密*，然后选择源图像。
++
+image::vm/create-encrypted-image.png[]
++
+. 在 *存储* 选项卡上，选择包含与加密相关字段的存储类。
++
+{harvester-product-name} 将所需字段传递给 Longhorn。
++
+image::vm/select-encryption-storage-class.png[]
++
+. 单击*创建*。
+
+== 解密虚拟机镜像
+
+. 在 {harvester-product-name} UI 上，转到 *图像*。
++
+. 单击*创建*。
++
+. 指定名称空间和名称。
++
+. 在 *基本* 选项卡上，选择 *解密*，然后选择源图像。
++
+image::vm/create-decrypted-image.png[]
++
+. 在 *存储* 选项卡上，选择 *harvester-longhorn (默认)* 或其他常用存储类。
++
+{harvester-product-name} 使用您要解密的源图像的存储类。
++
+image::vm/select-normal-storage-class.png[]
++
+. 单击*创建*。
+
+== 使用带有加密卷的镜像
+
+创建虚拟机时，您必须选择要使用的镜像。
+
+image::vm/create.png[]
+
+当虚拟机使用的卷被加密时，*虚拟机* 屏幕会显示以下图标和消息。
+
+image::vm/case1.png[]
+
+image::vm/case2.png[]
+
+要确定哪些卷是加密的，请在 *虚拟机* 详细信息屏幕上的 *卷* 选项卡中检查。
+
+image::vm/volume-detail.png[]
+
+== 与 {rancher-product-name} 集成的高级用法
+
+该密钥是一个未加密的 Base64 编码字符串。为了保护密钥安全，您可以使用项目和名称空间来隔离权限。有关更多信息，请参见 xref:/integrations/rancher/virtualization-management.adoc#_multi_tenancy[多租户]。
+
+== 局限性
+
+您无法执行以下操作：
+
+* 从加密镜像导出新镜像
+* 下载加密镜像
+* 上传加密镜像

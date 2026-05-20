@@ -1,0 +1,312 @@
+= Netzwerk-Best-Practices
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+== Ethernet NICs ersetzen
+
+Sie möchten möglicherweise die Ethernet NICs eines Bare-Metal-Knotens in einem {harvester-product-name} Cluster aus verschiedenen Gründen ersetzen, einschließlich der folgenden:
+
+* Fehlfunktion oder Beschädigung
+* Unzureichende Hardwarekapazität
+* Fehlende Funktionen
+
+Sie können die folgenden Schritte befolgen und sie Schritt für Schritt in jedem Knoten ausführen.
+
+=== Vor dem Austausch Überprüfungen
+
+. Überprüfen Sie, ob die installierte {harvester-product-name}-Version die neuen NICs unterstützt.
+. Testen Sie die neuen NICs in einer Nicht-Produktionsumgebung.
+. Überprüfen Sie auf dem xref:/virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[*Virtuelle Maschinen* Bildschirm] der {harvester-product-name} UI, ob der Status aller VMs entweder __Läuft__ oder __Gestoppt__ ist.
+. Überprüfen Sie auf der xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[eingebetteten {longhorn-product-name} UI], ob der Status aller {longhorn-product-name} Volumes __Gesund__ ist.
+. (Optional) Erzeugen Sie auf dem *Harvester Support* Bildschirm ein xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[Support-Bundle] zu Vergleichszwecken.
+
+=== Informationen sammeln
+
+Bevor Maßnahmen ergriffen werden, ist es wichtig, die aktuellen Netzwerkinformationen und den Status zu sammeln.
+
+* Netzwerkkonfiguration: Standardmäßig erstellt {harvester-product-name} eine Bonding-Schnittstelle mit dem Namen `mgmt-bo` für das Management-Netzwerk. Darüber hinaus gibt es eine Bridge-Schnittstelle mit dem Namen `mgmt-br`, die optional ein VLAN verwenden kann. Jedes Cluster-Netzwerk hat auch eine neue Bonding-Schnittstelle. Sie können die aktuellen Verbindungsdetails mit dem `nmcli` Tool anzeigen.
++
+Beispiel:
++
+----
+$ nmcli
+mgmt-br.2017: connected to vlan-mgmt
+        "mgmt-br.2017"
+        vlan, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        ip4 default
+        inet4 10.115.55.20/21
+        route4 10.115.48.0/21 metric 400
+        route4 default via 10.115.55.254 metric 400
+...
+mgmt-bo: connected to bond-mgmt
+        "mgmt-bo"
+        bond, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        master mgmt-br
+mgmt-br: connected to bridge-mgmt
+        "mgmt-br"
+        bridge, 5C:B9:01:89:C2:F5, sw, mtu 1500
+eno50: connected to bond-slave-eno50
+        "Intel 82599ES SFI/SFP+"
+        ethernet (ixgbe), 5C:B9:01:89:C2:F5, hw, sriov, mtu 1500
+        master mgmt-bo
+...
+----
+
+* Physische NICs: Sie können den Befehl `ip link` verwenden, um verwandte Informationen abzurufen, einschließlich des Status jeder NIC und des entsprechenden Masters (sofern zutreffend).
++
+Beispiel:
++
+----
+  $ ip link | grep master -1
+
+  2: ens3: <BROADCAST,MULTICAST,SLAVE,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master mgmt-bo state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+  --
+
+  4: mgmt-bo: <BROADCAST,MULTICAST,MASTER,UP,LOWER_UP> mtu 1500 qdisc noqueue master mgmt-br state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+----
+
+* PCI-Geräte: Sie können den Befehl `lspci` verwenden, um eine Liste von Geräten abzurufen, mit der Sie die Netzwerk-NICs schnell identifizieren können. Um detaillierte Informationen zu jedem Gerät abzurufen, verwenden Sie den Befehl `lspci -v`.
++
+Beispiel (`lspci`):
++
+----
+  $ lspci
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+----
++
+Beispiel (`lspci -v`):
++
+----
+  $ lspci -v
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    Subsystem: Red Hat, Inc. QEMU Virtual Machine
+    Physical Slot: 3
+    Flags: bus master, fast devsel, latency 0, IRQ 11
+    Memory at fc080000 (32-bit, non-prefetchable) [size=128K]
+    I/O ports at c000 [size=64]
+    Expansion ROM at fc000000 [disabled] [size=512K]
+    Kernel driver in use: e1000
+    Kernel modules: e1000
+----
+
+* Linux-Kernel-Protokoll: Sie können den Befehl `dmesg` verwenden, um Kernel-Nachrichten anzuzeigen, die die meisten erforderlichen Informationen enthalten. Wenn Sie die Nachrichten in `kernel.log` speichern, können Sie den Treiber- und Linkstatus überprüfen.
++
+{harvester-product-name} platziert Sub-NICs in die Bonding-Schnittstellen. Im folgenden Beispiel wird eine zusätzliche Bonding-Schnittstelle mit dem Namen `data-bo` im Cluster erstellt.
++
+----
+  $ grep "(slave" kernel.log  (or: dmesg | grep "(slave")
+
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave eno5): Enslaving as a backup interface with an up link
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave ens4f0): Enslaving as a backup interface with an up link
+  Jan 08 00:37:34 localhost kernel: data-bo: (slave eno6): Enslaving as a backup interface with an up link
+  Jan 08 00:37:35 localhost kernel: data-bo: (slave ens4f1): Enslaving as a backup interface with an up link
+----
++
+Die NICs werden umbenannt.
++
+----
+  $ grep "renamed" kernel.log
+
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.0 eno1: renamed from eth2 // eth2 / eno1 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.3 eno4: renamed from eth6 // eth6 / eno4 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.2 eno3: renamed from eth5 // eth5 / eno3 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.1 eno2: renamed from eth3 // eth3 / eno2 is not used by Harvester
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.0 ens4f0: renamed from eth4
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.1 eno6: renamed from eth1
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 ens4f1: renamed from eth2
+----
++
+Der NIC-Treiber von `eno5(0000:5d:00.0)` ist `(intel) i40e 10Gbps Full Duplex`.
++
+----
+  $ grep "0000:5d:00.0" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: fw 8.71.63306 api 1.11 nvm 10.54.7 [8086:1572] [103c:22fc]
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: MAC address: 48:df:37:24:c2:00
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: FW LLDP is enabled
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: PCI-Express: Speed 8.0GT/s Width x8
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: Features: PF-id[0] VFs: 64 VSIs: 66 QP: 112 RSS FD_ATR FD_SB NTUPLE DCB VxLAN Geneve PTP VEPA
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+----
++
+Die aktivierten NICs werden erkannt.
++
+----
+  $ grep "is Up" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:5d:00.1 eth1: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:af:00.0 eth4: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 eth2: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+----
+
+=== Wartungsmodus aktivieren
+
+. (Optional) Stoppen Sie VMs, die nicht migriert werden können oder nicht migriert werden dürfen.
+. xref:/hosts/hosts.adoc#_node_maintenance[Wartungsmodus aktivieren] auf dem Zielknoten, um alle VMs automatisch auf andere Knoten zu migrieren.
+
+* Warten Sie, bis alles bereit ist, und wiederholen Sie dann die Schritte im Abschnitt <<Pre-Replacement Checks,Vorprüfung>>.
+* Stoppen Sie eine VM manuell in den folgenden Situationen:
+ ** Die VM kann nicht migriert werden.
+ ** Die VM hat Selektoren, die verhindern, dass sie zu anderen Knoten migriert.
+ ** Die VM hat spezielle Hardware (zum Beispiel PCI-Passthrough oder vGPUs), die verhindern, dass sie zu anderen Knoten migriert.
+
+=== (Optional) Netzwerkkonfiguration aktualisieren
+
+Es gibt eine oder mehrere xref:./cluster-network.adoc#_create_a_new_cluster_network[Netzwerkkonfigurationen] unter jedem xref:./cluster-network.adoc#_cluster_network[Clusternetzwerk] auf {harvester-product-name}. Jede `Network Config` wird von einem `VlanConfig` CRD-Objekt unterstützt.
+
+[IMPORTANT]
+====
+Das `Network Config` muss *aktualisiert* werden, wenn die neuen NICs in unterschiedlichen physischen Steckplätzen platziert werden oder unterschiedliche Uplink-Parameter haben.
+====
+
+. Überprüfen Sie den Knoten.
++
+Wenn ein {harvester-product-name} Clusterknoten zu einem `Network Config` gehört, hat das `Node` Objekt ein Etikett mit dem Schlüssel `network.harvesterhci.io/vlanconfig`.
++
+Beispiel:
++
+----
+ apiVersion: v1
+ kind: Node
+ metadata:
+   labels:
+     ...
+     network.harvesterhci.io/vlanconfig: vlan123
+----
+
+. Entfernen Sie diesen Knoten aus dem `Network Config`.
++
+Wenn die neuen NICs in unterschiedlichen Steckplätzen platziert werden, müssen Sie das `Network Config` ändern, um diesen Knoten auszuschließen. Sie können die VlanConfig löschen, wenn das `Network Config` Objekt nur diesen Knoten aus `nodeSelector` auswählt.
++
+Beispiel:
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanConfig
+ spec:
+   clusterNetwork: data
+   nodeSelector:
+     kubernetes.io/hostname: node123  // select one or more nodes
+   uplink:
+     bondOptions:
+       miimon: 100
+       mode: 802.3ad
+     linkAttributes:
+       mtu: 1500
+       txQLen: -1
+     nics:
+     - enp0s1
+     - enp0s2
+----
++
+Wenn VMs noch auf einem betroffenen Knoten laufen, gibt der Netzwerk-WebHook einen Fehler zurück.
+
+. Überprüfen Sie das `Node` Objekt.
++
+Je nach Situation ändert sich entweder das Etikett `network.harvesterhci.io/vlanconfig` oder es wird entfernt.
+
+. Überprüfen Sie das `VlanStatus` Objekt.
++
+Je nach Situation ändert sich entweder der Status der `ready`-Bedingung des `VlanStatus`-Objekts zu `"True"` oder das Objekt wird gelöscht.
++
+Beispiel:
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanStatus
+ metadata:
+ ...
+ status:
+   clusterNetwork: data
+   conditions:
+   - lastUpdateTime: "2024-02-03T18:32:41Z"
+     status: "True"
+     type: ready
+   linkMonitor: public
+   localAreas:
+   - cidr: 10.190.186.0/24
+     vlanID: 2013
+   node: node123
+   vlanConfig: vlan123
+----
+
+=== Drainen Sie den Knoten.
+
+Es kann sein, dass einige {longhorn-product-name} Replikate aktiv auf dem Knoten bleiben, selbst nachdem die zuvor beschriebenen Verfahren abgeschlossen sind.
+
+. Drainen Sie den Knoten. (Dies ist optional in {harvester-product-name}.)
+ ** Szenario 1: Der `numReplicas` Wert aller Volumes ist `3`, was bedeutet, dass jedes {longhorn-product-name} Volume drei aktive Replikate hat.
++
+Die Longhorn-Engine erkennt, dass sie nicht mehr mit dem Replica auf dem entleerten Knoten kommunizieren kann, und markiert dieses Replica dann als fehlgeschlagen. Keines der Replicas hat eine besondere Bedeutung für {longhorn-product-name}, sodass es funktioniert, solange es mit mindestens einem Replica kommunizieren kann.
+
+ ** Szenario 2: Einige {longhorn-product-name} Volumes haben _weniger_ als drei aktive Replicas, oder Sie haben Volumes manuell über die {harvester-product-name} UI oder {longhorn-product-name} UI angehängt.
++
+Sie müssen die Replicas manuell trennen oder sie auf andere Knoten verschieben und dann https://documentation.suse.com/cloudnative/storage/1.8/en/troubleshooting-maintenance/maintenance.html#_updating_the_node_os_or_container_runtime[den Knoten drainen] mit dem Befehl `kubectl drain --ignore-daemonsets <node name>`. Die Option `--ignore-daemonsets` ist erforderlich, da {longhorn-product-name} Daemons wie Longhorn Manager, Longhorn CSI-Plugin und Longhorn Engine-Image bereitstellt.
++
+Replicas, die auf dem Knoten ausgeführt werden, werden gestoppt und als `Failed` markiert. Longhorn-Engine-Prozesse, die auf dem Knoten ausgeführt werden, werden mit dem Pod auf andere Knoten migriert. Sobald der Knoten vollständig entleert ist, sollten keine Replicas und Engine-Prozesse mehr auf dem Knoten ausgeführt werden.
+. Replicas auffrischen.
++
+Nachdem ein Knoten heruntergefahren wurde, beginnt {longhorn-product-name} nicht mit dem Wiederaufbau der Replicas auf anderen Knoten, bis der `replica-replenishment-wait-interval` (Standardwert: 600 Sekunden) erreicht ist. Wenn der Knoten vor Erreichen des Warteintervallwerts wieder online kommt, verwendet {longhorn-product-name} die Replicas wieder. Andernfalls baut {longhorn-product-name} die Replicas auf einem anderen Knoten wieder auf.
++
+Während der Systemwartung können Sie den https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_replenishment_wait_interval[`replica-replenishment-wait-interval`] Wert über die xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[eingebettete {longhorn-product-name} UI] ändern, um einen schnelleren Wiederaufbau der Replicas zu ermöglichen.
+
+=== Ersetzen Sie die NICs
+
+. Fahren Sie den Knoten herunter.
+. Ersetzen Sie die NICs.
+. Starten Sie den Knoten neu.
+. <<Collect Information>> über die aktuelle Netzwerkkonfiguration und den Status.
+
+Wenn Sie Unregelmäßigkeiten feststellen, erstellen Sie ein xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[Support-Bundle] zu Fehlerbehebungszwecken.
+
+=== (Optional) Aktualisieren Sie die Netzwerkkonfiguration erneut.
+
+[IMPORTANT]
+====
+Das Aktualisieren des `Network Config` ist *erforderlich*, wenn die neuen NICs in unterschiedlichen physischen Steckplätzen platziert werden sollen.
+====
+
+. Fügen Sie den Knoten zum `Network Config` hinzu.
++
+Sie müssen ein neues `Network Config` erstellen oder das `Network Config` ändern, um diesen Knoten einzuschließen.
+
+. Überprüfen Sie das `Node` Objekt.
++
+Das Label `network.harvesterhci.io/vlanconfig` spiegelt das spezifische `Network Config` wider, das verwendet wird.
+
+. Überprüfen Sie das `VlanStatus` Objekt.
++
+Der Status der `ready`-Bedingung des `VlanStatus`-Objekts ändert sich zu `"True"`.
+
+=== Wartungsmodus deaktivieren.
+
+. Warten Sie, bis der Knoten zurück zum Cluster verschoben wird.
+. Wartungsmodus deaktivieren.
+. (Optional) Starten Sie die VMs, die Sie manuell gestoppt haben.
+. (Optional) Migrieren Sie xref:/virtual-machines/live-migration.adoc#_starting_a_migration[VMs manuell] auf diesen Knoten.
+
+=== Fehlerbehebung
+
+{harvester-product-name} verwendet mehrere netzwerkbezogene Pods und CRDs. Bei der Fehlerbehebung überprüfen Sie die Pod-Protokolle und den Status der CRD-Objekte.
+
+Pods:
+
+ $ kubectl get pods -n harvester-system
+ NAME                                                    READY   STATUS    RESTARTS      AGE
+ harvester-network-controller-cnf22                      1/1     Running   2 (60m ago)   3d22h  // Network controller agent daemonSet, deployed in each node
+ harvester-network-controller-manager-859c4bd874-xcllf   1/1     Running   2 (60m ago)   3d22h  // Network controller
+ harvester-network-webhook-56b877d5d5-z42dp              1/1     Running   2 (60m ago)   3d22h
+
+CRDs:
+
+----
+clusternetworks.network.harvesterhci.io
+linkmonitors.network.harvesterhci.io
+vlanconfigs.network.harvesterhci.io
+vlanstatuses.network.harvesterhci.io
+----

@@ -1,0 +1,197 @@
+= Instalação ISO
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+{harvester-product-name} é enviado como uma imagem de appliance inicializável, você pode instalá-lo diretamente em um servidor bare metal com a imagem ISO. Para obter a imagem ISO, baixe *💿 harvester-v1.x.x-amd64.iso* da página https://github.com/harvester/harvester/releases[Releases].
+
+Durante a instalação, você pode escolher *criar um novo cluster* ou *ingressar o nó em um cluster existente*.
+
+O seguinte https://youtu.be/X0VIGZ_lExQ[vídeo] mostra uma visão geral rápida de uma instalação ISO.
+
++++++++++<iframe width="800" height="400" src="https://www.youtube.com/embed/X0VIGZ_lExQ" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="">[]++++++</iframe>+++++++++
+
+== Etapas de instalação
+
+. Monte o arquivo ISO e inicialize o servidor selecionando a opção `Harvester Installer`.
++
+image::install/iso-install.png[iso-install.png]
++
+O instalador verifica automaticamente o hardware e exibe mensagens de aviso se os requisitos mínimos não forem atendidos. A tela *Verificações de Hardware* não é exibida se todas as verificações forem aprovadas.
++
+image::install/hardware-checks.png[hardware-checks.png]
+
+. Use as teclas de seta para escolher um modo de instalação. Por padrão, o primeiro nó será o nó de gerenciamento do cluster.
++
+image::install/choose-installation-mode.png[choose-installation-mode.png]
++
+** `Create a new Harvester cluster`: cria um cluster totalmente novo.
+** `Join an existing Harvester cluster`: ingressa um cluster existente. Você precisa do VIP e do token do cluster ao qual deseja ingressar.
+** `Install Harvester binaries only`: Se você escolher esta opção, uma configuração adicional é necessária após a primeira inicialização.
++
+[IMPORTANT]
+====
+Quando há 3 nós, os outros 2 nós adicionados primeiro são automaticamente promovidos a nós de gerenciamento para formar um cluster HA. Se você quiser promover nós de gerenciamento de diferentes zonas, pode adicionar o rótulo do nó `topology.kubernetes.io/zone` na configuração xref:../../installation-setup/config/configuration-file.adoc#_os_labels[os.labels] fornecendo uma URL do xref:../../installation-setup/config/configuration-file.adoc[arquivo de configuração] na etapa de personalizar o host. Neste caso, são necessárias pelo menos três zonas diferentes.
+====
+
+. Escolha uma função para o nó. Você deve realizar esta etapa se selecionou o modo de instalação `Join an existing Harvester cluster`.
++
+image::install/select-role.png[choose-node-role.png]
++
+** `Default Role`: Permite que um nó funcione como um nó de gerenciamento ou um nó trabalhador. Esta função não possui privilégios ou restrições específicas.
+** `Management Role`: Permite que um nó seja priorizado quando {harvester-product-name} promove nós a nós de gerenciamento.
+** `Witness Role`: Restringe um nó a ser um nó testemunha (funciona apenas como um nó etcd) em um cluster específico.
+** `Worker Role`: Restringe um nó a ser um nó trabalhador (nunca promovido a nó de gerenciamento) em um cluster específico.
+
+. Configure uma senha para acessar o nó. O usuário SSH padrão é `rancher`.
++
+image::install/config-password.png[config-password.png]
+
+. Escolha o disco de instalação no qual deseja instalar o cluster e o disco de dados onde deseja armazenar os dados da VM. Por padrão, {harvester-product-name} usa o esquema de particionamento https://en.wikipedia.org/wiki/GUID_Partition_Table[Tabela de Partição GUID (GPT)] para UEFI e BIOS. Se você usar o boot pelo BIOS, então terá a opção de selecionar https://en.wikipedia.org/wiki/Master_boot_record[Master Boot Record (MBR)].
++
+[IMPORTANT]
+====
+O suporte para inicialização pelo BIOS legado está descontinuado na versão v1.7.0 e será removido em uma versão posterior. Os clusters {harvester-product-name} existentes que usam este modo de inicialização continuarão a funcionar, mas a atualização para versões posteriores pode exigir reinstalação em modo UEFI. Para evitar problemas e interrupções, use UEFI em novas instalações.
+====
++
+image::install/choose-installation-target-data-disk.png[choose-installation-target-data-disk.png]
++
+** `Installation disk`: O disco para instalar o cluster.
+** `Data disk`: O disco para armazenar os dados da VM. Recomenda-se escolher um disco separado para armazenar os dados da VM. Isso não se aplica a nós testemunhas.
+** `Persistent size`: Se você tiver apenas um disco ou usar o mesmo disco para os dados do SO e da VM, precisará configurar o tamanho da partição persistente para armazenar os pacotes do sistema e as imagens de contêiner. O tamanho padrão e mínimo da partição persistente é de 150 GiB. Você pode especificar um tamanho como 200Gi ou 153600Mi.
+
+. Configure o `HostName` do nó.
++
+image::install/config-hostname.png[config-hostname.png]
+
+. Configure a(s) interface(s) de rede para a rede de gerenciamento. Por padrão, {harvester-product-name} cria uma xref:../../installation-setup/requirements.adoc#_hardware_requirements[interface de vínculo (NIC)] chamada `mgmt-bo` para a xref:../../networking/cluster-network.adoc#_built_in_cluster_network[rede de gerenciamento incorporada], e o endereço IP pode ser configurado via DHCP ou atribuído estaticamente.
++
+image::install/config-network.png[config-network.png]
++
+[NOTE]
+====
+Os switches físicos conectados a interfaces agrupadas devem ser configurados estritamente como portas trunk. Essas portas devem aceitar tráfego marcado e enviar tráfego marcado com o ID da VLAN usado pela rede da VM.
+
+Não é possível alterar o IP do nó ao longo do ciclo de vida de um cluster. Se estiver usando DHCP, você deve garantir que o servidor DHCP sempre ofereça o mesmo IP para o mesmo nó. Se o IP do nó for alterado, o nó relacionado não poderá ingressar no cluster e pode até quebrar o cluster.
+
+Além disso, você é obrigado a adicionar a opção _roteadores_ (`option routers`) ao configurar o servidor DHCP. Essa opção é usada para adicionar a rota padrão no host. Sem a rota padrão, o nó falhará ao iniciar.
+
+Por exemplo:
+
+----
+Linux~ # ip route
+default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+O valor padrão de MTU da NIC agrupada é `1500`. Para usar um valor de MTU diferente, configure a xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[[`install.management_interface`] no arquivo de configuração do Harvester conforme o passo a seguir.
+
+Para mais informações, consulte xref:./pxe-boot-install.adoc#_dhcp_server_configuration[Configuração do Servidor DHCP].
+====
+
+. (Opcional) Configure os CIDRs para os pods e serviços do cluster.
++
+Para usar os valores padrão, deixe os campos em branco.
++
+image::install/config-cluster-cidrs.png[config-cluster-cidrs.png]
++
+[IMPORTANT]
+====
+Os valores de CIDR não devem se sobrepor e devem estar dentro do intervalo de endereços IP privados de 10.0.0.0/8, 172.16.0.0/12 ou 192.168.0.0/16.
+
+O IP do serviço DNS deve estar dentro do intervalo definido pelo campo *Service CIDR*.
+====
++
+Exemplo de uma configuração CIDR válida:
++
+* *Pod CIDR*: 172.16.0.0/16
+* *Service CIDR*: 172.22.0.0/16
+* *Cluster DNS IP*: 172.22.0.10
+
+. (Opcional) Configure o `DNS Servers`. Use vírgulas entre os valores para adicionar mais servidores DNS. Deixe em branco para usar o servidor DNS padrão.
++
+image::install/config-dns-server.png[config-dns-server.png]
+
+. Configure o IP virtual (VIP) selecionando um `VIP Mode`. Este VIP é usado para acessar o cluster ou para que outros nós ingressem no cluster.
++
+[NOTE]
+====
+Para configuração de DHCP com mapeamentos de endereço MAC para IP estáticos configurados, insira o endereço MAC no campo fornecido para buscar o IP virtual persistente único (VIP). Caso contrário, deixe em branco.
+====
++
+image::install/config-virtual-ip.png[config-virtual-ip.png]
+
+. Configure o `Cluster token`. Este token é usado para adicionar outros nós ao cluster.
++
+image::install/config-cluster-token.png[config-cluster-token.png]
+
+. Configure `NTP servers` para garantir que os horários de todos os nós estejam sincronizados. Isso é padrão para `0.suse.pool.ntp.org`. Use vírgulas entre os valores para adicionar mais servidores NTP.
++
+image::install/config-ntp-server.png[config-ntp-server.png]
++
+[NOTE]
+====
+Usar múltiplos servidores NTP proporciona redundância, melhor precisão, tolerância a falhas e desempenho aprimorado. Isso garante que a sincronização de tempo continue mesmo se um servidor falhar ou fornecer dados incorretos, e ajuda a distribuir a carga entre diferentes servidores.
+====
+
+. (Opcional) Se você precisar usar um proxy HTTP para acessar o mundo exterior, insira o `Proxy address`. Caso contrário, deixe isso em branco.
++
+image::install/config-proxy.png[config-proxy.png]
+
+. (Opcional) Você pode escolher importar chaves SSH fornecendo `HTTP URL`. Por exemplo, suas chaves públicas do GitHub `https://github.com/<username>.keys` podem ser usadas.
++
+image::install/import-ssh-keys.png[import-ssh-keys.png]
+
+. (Opcional) Se você precisar personalizar o host com um xref:../../installation-setup/config/configuration-file.adoc[arquivo de configuração], insira o `HTTP URL` aqui.
++
+image::install/remote-config.png[remote-config.png]
+
+. Revise e confirme suas opções de instalação. Após confirmar as opções de instalação, {harvester-product-name} será instalado em seu host. A instalação pode levar alguns minutos para ser concluída.
++
+image::install/confirm-install.png[confirm-install.png]
+
+. Uma vez que a instalação esteja completa, seu nó reinicia. Após a reinicialização, o console exibe a URL de gerenciamento e o status. A URL padrão da interface web é `https://your-virtual-ip`. Você pode usar `F12` para alternar do console para o Shell e digitar `exit` para voltar ao console.
++
+
+[NOTE]
+====
+Escolher `Install Harvester binaries only` na primeira página requer configuração adicional após a primeira inicialização.
+====
+
++
+image::install/iso-installed.png[iso-installed.png]
+
+. Você será solicitado a definir a senha para o usuário padrão `admin` ao fazer login pela primeira vez.
++
+image::install/first-time-login.png[first-login.png]
+
+////
+
+[NOTE]
+====
+In some cases, if you are using an older VGA connector, you may encounter an `panic: invalid dimensions` error with ISO installation. See issue [#2937](https://github.com/harvester/harvester/issues/2937#issuecomment-1278545927) for a workaround.
+====
+
+////
+
+== Problema conhecido
+
+=== O instalador pode travar ao usar uma placa de vídeo ou monitor mais antigos.
+
+Em alguns casos, se você estiver usando uma placa de vídeo ou um monitor mais antigos, pode encontrar um erro `panic: invalid dimensions` durante a instalação do ISO.
+
+image::install/invalid-dimensions.png[invalid-dimensions.png]
+
+Estamos trabalhando nesta questão conhecida e planejando uma correção para uma futura versão. Você pode tentar usar outra entrada do GRUB para forçá-lo a usar a resolução de `1024x768` ao inicializar.
+
+image::install/force-resolution.png[force-resolution.png]
+
+Se você estiver usando uma versão anterior à v1.1.1, por favor, tente a seguinte solução alternativa:
+
+. Inicie com o ISO e pressione `E` para editar a primeira entrada do menu:
++
+image::install/grub-menu.png[grub-menu.png]
+
+. Adicione `vga=792` à linha que começa com `$linux`:
++
+image::install/edit-menu-entry.png[edit-menu-entry.png]
+
+. Pressione `Ctrl+X` ou `F10` para iniciar.

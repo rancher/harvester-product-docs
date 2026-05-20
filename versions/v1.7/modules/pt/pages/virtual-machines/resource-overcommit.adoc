@@ -1,0 +1,59 @@
+= Overcommit de Recursos
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name} suporta configuração global de porcentagens de sobrecarga de recursos em CPU, memória e armazenamento. Ao definir xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`], isso permitirá o agendamento de máquinas virtuais adicionais mesmo quando os recursos físicos estiverem totalmente utilizados.
+
+{harvester-product-name} permite que você realize overcommit de CPU e RAM em nós de computação. Isso permite que você aumente o número de instâncias em execução na sua nuvem à custa de reduzir o desempenho das instâncias. O serviço de Computação usa as seguintes proporções por padrão:
+
+* Proporção de alocação de CPU: 1600%
+* Proporção de alocação de RAM: 150%
+* Proporção de alocação de armazenamento: 200%
+
+[NOTE]
+====
+Sobrecarga clássica de memória ou balonamento de memória ainda não é suportada por este recurso. Em outras palavras, a memória usada por uma instância de máquina virtual não pode ser retornada uma vez alocada.
+====
+
+== Configure a definição global xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]
+
+Os usuários podem modificar o `overcommit-config` global seguindo os passos abaixo, e isso será aplicado a cada nova máquina virtual criada após a alteração.
+
+. Vá para *Configurações -> Avançadas*.
++
+image::vm/overcommit-page.png[página de overcommit]
++
+. Encontre a configuração `overcommit-config`.
+. Configure a proporção desejada de CPU, Memória e Armazenamento.
++
+image::vm/overcommit-panel.png[painel de overcommit]
+
+== Configure o overcommit para uma única máquina virtual
+
+Em situações onde você requer configurações específicas para máquinas virtuais individuais sem afetar as configurações globais, você pode facilmente alcançar isso modificando o valor `spec.template.spec.domain.resources.limits.<memory|cpu>` na especificação da máquina virtual correspondente diretamente.
+
+image::vm/vm-overcommit-config.png[configuração de overcommit de VM]
+
+== Reserve mais memória para a sobrecarga do sistema
+
+Por padrão, o {harvester-product-name} reserva uma certa quantidade de memória de gerenciamento do sistema da memória alocada para a máquina virtual. Na maioria dos casos, isso não causará problemas. No entanto, alguns sistemas operacionais, como o Windows 2022, solicitarão mais memória do que a reservada.
+
+Para resolver o problema, o {harvester-product-name} fornece uma anotação `harvesterhci.io/reservedMemory` no recurso personalizado VirtualMachine para permitir que você especifique a quantidade de memória a ser reservada. Por exemplo, adicione `harvesterhci.io/reservedMemory: 200Mi` se você decidir reservar 200 MiB para a sobrecarga do sistema da máquina virtual.
+
+[,diff]
+----
+ apiVersion: kubevirt.io/v1
+ kind: VirtualMachine
+ metadata:
+   annotations:
++    harvesterhci.io/reservedMemory: 200Mi
+     kubevirt.io/latest-observed-api-version: v1
+     kubevirt.io/storage-observed-api-version: v1alpha3
+     network.harvesterhci.io/ips: '[]'
+   ...
+   ...
+----
+
+== Por que minhas máquinas virtuais estão agendadas de forma desigual?
+
+O agendamento das máquinas virtuais depende do comportamento subjacente do kube-scheduler. Temos um artigo dedicado explicando os detalhes. Se você gostaria de saber mais, confira: https://harvesterhci.io/kb/vm-scheduling/[Agendamento de VM].

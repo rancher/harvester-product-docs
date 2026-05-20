@@ -1,0 +1,83 @@
+= 外部磁盘支持
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== 概述
+
+{harvester-product-name} 可以安装在外部磁盘上并从中启动。这在主机具有支持从外部 iSCSI 设备或 SAN 存储阵列启动的 NIC 或 HBA 卡的环境中尤其有用。这种无盘系统在大型数据中心中很常见。
+
+以下部分提供有关在外部 iSCSI 设备上安装 {harvester-product-name} 的信息。SAN 阵列的工作流程类似，但可能需要不同的一组内核参数，以允许 {harvester-product-name} 成功从 SAN 阵列启动。
+
+== 基于 iSCSI 的安装
+
+=== 配置 iSCSI 目标
+
+[NOTE]
+====
+对 BIOS 或固件的必要更改将取决于您使用的硬件。
+====
+
+当安装目标通电或重置时，您必须进入固件设置菜单以更改启动设置并启用通过 iSCSI 启动。设置因系统而异。
+
+进入固件设置菜单通常需要按下指定的键（例如，F2、F7 或 ESC）。系统可能会显示可用于特定固件功能的键列表。然而，这个列表显示的时间非常短，因此您必须在列表消失并系统开始启动之前选择一个菜单选项。
+
+image::install/target-details.png[target-details]
+
+您必须执行的配置任务包括以下内容：
+
+* 启用 UEFI 启动
++
+* 配置 iSCSI 启动器和目标参数
++
+* 在启动菜单中启用 iSCSI 设备
++
+* 设置启动顺序，以便您的系统从 iSCSI 设备启动
+
+有关启动设置和固件功能的更多信息，请参阅您的系统提供商的文档。
+
+=== 安装 {harvester-product-name}
+
+您可以使用任何标准方法加载 {harvester-product-name}.iso 映像。安装程序应自动检测 iSCSI 设备。在提示您指定安装磁盘时选择此设备。
+
+当您选择 iSCSI 目标时，安装程序上显示的信息会略有不同。
+
+* 网络配置屏幕：不显示用于挂载 iSCSI 卷的网络接口。
++
+* 磁盘配置屏幕：显示到多路径远程磁盘的第一个路径。但是，在安装后（假设提供了 `os.externalStorageConfig`），操作系统将从多路径设备启动。
+
+在安装过程中，您必须提供一个配置文件 (`config.yaml`)，该文件包含多路径和其他内核参数。该信息被添加到已安装的操作系统中，以允许后续从 iSCSI 目标启动。
+
+示例 (`config.yaml`)：
+
+----
+os:
+  write_files:
+  - content: |
+      name: "fix default gateway"
+      stages:
+        network:
+          - commands:
+            - ip route delete default dev enp4s0f0.2017
+            - ip route add default via 10.115.7.254
+    path: /oem/99_fix_gateway.yaml
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "rd.iscsi.firmware vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none"
+----
+
+测试设置使用多个标记 VLAN，例如 VLAN 2017（用于连接 iSCSI 卷）和 VLAN 2011（用于 {harvester-product-name} 管理接口）。
+
+仅当 iSCSI 卷通过标记 VLAN 上的接口可访问时，内核参数 `vlan=enp4s0f0.2017:enp4s0f0 ip=10.115.48.10::10.115.55.254:255.255.248.0::enp4s0f0.2017:none` 才是必要的。这些参数确保在启动期间创建一个额外的标记接口，并为该接口分配一个静态地址。有关配置内核参数以匹配您的用例的更多信息，请参见 https://manpages.opensuse.org/Tumbleweed/dracut/dracut.cmdline.7.en.html[dracut.cmdline]。
+
+需要 `write_files` 指令以确保管理接口用作默认网关。这很重要，因为 RKE2 使用具有默认网关的接口作为节点地址。

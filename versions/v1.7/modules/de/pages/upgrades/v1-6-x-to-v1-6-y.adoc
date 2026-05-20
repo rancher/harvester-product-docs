@@ -1,0 +1,93 @@
+= Upgrade von v1.6.x auf v1.6.y
+:revdate: 2025-12-08
+:page-revdate: {revdate}
+
+== Allgemeine Informationen
+
+Ein *Upgrade* Button erscheint auf dem *Dashboard* Bildschirm, wann immer eine neue {harvester-product-name} Version verfügbar ist, auf die Sie upgraden können. Für weitere Informationen siehe xref:./upgrades.adoc#_start_an_upgrade[Starten eines Upgrades].
+
+Für Informationen zum Upgrade von {harvester-product-name} in Air-Gapped-Umgebungen siehe xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Vorbereiten eines Air-Gapped-Upgrades].
+
+=== Aktualisieren Sie die Harvester UI-Erweiterung auf {rancher-product-name} v2.12
+
+Sie müssen eine kompatible Version (v1.6.x) der Harvester UI-Erweiterung verwenden, um {harvester-product-name} v1.6.x Cluster auf {rancher-short-name} v2.12 zu importieren.
+
+. Gehen Sie in der {rancher-short-name} UI zu *lokalen -> Apps -> Repositories*.
+
+. Suchen Sie das Repository mit dem Namen *harvester* und wählen Sie dann *⋮ -> Aktualisieren* aus.
+
+. Gehen Sie zum Bildschirm *Erweiterungen*.
+
+. Suchen Sie die Erweiterung mit dem Namen *Harvester* und klicken Sie dann auf *Aktualisieren*.
+
+. Wählen Sie eine kompatible Version aus und klicken Sie dann auf *Aktualisieren*.
+
+. Lassen Sie etwas Zeit für die Aktualisierung der Erweiterung und aktualisieren Sie dann den Bildschirm.
+
+== Bekannte Probleme
+
+=== Upgrade steckt im "Vorentleert"-Zustand fest
+
+In bestimmten Situationen kann der Instanzmanager möglicherweise eine Engine-Instanz nicht bereinigen, selbst nachdem sich der Zustand des Engine-CR in "Gestoppt" geändert hat. Der Upgrade-Prozess bleibt im "Vorentleert"-Zustand stecken, weil das Instanzmanager-Pod nicht gelöscht werden kann, solange das entsprechende PodDisruptionBudget (PDB) noch existiert.
+
+Die Lösung besteht darin, das Instanzmanager-PDB zu löschen, nachdem sichergestellt wurde, dass alle Volumes gesund sind.
+
+Verwandte Probleme: https://github.com/harvester/harvester/issues/8977[#8977] und https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== Gast-Cluster steckt im "Aktualisieren"-Zustand fest
+
+Ein {rke2-short-name} Gast-Cluster kann im "Aktualisieren"-Zustand stecken bleiben, nachdem {harvester-product-name} aktualisiert wurde. Die folgende Fehlermeldung wird auf der {harvester-product-name} UI angezeigt:
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+Das Problem tritt auf, wenn sich die IP-Adresse des Gastknotens nach dem Upgrade ändert, was zu Fehlfunktionen von etcd führt. Es ist wahrscheinlich, dass die zugrunde liegende virtuelle Maschine mehrmals neu gestartet wurde und eine neue IP-Adresse vom DHCP-Server erhalten hat.
+
+Um das Problem zu beheben, führen Sie die folgenden Schritte aus:
+
+. Löschen Sie im {rancher-short-name} UI den fehlerverursachenden Knoten aus dem Gastcluster.
+. Überprüfen Sie im {harvester-product-name} UI den Status der zugrunde liegenden virtuellen Maschine.
+. Falls erforderlich, starten Sie die virtuelle Maschine neu.
+
+Die virtuelle Maschine wird entfernt, und das Gastcluster versucht, einen neuen Knoten zu erstellen. Sobald der Knoten erstellt ist, ändert sich der Status des Gastclusters in "Aktiv".
+
+Verwandtes Problem: https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== Die gestoppte virtuelle Maschine steckt im Status "Starten" fest.
+
+Ein {longhorn-product-name} Volume kann nach einer Live-Migration zwischen den Zuständen "Trennen" und "Getrennt" wechseln. Da das Volume nicht bereit ist, kann die zugehörige virtuelle Maschine nicht vollständig gestartet werden.
+
+Die Umgehungslösung besteht darin, das `status.currentMigrationNodeID` des Volumes mit dem folgenden Befehl zu löschen:
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+Verwandte Probleme: https://github.com/harvester/harvester/issues/8949[#8949] und https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+### 4. Upgrade auf v1.6.1-rc2 steckt im "Vorentleert"-Zustand fest.
+
+Der Upgrade-Prozess kann unendlich im "Vorentleert"-Zustand stecken bleiben, wenn der folgende spezifische Upgrade-Pfad eingehalten wird:
+
+* Der Cluster wurde zuerst von v1.5.1 auf v1.6.0 aktualisiert.
+* Ein anschließendes Upgrade von v1.6.0 auf v1.6.1-rc2 wird versucht.
+
+Sie können die folgende Fehlermeldung sehen, wenn Sie den {harvester-product-name} Controller überprüfen:
+
+[,shell]
+----
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:21:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:23:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:25:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+----
+
+Dies ist ein seltener Synchronisierungsfehler: Der Job wurde bereits erstellt, aber das Upgrade-Objekt wurde nicht aktualisiert.
+
+Die Lösung besteht darin, den vorhandenen Post-Drain-Job zu löschen und dann zu warten, bis der Upgrade Controller ihn neu erstellt.
+
+Verwandtes Problem: https://github.com/harvester/harvester/issues/9293[#9293]

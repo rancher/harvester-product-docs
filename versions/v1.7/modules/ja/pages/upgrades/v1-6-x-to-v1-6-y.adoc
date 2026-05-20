@@ -1,0 +1,93 @@
+= v1.6.xからv1.6.yにアップグレードする
+:revdate: 2025-12-08
+:page-revdate: {revdate}
+
+== 一般情報
+
+新しい{harvester-product-name}バージョンにアップグレードできるようになると、*ダッシュボード*画面に*アップグレード*ボタンが表示されます。詳細については、xref:./upgrades.adoc#_start_an_upgrade[アップグレードを開始する]を参照してください。
+
+エアギャップ環境での{harvester-product-name}のアップグレードに関する情報は、xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[エアギャップアップグレードの準備]を参照してください。
+
+=== {rancher-product-name} v2.12でHarvester UI拡張機能を更新する
+
+{rancher-short-name} v2.12で{harvester-product-name} v1.6.xクラスターをインポートするには、Harvester UI拡張機能の互換性のあるバージョン(v1.6.x)を使用する必要があります。
+
+. {rancher-short-name} UIで、*ローカル -> アプリ -> リポジトリ*に移動します。
+
+. *harvester*という名前のリポジトリを見つけて、*⋮ -> 更新*を選択します。
+
+. *拡張機能*画面に移動します。
+
+. *Harvester*という名前の拡張機能を見つけて、*更新*をクリックします。
+
+. 互換性のあるバージョンを選択し、*更新*をクリックします。
+
+. 拡張機能が更新されるまでしばらく待ち、画面を更新します。
+
+== 当バージョンの注意事項
+
+=== アップグレードが「プレドレイン」状態でスタックしています
+
+特定の状況では、インスタンスマネージャーがエンジンCRの状態が「停止」に変更された後でも、エンジンインスタンスのクリーンアップに失敗することがあります。インスタンスマネージャーポッドが対応するPodDisruptionBudget (PDB)が存在する間は削除できないため、アップグレードプロセスが「プレドレイン」状態でスタックします。
+
+回避策は、すべてのボリュームが正常であることを確認した後にインスタンスマネージャーPDBを削除することです。
+
+関連する問題: https://github.com/harvester/harvester/issues/8977[#8977]および https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== ゲストクラスターが「更新中」状態でスタックしています
+
+{harvester-product-name}がアップグレードされた後、{rke2-short-name}ゲストクラスターが「更新中」状態でスタックすることがあります。{harvester-product-name} UIに次のエラーメッセージが表示されます:
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+この問題は、ゲストノードのIPアドレスがアップグレード後に変更されると発生し、etcdが正常に機能しなくなります。基盤となる仮想マシンが何度も再起動され、DHCPサーバーから新しいIPアドレスを受け取った可能性があります。
+
+この問題に対処するには、次の手順を実行してください。
+
+. {rancher-short-name} UIで、エラーを引き起こしているノードをゲストクラスターから削除します。
+. {harvester-product-name} UIで、基盤となる仮想マシンの状態を確認します。
+. 必要に応じて、仮想マシンを再起動します。
+
+仮想マシンが削除され、ゲストクラスターは新しいノードを作成しようとします。ノードが作成されると、ゲストクラスターの状態が「アクティブ」に変更されます。
+
+関連する問題: https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== 停止した仮想マシンが「起動中」状態でスタックしています。
+
+{longhorn-product-name}ボリュームは、ライブマイグレーション後に「デタッチ中」と「デタッチ済み」状態の間でフラップすることがあります。ボリュームが準備できていないため、関連する仮想マシンは完全に起動できません。
+
+回避策は、次のコマンドを使用してボリュームの`status.currentMigrationNodeID`をクリアすることです。
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+関連する問題: https://github.com/harvester/harvester/issues/8949[#8949]および https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+### 4.v1.6.1-rc2へのアップグレードが「プレドレイン」状態でスタックしています。
+
+次の特定のアップグレードパスに従うと、アップグレードプロセスが無期限に「プレドレイン」状態でスタックする可能性があります。
+
+* クラスターは最初にv1.5.1からv1.6.0にアップグレードされました。
+* その後、v1.6.0からv1.6.1-rc2へのアップグレードが試みられます。
+
+{harvester-product-name}コントローラーを確認すると、次のエラーメッセージが表示されることがあります。
+
+[,shell]
+----
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:21:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:23:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:25:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+----
+
+これはまれな同期エラーです: ジョブはすでに作成されましたが、アップグレードオブジェクトは更新されていません。
+
+回避策は、既存のポストドレインジョブを削除し、その後アップグレードコントローラーがそれを再作成するのを待つことです。
+
+関連する問題: https://github.com/harvester/harvester/issues/9293[#9293]

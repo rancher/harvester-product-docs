@@ -1,0 +1,109 @@
+= Driver de Nó do Harvester
+:revdate: 2025-09-18
+:page-revdate: {revdate}
+
+O https://github.com/harvester/docker-machine-driver-harvester[Driver de Nó do Harvester], semelhante ao driver do Docker Machine, é usado para provisionar VMs no cluster {harvester-product-name}, e {rancher-short-name} o utiliza para lançar e gerenciar clusters Kubernetes.
+
+Um benefício de instalar o Kubernetes em pools de nós hospedados pelo driver de nó é que, se um nó perder conectividade com o cluster, o Rancher pode automaticamente criar outro nó para se juntar ao cluster, garantindo que a contagem do pool de nós esteja conforme o esperado.
+Além disso, o driver de nó do Harvester é integrado ao provedor de nuvem Harvester por padrão, oferecendo xref:/integrations/rancher/cloud-provider.adoc#_load_balancer_support[suporte a balanceador de carga incorporado] e xref:/integrations/rancher/csi-driver.adoc[passagem de armazenamento] do cluster bare-metal para os clusters Kubernetes convidados, para obter desempenho nativo de armazenamento.
+
+Nesta seção, você aprenderá a configurar {rancher-short-name} para usar o Driver de Nó do Harvester para lançar e gerenciar clusters Kubernetes.
+
+[NOTE]
+====
+O Driver de Nó do Harvester suporta apenas imagens de nuvem. Isso ocorre porque imagens ISO geralmente requerem configuração adicional que interfere em uma implantação limpa (sem exigir intervenção do usuário), e não são tipicamente usadas em ambientes de nuvem.
+====
+
+== Driver de Nó do Harvester
+
+A partir de {rancher-short-name} `v2.6.3`, o Driver de Nó do Harvester é habilitado por padrão. Você pode ir para a página *Gerenciamento de Cluster* > *Drivers* > *Drivers de Nó* para verificar o status do Driver de Nó do Harvester.
+
+image::rancher/edit-node-driver.png[edit-node-driver]
+
+Quando o Driver de Nó do Harvester está habilitado, você pode criar clusters Kubernetes em cima do cluster {harvester-product-name} e gerenciá-los a partir de {rancher-short-name}.
+
+image::rancher/harvester-node-driver.png[harvester-node-driver]
+
+[NOTE]
+====
+* Consulte a https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-7-5[{rancher-short-name} matriz de suporte de cluster downstream] para suas versões RKE2 suportadas e versões de SO convidado.
+* As alterações feitas na configuração do Driver de Nó do Harvester não são persistidas. Quaisquer modificações aplicadas serão redefinidas ao reiniciar o contêiner {rancher-short-name}.
+* A partir da versão v0.6.3 do Driver de Nó do Harvester, a injeção automática do `qemu-guest-agent` foi removida do backend. Se a imagem que você está usando não contiver o pacote `qemu-guest-agent`, você ainda pode instalá-lo pela configuração `userdata`. Caso contrário, o cluster não será provisionado com sucesso.
++
+[,yaml]
+----
+ #cloud-config
+ package_update: true
+ packages:
+ - qemu-guest-agent
+ runcmd:
+ - - systemctl
+   - enable
+   - '--now'
+   - qemu-guest-agent.service
+----
+====
+
+== Problemas conhecidos
+
+=== {rancher-short-name} perde a capacidade de gerenciar ou escalar clusters convidados quando os tokens de API correspondentes expiram.
+
+*Problema*: https://github.com/harvester/harvester/issues/5827[#5827]
+
+*Descrição*: {rancher-short-name} usa kubeconfigs com tokens de autenticação embutidos para provisionar clusters Kubernetes convidados em {harvester-product-name}. Quando esses tokens expirarem, {rancher-short-name} perde a capacidade de realizar operações de gerenciamento para o cluster Kubernetes convidado correspondente gerenciado por {rancher-short-name}. Esse problema afeta apenas clusters Kubernetes convidados que estão rodando em {harvester-product-name} e usando credenciais de nuvem criadas após a instalação ou atualização para {rancher-short-name} v2.8.x, que reduziu a configuração https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_kubeconfig_default_token_ttl_minutes[kubeconfig-default-token-ttl-minutes] assim como a configuração https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_auth_token_max_ttl_minutes[auth-token-max-ttl-minutes] para 30 dias e 90 dias, respectivamente.
+
+*Status*: Uma https://harvesterhci.io/kb/renew_harvester_cloud_credentials[solução alternativa temporária] está disponível.
+
+*Última atualização*: 2024-05-21
+
+== RKE2 Kubernetes cluster
+
+Veja xref:./rke2-cluster.adoc[Criando um Cluster Kubernetes RKE2].
+
+== K3s Kubernetes cluster
+
+Veja xref:./k3s-cluster.adoc[Criando um Cluster Kubernetes K3s].
+
+== Restrições de distribuição de topologia
+
+Dentro do seu cluster Kubernetes convidado, você pode usar https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[restrições de distribuição de topologia] para gerenciar como as cargas de trabalho são distribuídas entre os nós, levando em conta fatores como domínios de falha, como regiões e zonas. Isso ajuda a alcançar alta disponibilidade e utilização eficiente dos recursos do cluster {harvester-product-name}.
+
+Para versões do RKE2 anteriores a `v1.25.x`, as versões mínimas necessárias para suportar o recurso de sincronização de rótulos de topologia são as seguintes:
+
+|===
+| Versão Mínima Requerida do RKE2
+
+| >=  v1.24.3+rke2r1
+| >=  v1.23.9+rke2r1
+| >=  v1.22.12+rke2r1
+|===
+
+Além disso, para instalação personalizada, a versão do Provedor de Nuvem Harvester deve ser `>= v0.1.4`.
+
+=== Sincronize os rótulos de topologia com o nó do cluster convidado
+
+Durante a instalação do cluster, o Driver de Nó do Harvester ajudará automaticamente a sincronizar os rótulos de topologia dos nós de VM para os nós do cluster convidado. Atualmente, apenas os rótulos de topologia `region` e `zone` são suportados.
+
+. Configure os rótulos de topologia nos nós {harvester-product-name} na página *Hosts* > *Editar Config* > *Rótulos*. Por exemplo, adicione os rótulos de topologia da seguinte forma:
++
+[,yaml]
+----
+topology.kubernetes.io/region: us-east-1
+topology.kubernetes.io/zone: us-east-1a
+----
++
+image::rancher/node-add-affinity-labels.png[]
+
+. Crie um cluster RKE2 downstream usando o driver de nó do Harvester com o provedor de nuvem Harvester habilitado. Recomendamos adicionar as xref:./rke2-cluster.adoc#_add_node_affinity[regras de afinidade de nó], que impedem que os nós se desloquem para outras zonas após a reconstrução da VM.
++
+image::rancher/create-rke2-harvester-cluster-3.png[]
+
+. Após o cluster estar pronto, confirme que esses rótulos de topologia foram sincronizados com sucesso para os nós no cluster Kubernetes convidado.
+. Agora, implante cargas de trabalho em seu cluster Kubernetes convidado, e você deverá ser capaz de gerenciá-las usando as https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[restrições de distribuição de topologia].
+
+[NOTE]
+====
+Para o Provedor de Nuvem Harvester >= v0.2.0, os rótulos de topologia no nó {harvester-product-name} serão automaticamente ressincronizados quando uma VM (correspondente ao nó convidado) passar por migração ou atualização.
+
+Para o Provedor de Nuvem Harvester < v0.2.0, a sincronização de rótulos ocorrerá apenas durante a inicialização dos nós convidados. Para evitar que os nós se desloquem para diferentes regiões ou zonas, recomendamos adicionar xref:./rke2-cluster.adoc#_add_node_affinity[regras de afinidade de nó] durante o provisionamento do cluster. Isso permitirá que você agende VMs na mesma zona mesmo após a reconstrução.
+====

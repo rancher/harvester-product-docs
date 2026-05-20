@@ -1,0 +1,104 @@
+= USBインストール
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== ブータブルUSBフラッシュ ドライブを作成する
+
+USBインストールフラッシュ ドライブを作成する方法はいくつかあります。
+
+[CAUTION]
+====
+*既知の問題:*v1.2.0 ISOイメージには、USB方式を使用したインタラクティブISOインストールが停止する既知の https://github.com/harvester/harvester/issues/4510[問題]があります。
+
+これを解決するには、パッチが適用された https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso[ISO]を使用できます。このパッチ版はパーティションラベルのみを修正し、他に変更はありません。関連するsha512 https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso.sha512sum[ファイル]を使用してISOを検証することもできます。
+
+詳細と回避策については<<Interactive ISO hangs with the USB installation method>>を参照してください。
+
+どのツールを使用しても、ブータブルデバイスを作成するとUSBデバイスのデータが消去されます。ブータブルデバイスを作成する前に、USBデバイスのすべてのデータをバックアップしてください。
+====
+
+=== Rufus
+
+https://rufus.ie/[Rufus]を使用すると、Windowsコンピュータ上のUSBフラッシュドライブにISOイメージを作成できます。
+
+. Rufusを開き、コンピュータにクリーンなUSBスティックを挿入します。
+. Rufusは自動的にUSBを検出します。*デバイス*のドロップダウンメニューから使用するUSBデバイスを選択します。
+. *ブート選択*では、*選択*を選び、USBに書き込むISOイメージを見つけます。
++
+image::install/rufus.png[rufus.png]
++
+[IMPORTANT]
+====
+古いバージョンのRufusを使用する場合、`DD mode`と`ISO mode`の両方が機能します。`DD mode`はLinuxの`dd`コマンドと同様に機能し、ブータブルデバイスを作成した後はパーティションをブラウズできません。`ISO mode`はデバイス上に自動的にパーティションを作成し、これらのパーティションにファイルをコピーします。ブータブルデバイスを作成した後でも、これらのパーティションをブラウズできます。
+====
+
+=== balenaEtcher
+
+https://www.balena.io/etcher/[balenaEtcher]は、ほとんどのLinux配布パッケージ、macOS、およびWindowsでUSBフラッシュ ドライブにイメージを書き込むことをサポートしています。GUIがあり、使いやすいです。
+
+. ISOイメージを選択します。
+. USBインストールフラッシュ ドライブを作成するためのターゲットUSBデバイスを選択します。
++
+image::install/balena-etcher.png[balena-etcher.png]
+
+=== `dd` コマンド
+
+USBインストールフラッシュドライブを作成するために、Linuxや他のプラットフォームで「dd」コマンドを使用できます。正しいデバイスを選択したことを確認してください。以下のコマンドは、選択したデバイスのデータを消去します。
+
+[,sh]
+----
+# sudo dd if=<path_to_iso> of=<path_to_usb_device> bs=64k
+----
+
+== 当バージョンの注意事項
+
+=== `GRUB _` テキストが表示されますが、USBインストールフラッシュ ドライブから起動しても何も起こりません。
+
+UEFIモードを使用する場合は、USBデバイス自体ではなく、USBデバイスのUEFIブートパーティションから起動してみてください。例えば、ブートするために`UEFI: USB disk 3.0 PMAP, Partition 1`を選択します。表現はシステムによって異なります。
+
+image::install/usb-install-select-correct-partition.png[]
+
+=== グラフィックの問題
+
+一部のグラフィックカードのファームウェアは`v0.3.0`に含まれていません。
+
+`e`を押してGRUBメニューエントリを編集し、ブートパラメータに`nomodeset`を追加できます。`Ctrl + x`を押して起動します。
+
+image::install/usb-install-nomodeset.png[]
+
+=== インストーラーが表示されません
+
+USBフラッシュドライブが起動するがインストーラーが見えない場合は、次のいずれかの回避策を試してください：
+
+* USBフラッシュドライブをUSB 2.0スロットに接続します。
+* バージョン`v0.3.0`以上の場合、起動時に`console=ttyS0`パラメータを削除します。`e`を押してGRUBメニューエントリを編集し、`console=ttyS0`パラメータを削除します。
+
+=== インタラクティブISOがUSBインストール方法でハングします。
+
+v1.2.0 ISOイメージ（`balenaEtcher`、`dd`などのツールで作成）からUSBフラッシュドライブでインストール中、必要なラベルがブートパーティションに欠けているため、インストールプロセスが初期イメージの読み込みプロセスで停止することがあります。したがって、インストールはデータパーティションを正しくマウントできず、`dracut`のいくつかのチェックがブロックされます。
+
+この問題に遭遇した場合、次のような類似の出力が表示され、プロセスは少なくとも50分間（`dracut`からのデフォルトのタイムアウト値）ハングします。
+
+image::install/usb-install-hang.png[]
+
+==== 解決策
+
+この問題に対処するために、ルートパーティションを手動で次のように変更できます：
+
+[,text]
+----
+# Replace the `CDLABEL=COS_LIVE` with your USB data partition. Usually, your USB data partition is the first partition with the device name `sdx` that hangs on your screen.
+# Original
+$linux ($root)/boot/kernel cdroot root=live:CDLABEL=COS_LIVE rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+# Modified
+$linux ($root)/boot/kernel cdroot root=live:/dev/sda1 rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+----
+
+変更されたパラメータは次のようになります：
+
+image::install/grub-parameter-modified.png[]
+
+この調整を行った後、`Ctrl + x`を押してブートを開始します。これで、通常通りインストーラーに入ることができるはずです。
+
+* 関連する問題：
+ ** https://github.com/harvester/harvester/issues/4510[[BUG\] v1.2.0 インタラクティブ ISO が一部のベアメタル デバイスにインストールできない]

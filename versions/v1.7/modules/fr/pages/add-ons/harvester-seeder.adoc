@@ -1,0 +1,81 @@
+= Harvester Seeder
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-seeder* est un *produit complémentaire expérimental*. Pour plus d'informations sur les fonctionnalités expérimentales, consultez xref:introduction/document-conventions.adoc#_feature_labels[Étiquettes de fonctionnalités].
+====
+
+Le *harvester-seeder* produit complémentaire permet d'effectuer des opérations hors bande sur {harvester-product-name} hôtes en utilisant l'Interface de gestion de plateforme intelligente (IPMI).
+
+Ce produit complémentaire peut également découvrir le matériel et les événements associés pour les hôtes qui prennent en charge l'accès basé sur https://www.dmtf.org/standards/redfish[Redfish], puis associer ce matériel aux hôtes correspondants.
+
+== Conditions préalables
+
+Assurez-vous que les exigences suivantes sont remplies avant d'activer le produit complémentaire.
+
+* L'accès IPMI est activé sur les hôtes, et votre compte utilisateur dispose des privilèges nécessaires pour effectuer les opérations associées.
++
+Si vous utilisez https://github.com/ipmitool/ipmitool[ipmitool], vous pouvez exécuter `ipmitool -I lanplus -H iloOriDracIPAddress -U admin -P admin sel list` pour vérifier que les deux exigences sont remplies.
+
+* Redfish est activé.
++
+Vous pouvez exécuter `curl -vk https://iloOriDracIPAddress/redfish/v1` pour vérifier que Redfish est activé.
+
+* Les ports 443 et 623 sont accessibles.
++
+Certaines implémentations IPMI vous permettent d'accéder aux appareils via une interface web sur le port 443. Cependant, les appareils IPMI sont plus couramment accessibles via une interface de ligne de commande sur le port UDP 623 (IPMI sur IP).
+
+* Les alertes sont activées sur les hôtes.
++
+Certains fournisseurs de matériel peuvent exiger que vous activiez les alertes.
+
+== Activation du produit complémentaire et configuration des hôtes
+
+. Dans l'interface {harvester-product-name}, allez à *Avancé -> Modules complémentaires*.
+
+. Sélectionnez *harvester-seeder*, puis sélectionnez *⋮ -> Activer*.
++
+Après quelques secondes, la valeur de *État* change en *DéploiementRéussi*.
++
+image::vm-import-controller/EnableAddon.png[]
+
+. Allez à l'écran *Hôtes*.
++
+Vous devez modifier la configuration de chaque hôte répertorié sur cet écran.
+
+. Sélectionnez un hôte, puis sélectionnez *⋮ -> Modifier la configuration*.
++
+image::seeder/EditConfig.png[]
+
+. Dans l'onglet *Accès hors bande*, sélectionnez *Activé*, configurez les paramètres, puis sélectionnez *Enregistrer*.
++
+Le produit complémentaire utilise les informations pour se connecter à votre interface IPMI.
++
+image::seeder/OutOfBandAccess.png[]
+
+== Opérations liées à l'alimentation
+
+Vous pouvez utiliser l'interface {harvester-product-name} pour éteindre et redémarrer les hôtes une fois que les paramètres d'accès hors bande sont configurés. Cependant, vous devez d'abord activer xref:hosts/hosts.adoc#_node_maintenance[le mode de maintenance], qui migre automatiquement toutes les machines virtuelles vers d'autres nœuds. *harvester-seeder* communique avec les hôtes via IPMI lors de l'exécution de l'opération sélectionnée.
+
+image::seeder/ShutdownReboot.png[]
+
+Vous pouvez également démarrer des machines virtuelles pendant que le mode de maintenance est activé.
+
+image::seeder/PowerOn.png[]
+
+== Agrégation des événements matériels
+
+Si vous avez sélectionné *Activé* dans la section *Événement* de l'écran des paramètres *Accès hors bande*, *harvester-seeder* utilise Redfish pour interroger le matériel afin d'obtenir des informations sur les échecs des composants et les températures des ventilateurs. Les informations sont converties en événements Kubernetes lors de la réconciliation matérielle et sont ensuite gérées par la stratégie de collecte des déchets de Kubernetes. {harvester-product-name} stocke ces événements pendant 1 heure par défaut.
+
+image::seeder/HardwareEvents.png[]
+
+== Dépannage
+
+L'écran des paramètres *Accès hors bande* peut devenir non réactif et afficher le message `Waiting for "inventories.metal.harvesterhci.io" to be ready`. Vous devez actualiser la page chaque fois que cela se produit. Pour plus d'informations, voir https://github.com/harvester/harvester/issues/4412[Problème #4412].
+
+Si vous rencontrez des problèmes persistants lors de l'utilisation de *harvester-seeder*, soumettez ce qui suit au support SUSE{nbsp}:
+
+* Paquet de support
+* Résultat de la commande `kubectl get machine -n harvester-system -o yaml`

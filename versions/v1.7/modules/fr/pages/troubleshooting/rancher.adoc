@@ -1,0 +1,83 @@
+= Problèmes de Rancher
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== Collecte des journaux de cluster invité
+
+Vous pouvez collecter les journaux de cluster invité et les fichiers de configuration. Effectuez les étapes suivantes sur chaque nœud de cluster invité{nbsp}:
+
+. Connectez-vous au nœud.
+
+. Téléchargez le script de collecte de journaux Rancher v2.x pour Linux et générez un paquet de journaux en utilisant les commandes suivantes{nbsp}:
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+La sortie du script indique l'emplacement de l'archive tar générée.
+
+Pour plus d'informations, voir https://www.suse.com/support/kb/doc/?id=000020191[Le script de collecte de journaux Rancher v2.x pour Linux].
+
+== Importation des clusters Harvester dans Rancher
+
+Après que le `cluster-registration-url` soit configuré sur Harvester, un déploiement nommé `cattle-system/cattle-cluster-agent` est créé pour l'importation du cluster Harvester dans Rancher.
+
+=== Importation en attente en raison d'une erreur `unable to read CA file`
+
+Les messages d'erreur suivants dans les journaux du pod `cattle-cluster-agent-*` indiquent que le cluster Harvester ne peut pas être importé dans Rancher.
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+La cause profonde est une configuration inefficace du paramètre `agent-tls-mode` de Rancher, qui contrôle comment les agents de Rancher (`cluster-agent`, `fleet-agent` et `system-agent`) valident le certificat de Rancher lors de l'établissement d'une connexion. La valeur par défaut de ce paramètre dépend de la version de Rancher et du type d'installation.
+
+|===
+| Type | Versions | Valeur par défaut
+
+| Nouvelle installation
+| v2.8
+| `system-store`
+
+| Nouvelle installation
+| v2.9 et versions ultérieures
+| `strict`
+
+| Mise à niveau
+| v2.8 à v2.9
+| `system-store`
+|===
+
+Vous pouvez configurer ce paramètre pour qu'il corresponde à vos exigences en effectuant les étapes suivantes{nbsp}:
+
+. Connectez-vous à l'interface utilisateur de Rancher.
+
+. Allez à *Paramètres globaux -> Paramètres*.
+
+. Sélectionnez *agent-tls-mode*, puis sélectionnez *⋮ -> Modifier le paramètre* pour accéder aux options de configuration.
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. Sélectionnez l'une des valeurs suivantes{nbsp}:
++
+* *Strict* : Les agents de Rancher ne font confiance qu'aux certificats générés par l'Autorité de certification (CA) spécifiée dans le paramètre `cacerts`. C'est le paramètre TLS par défaut recommandé.
++
+L'option *Strict* permet un niveau de sécurité plus élevé en exigeant que Rancher ait accès à la CA qui a généré le certificat visible aux agents. Dans le cas de certaines configurations de certificats (notamment, les certificats externes), cela n'est pas automatique, et *une configuration supplémentaire est requise*. Pour plus d'informations sur les scénarios nécessitant une configuration supplémentaire, voir https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[Choisissez votre configuration SSL] dans la documentation de Rancher.
++
+* *Magasin système* : Les agents de Rancher font confiance à tout certificat généré par une CA publique spécifiée dans le magasin de confiance du système d'exploitation. Utilisez ce paramètre si votre configuration utilise une autorité de confiance externe et que vous n'avez pas la propriété de l'Autorité de certification.
++
+[IMPORTANT]
+====
+Utiliser le paramètre *Magasin système* implique que l'agent fait confiance à toutes les autorités externes trouvées dans le magasin de confiance du système d'exploitation, y compris celles en dehors du contrôle de l'utilisateur.
+====
+
+. Cliquez sur *Enregistrer*.
+
+Problèmes liés{nbsp}:
+
+- Harvester{nbsp}: https://github.com/harvester/harvester/issues/7105[#7105] et https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher{nbsp}: https://github.com/rancher/rancher/issues/45628[#45628] (Voir https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[ce commentaire].)

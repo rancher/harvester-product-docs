@@ -1,0 +1,332 @@
+= VM Import Controller
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+Sie können virtuelle Maschinen aus VMware, OpenStack und Open Virtual Appliance (OVA)-Paketen in {harvester-product-name} mit dem vm-import-controller Add-on importieren. Das Add-on muss aktiviert sein, bevor Sie mit dem Import von virtuellen Maschinen beginnen.
+
+image::vm-import-controller/EnableAddon.png[]
+
+Standardmäßig nutzt der vm-import-controller flüchtigen Speicher, der von /var/lib/kubelet gemountet wird.
+
+Während der Migration könnte der Knoten einer großen VM auf diesem Mount keinen Speicher mehr haben, was zu nachfolgenden Planungsfehlern führt.
+
+Um dies zu vermeiden, wird den Benutzern geraten, PVC-gestützten Speicher zu aktivieren und die benötigte Speichermenge anzupassen. Laut den besten Praktiken sollte die PVC-Größe doppelt so groß sein wie die größte VM, die migriert wird. Dies ist entscheidend, da die PVC als temporärer Speicher verwendet wird, um die VM herunterzuladen und die Festplatten in Rohbilddateien zu konvertieren.
+
+image::vm-import-controller/ConfigureAddon.png[]
+
+== vm-import-controller
+
+Derzeit werden die folgenden Quellanbieter unterstützt:
+
+* VMware
+* OpenStack
+* Open Virtual Appliance (OVA)
+
+== API
+
+Der vm-import-controller führt zwei CRDs ein.
+
+=== Ursprünge
+
+Quellen ermöglichen es Benutzern, gültige Quellcluster zu definieren.
+
+Beispiel:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VmwareSource
+metadata:
+  name: vcsim
+  namespace: default
+spec:
+  endpoint: "https://vscim/sdk"
+  dc: "DCO"
+  credentials:
+    name: vsphere-credentials
+    namespace: default
+----
+
+Das Geheimnis enthält die Anmeldeinformationen für den vCenter-Endpunkt:
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+----
+
+Im Rahmen des Abstimmungsprozesses wird der Controller sich bei vCenter anmelden und überprüfen, ob das in der Quellspezifikation angegebene `dc` gültig ist.
+
+Sobald diese Überprüfung bestanden ist, wird die Quelle als bereit markiert und kann für VM-Migrationen verwendet werden.
+
+[,shell]
+----
+$ kubectl get vmwaresource.migration
+NAME    STATUS
+vcsim   clusterReady
+----
+
+Für auf OpenStack basierende Quellcluster ist eine Beispieldefinition wie folgt:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OpenstackSource
+metadata:
+  name: devstack
+  namespace: default
+spec:
+  endpoint: "https://devstack/identity"
+  region: "RegionOne"
+  credentials:
+    name: devstack-credentials
+    namespace: default
+----
+
+Das Geheimnis enthält die Anmeldeinformationen für den OpenStack-Endpunkt:
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devstack-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "project_name": "admin"
+  "domain_name": "default"
+  "ca_cert": "pem-encoded-ca-cert"
+----
+
+Im Rahmen des Abstimmungsprozesses versucht der Controller, virtuelle Maschinen im Projekt aufzulisten und markiert die Quelle als bereit.
+
+[,shell]
+----
+$ kubectl get openstacksource.migration
+NAME       STATUS
+devstack   clusterReady
+----
+
+Für OVA-basierte Quellen ist eine Beispieldefinition wie folgt:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OvaSource
+metadata:
+  name: example
+  namespace: default
+spec:
+  url: "http://192.168.0.1:8080/example.ova"
+  httpTimeoutSeconds: 300
+  credentials:
+    name: example-ova-credentials
+    namespace: default
+----
+
+Das optionale `httpTimeoutSeconds` Feld ermöglicht es Ihnen, die maximale Zeit (in Sekunden) festzulegen, die {harvester-product-name} auf den Abschluss einer HTTP-Anfrage wartet. Dieser Zeitraum umfasst die gesamte Transaktion, einschließlich der Herstellung der Verbindung, der Handhabung von Weiterleitungen und dem Lesen des Antwortkörpers. Wenn der Wert `0` ist, wird die Timeout-Funktion deaktiviert. Der Standardwert ist `600` (10 Minuten).
+
+Bei der Konfiguration des Secrets können Sie grundlegende Authentifizierungsanmeldeinformationen für die URL und ein CA-Zertifikat angeben, wenn der Endpunkt HTTPS verwendet.
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata: 
+  name: example-ova-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "ca.crt": "pem-encoded-ca-cert"
+----
+
+Im Rahmen des Abstimmungsprozesses sendet der Controller eine HEAD-Anfrage an die angegebene URL, um deren Gültigkeit zu bestätigen, bevor die Quelle als bereit markiert wird.
+
+[,shell]
+----
+$ kubectl get ovasource.migration
+NAME      STATUS
+example   clusterReady
+----
+
+=== VirtualMachineImport
+
+Die VirtualMachineImport CRD bietet eine Möglichkeit für Benutzer, eine Quell-VM zu definieren und mit dem tatsächlichen Quell-Cluster zu verknüpfen, um einen VM-Export/-Import durchzuführen.
+
+Ein Beispiel für VirtualMachineImport sieht so aus:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: alpine-export-test
+  namespace: default
+spec:
+  virtualMachineName: "alpine-export-test"
+  folder: "Discovered VM"
+  networkMapping:
+  - sourceNetwork: "dvSwitch 1"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "dvSwitch 2"
+    destinationNetwork: "default/vlan2"
+    networkInterfaceModel: "e1000"
+  defaultNetworkInterfaceModel: "virtio"
+  skipPreflightChecks: false
+  storageClass: "my-storage-class"
+  defaultDiskBusType: "scsi"
+  sourceCluster:
+    name: vcsim
+    namespace: default
+    kind: VmwareSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+  forcePowerOff: false
+  gracefulShutdownTimeoutSeconds: 30
+----
+
+Dies veranlasst den Controller dazu, die virtuelle Maschine mit dem Namen `alpine-export-test` im Quell-VMware-Cluster zu exportieren, zu verarbeiten und im {harvester-product-name}-Cluster neu zu erstellen.
+
+Der Controller überprüft die Konfiguration, bevor er den Importprozess startet, und stoppt den Import, wenn er Fehler wie unbekannte xref:storage/storageclass.adoc[StorageClasses] oder Netzwerke erkennt. Diese Überprüfungen sind standardmäßig aktiviert, können jedoch deaktiviert werden, indem `skipPreflightChecks` auf `true` gesetzt wird.
+
+Die Dauer des Importprozesses hängt von der Größe der virtuellen Maschine ab. Während der Importprozess einige Zeit in Anspruch nehmen kann, sollten Sie `VirtualMachineImages` für jede Festplatte in der definierten virtuellen Maschine sehen.
+
+Wenn die Quellvirtuelle Maschine in einem Ordner platziert ist, können Sie den Ordnernamen im optionalen `folder` Feld angeben.
+
+Die Liste der Elemente in `networkMapping` definiert, wie die Quell-Netzwerkschnittstellen den {harvester-product-name} Netzwerken zugeordnet werden.
+
+Falls erforderlich, können Sie das Modell jeder Quell-Netzwerkschnittstelle einzeln mit dem `networkInterfaceModel` Feld angeben. Die gültigen Werte sind `e1000`, `e1000e`, `ne2k_pci`, `pcnet`, `rtl8139` und `virtio`.
+
+Die Angabe des Standard-Schnittstellenmodells mit dem `defaultNetworkInterfaceModel` Feld ist besonders nützlich in den folgenden Situationen:
+
+* Sie möchten das Standardmodell überschreiben, das verwendet wird, wenn die automatische Erkennung bei VMware-Importen nicht funktioniert, oder das Standardmodell, das für alle Netzwerkschnittstellen bei OpenStack-Importen verwendet wird.
+* Es ist keine Netzwerkzuordnung vorhanden, und die `pod-network` Quell-Netzwerkschnittstelle wird automatisch erstellt.
+
+Wenn Sie keinen Wert angeben, wird standardmäßig `virtio` verwendet.
+
+Wenn kein Treffer gefunden wird, wird jede nicht zugeordnete Netzwerkschnittstelle an das Standard-`managementNetwork` angehängt.
+
+Das `storageClass` Feld gibt die xref:storage/storageclass.adoc[StorageClass] an, die für Bilder und die Bereitstellung von persistenten Volumes während des Importprozesses verwendet werden soll. Wenn kein Wert angegeben ist, verwendet {harvester-product-name} die Standard-StorageClass.
+
+Das `defaultDiskBusType` Feld ermöglicht es Ihnen, den Bustyp für importierte Festplatten anzugeben. {harvester-product-name} verwendet dieses Feld auf folgende Weise:
+
+* VMware-Quellen: Der Wert wird nur verwendet, wenn {harvester-product-name} den Bustyp nicht automatisch erkennen kann.
+* OpenStack-Quellen: Der Wert wird für alle importierten Festplatten verwendet.
+* Open Virtual Appliance (OVA) Quellen: Der Wert wird nur verwendet, wenn {harvester-product-name} den Bustyp nicht automatisch erkennen kann.
+
+Die gültigen Werte sind `sata`, `scsi`, `usb` und `virtio`. Wenn Sie keinen Wert angeben, wird standardmäßig `virtio` verwendet.
+
+Standardmäßig versucht der vm-import-controller, das Gastbetriebssystem der Quellvirtuellen Maschine vor dem Start des Importprozesses ordnungsgemäß herunterzufahren. Wenn die virtuelle Maschine nicht innerhalb eines bestimmten Zeitraums ordnungsgemäß heruntergefahren wird, wird ein harter Ausschaltvorgang erzwungen. Sie können diesen Zeitraum für das ordnungsgemäße Herunterfahren anpassen, indem Sie den Wert des `gracefulShutdownTimeoutSeconds` Feldes ändern, das standardmäßig auf `60` Sekunden eingestellt ist. Ein harter Ausschaltvorgang ohne Versuch eines ordnungsgemäßen Herunterfahrens kann erzwungen werden, indem das `forcePowerOff` Feld auf `true` gesetzt wird.
+
+Wenn Sie eine auf VMware basierende virtuelle Maschine importieren, hängt das Verhalten des vm-import-controllers davon ab, ob https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools] auf der virtuellen Maschine installiert ist.
+
+|===
+| VMware Tools Status | vm-import-controller Behavior
+
+| Installiert
+| Versucht den beschriebenen sanften Shutdown, bevor der Importprozess gestartet wird.
+
+| Nicht installiert
+| Zeigt Protokolle ähnlich wie `handler virtualmachine-import-job-change: failed to shutdown the guest OS of the source VM: ServerFaultCode: Cannot complete operation because VMware Tools is not running in this virtual machine., requeuing` an
+|===
+
+[NOTE]
+====
+Der vm-import-controller unterstützt nur die Felder `forcePowerOff` und `gracefulShutdownTimeoutSeconds` für VMware, da OpenStack automatisch eine Kombination aus sanftem Herunterfahren und hartem Ausschalten durchführt.
+====
+
+Sobald die virtuelle Maschine erfolgreich importiert wurde, spiegelt das Objekt den Status wider:
+
+[,shell]
+----
+$ kubectl get virtualmachineimport.migration
+NAME                    STATUS
+alpine-export-test      virtualMachineRunning
+openstack-cirros-test   virtualMachineRunning
+----
+
+Ähnlich können Benutzer einen VirtualMachineImport für eine OpenStack-Quelle definieren:
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: openstack-demo
+  namespace: default
+spec:
+  virtualMachineName: "openstack-demo" #Name or UUID for instance
+  networkMapping:
+  - sourceNetwork: "shared"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "public"
+    destinationNetwork: "default/vlan2"
+  sourceCluster:
+    name: devstack
+    namespace: default
+    kind: OpenstackSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+----
+
+[NOTE]
+====
+OpenStack ermöglicht es Benutzern, mehrere Instanzen mit demselben Namen zu haben. In einem solchen Szenario wird den Benutzern geraten, die Instanz-ID zu verwenden. Die Abgleichlogik versucht, eine Namens-zu-ID-Suche durchzuführen, wenn ein Name verwendet wird.
+====
+
+==== Bekannte Probleme
+
+===== Der Name der Quell-virtuellen Maschine entspricht nicht den RFC1123-Anforderungen.
+
+Beim Erstellen eines Objekts für die virtuelle Maschine verwendet das vm-import-controller-Add-On den Namen der Quell-virtuellen Maschine, der möglicherweise nicht den Kubernetes-Objekt https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names[Benennungsrichtlinien] entspricht. Möglicherweise müssen Sie die Quell-virtuelle Maschine umbenennen, um einen erfolgreichen Abschluss des Imports zu ermöglichen.
+
+===== VMware-basierte virtuelle Maschine ohne VMware Tools wird nicht migriert.
+
+Wenn Sie versuchen, eine VMware-basierte virtuelle Maschine in {harvester-product-name} v1.6.0 zu importieren, treten die folgenden Probleme auf, wenn https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools] nicht auf der virtuellen Maschine installiert ist:
+
+* Der vm-import-controller fährt das Gastbetriebssystem nicht sanft herunter.
+* Wenn die Zeitspanne für den sanften Shutdown (`gracefulShutdownTimeoutSeconds`) abläuft, zwingt der vm-import-controller nicht zu einem harten Ausschalten.
+* Die virtuelle Maschine wird nicht von VMware migriert.
+
+Um das Problem zu beheben, führen Sie eine der folgenden Alternativen durch:
+
+* Fahren Sie die virtuelle Maschine herunter, bevor Sie sie nach {harvester-product-name} migrieren. 
+* In der `VirtualMachineImport` CRD-Spezifikation setzen Sie das `forcePowerOff`-Feld auf `true`.
+* Installieren Sie VMware Tools oder https://knowledge.broadcom.com/external/article?legacyId=2073803[open-vm-tools].
+
+===== Die Räumungsstrategie ist nicht festgelegt.
+
+Das `evictionStrategy` Feld wird während des Importvorgangs der virtuellen Maschine nicht automatisch konfiguriert. Dies verhindert die Live-Migration der virtuellen Maschine.
+
+Um das Problem zu beheben, führen Sie den folgenden Befehl aus:
+
+[,shell]
+----
+kubectl patch VirtualMachine <vm-name> -n <namespace> --type=merge -p '{
+  "spec": {
+    "template": {
+      "spec": {
+        "evictionStrategy": "LiveMigrateIfPossible"
+      }
+    }
+  }
+}'
+----
+
+Um alle virtuellen Maschinen mit einer fehlenden `evictionStrategy`-Konfiguration zu aktualisieren, führen Sie den folgenden Befehl aus:
+
+[,shell]
+----
+for vm in $(kubectl get VirtualMachine -A -o json | jq -r '.items[] | select(.spec.template.spec.evictionStrategy == null) | "\(.metadata.namespace):\(.metadata.name)"'); do \
+  kubectl patch VirtualMachine ${vm#*:} -n ${vm%:*} --type=merge -p '{"spec":{"template":{"spec":{"evictionStrategy":"LiveMigrateIfPossible"}}}}'; \
+done
+----
+
+Sie müssen die virtuelle Maschine neu starten, um die Änderungen anzuwenden.

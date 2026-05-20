@@ -1,0 +1,140 @@
+= CloudInit CRD
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Sie können die `CloudInit` CRD verwenden, um {harvester-product-name} Betriebssystemeinstellungen entweder manuell oder mit GitOps-Lösungen zu konfigurieren.
+
+== Hintergrund
+
+Das {harvester-product-name} Betriebssystem verwendet das https://github.com/rancher/elemental-toolkit[elemental-toolkit], das eine einzigartige Form der https://rancher.github.io/elemental-toolkit/docs/reference/cloud_init/[cloud-init-Unterstützung] bietet.
+
+Einstellungen, die während des Installationsprozesses konfiguriert werden, werden in die `elemental` cloud-init-Datei im `/oem` Verzeichnis geschrieben. Da das Betriebssystem unveränderlich ist, stellt die cloud-init-Datei sicher, dass knotenspezifische Einstellungen bei jedem Neustart angewendet werden.
+
+Die `CloudInit` CRD stellt die cloud-init-Datei über eine Kubernetes CRD zur Verfügung. Dies ermöglicht es Ihnen, knotenspezifische Einstellungen nach der Installation zu ändern, ohne Schritte unternehmen zu müssen, um das Root-Dateisystem beschreibbar zu machen.
+
+Darüber hinaus wird die `CloudInit` CRD gespeichert und mit den zugrunde liegenden Hosts synchronisiert, sodass Änderungen, die direkt am Betriebssystem vorgenommen werden, nicht verloren gehen, wenn Knoten neu gestartet und aktualisiert werden.
+
+[NOTE]
+====
+
+Die `CloudInit` CRD ist eine clusterweite Ressource. Stellen Sie sicher, dass Ihr Benutzerkonto über die erforderlichen Berechtigungen verfügt, um auf die Ressource zuzugreifen (über {rancher-product-name} rollenbasierte Zugriffskontrolle).
+====
+
+
+== Einführung
+
+Das folgende Beispiel fügt allen Knoten in einem bestehenden {harvester-product-name} Cluster SSH-Schlüssel hinzu.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: my-ssh-keys
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-my-ssh-keys
+  contents: |
+    stages:
+      network:
+        - name: "add my ssh keys"
+          authorized_keys:
+            rancher:
+            - ssh-rsa key1
+            - ssh-rsa key2
+  paused: false
+----
+
+Das `spec` Feld enthält Folgendes:
+
+* `matchSelector (required)`: Label-Selector, der verwendet wird, um die Knoten zu identifizieren, auf die die Änderung angewendet werden muss. Sie können das `harvesterhci.io/managed: "true"` Label verwenden, um alle Knoten auszuwählen.
+* `filename (required)`: Name der Datei in `/oem`. Cloud-init-Dateien in `/oem` werden in alphabetischer Reihenfolge angewendet. Dies kann verwendet werden, um sicherzustellen, dass Dateiänderungen während des Bootvorgangs angewendet werden.
+* `content (required)`: Inline-Inhalt für die Elemental cloud-init Ressource, die an Zielknoten geschrieben wird.
+* `paused (optional)`: Verwendet, um den `CloudInit` CRD-Abgleich zu pausieren. Die {harvester-product-name} Controller überwachen Elemental cloud-init-Dateien, die von der `CloudInit` CRD verwaltet werden. Direkte Änderungen an diesen Dateien werden sofort mit dem definierten Zustand abgeglichen, es sei denn, die CRD ist pausiert.
+
+Sobald das Objekt erstellt ist, können Sie sich bei den Zielknoten anmelden, um die Ergebnisse zu überprüfen.
+
+Im folgenden Beispiel wird eine Datei mit dem Namen `/oem/99-my-ssh-keys.yaml` erstellt und anschließend von den {harvester-product-name} Controllern überwacht.
+
+----
+harvester-qhgd4:/oem # more 99-my-ssh-keys.yaml
+stages:
+  network:
+    - name: "add my ssh keys"
+      authorized_keys:
+        rancher:
+        - ssh-rsa key1
+        - ssh-rsa key2
+----
+
+Die `status` Subressource kann verwendet werden, um den Rollout einer Änderung an den zugrunde liegenden Knoten zu verfolgen.
+
+Im folgenden Beispiel zeigen die `status` Werte an, dass die Änderung auf alle drei Knoten im Cluster angewendet wurde.
+
+----
+status:
+  rollouts:
+    harvester-kfs2c:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-qhgd4:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-rmvzg:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+[NOTE]
+====
+
+Sobald die cloud-init-Änderungen angewendet sind, müssen Sie die Knoten neu starten, um sicherzustellen, dass die `elemental-toolkit` die angeforderten Änderungen am Betriebssystem anwendet.
+====
+
+
+Das Löschen der `CloudInit` CRD führt zur Entfernung der zugehörigen Dateien von den zugrunde liegenden Knoten. Wie bei anderen cloud-init-Ressourcen treten die Auswirkungen dieser Änderung erst nach dem Neustart der betroffenen Knoten in Kraft.
+
+Sie werden ermutigt, https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] und die `CloudInit` CRD zu nutzen, um Änderungen am {harvester-product-name} Betriebssystem zu verwalten.

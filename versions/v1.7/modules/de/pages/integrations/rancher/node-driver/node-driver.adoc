@@ -1,0 +1,109 @@
+= Harvester Node Driver
+:revdate: 2025-09-18
+:page-revdate: {revdate}
+
+Der https://github.com/harvester/docker-machine-driver-harvester[Harvester Node Driver] wird, ähnlich wie der Docker Machine-Treiber, verwendet, um VMs im {harvester-product-name}-Cluster bereitzustellen, und {rancher-short-name} nutzt ihn, um Kubernetes-Cluster zu starten und zu verwalten.
+
+Ein Vorteil der Installation von Kubernetes auf Knotenpools, die vom Knoten-Treiber gehostet werden, besteht darin, dass Rancher automatisch einen weiteren Knoten erstellen kann, um dem Cluster beizutreten, falls ein Knoten die Verbindung verliert, sodass die Anzahl des Knotenpools wie erwartet erhalten bleibt.
+Darüber hinaus ist der Harvester Node Driver standardmäßig in den Harvester Cloud-Anbieter integriert und bietet xref:/integrations/rancher/cloud-provider.adoc#_load_balancer_support[integrierte Unterstützung für Lastenausgleich] sowie xref:/integrations/rancher/csi-driver.adoc[Speicher-Passthrough] vom Bare-Metal-Cluster zu den Gast-Kubernetes-Clustern, um native Speicherleistung zu erzielen.
+
+In diesem Abschnitt lernen Sie, wie Sie {rancher-short-name} konfigurieren, um den Harvester Node Driver zu verwenden, um Kubernetes-Cluster zu starten und zu verwalten.
+
+[NOTE]
+====
+Der Harvester Node Driver unterstützt nur Cloud-Images. Das liegt daran, dass ISO-Images normalerweise zusätzliche Konfigurationen erfordern, die eine saubere Bereitstellung (ohne Benutzerintervention) stören, und sie werden in Cloud-Umgebungen normalerweise nicht verwendet.
+====
+
+== Harvester Node Driver
+
+Ab {rancher-short-name} `v2.6.3` ist der Harvester Node Driver standardmäßig aktiviert. Sie können zur Seite *Cluster Management* > *Drivers* > *Node Drivers* gehen, um den Status des Harvester Node Drivers zu überprüfen.
+
+image::rancher/edit-node-driver.png[edit-node-driver]
+
+Wenn der Harvester Node Driver aktiviert ist, können Sie Kubernetes-Cluster auf dem {harvester-product-name}-Cluster erstellen und diese von {rancher-short-name} aus verwalten.
+
+image::rancher/harvester-node-driver.png[harvester-node-driver]
+
+[NOTE]
+====
+* Verweisen Sie auf die https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-7-5[{rancher-short-name} Downstream-Cluster-Unterstützungsmatrix] für die unterstützten RKE2-Versionen und Gastbetriebssystemversionen.
+* Änderungen an der Konfiguration des Harvester Node Drivers werden nicht gespeichert. Alle angewendeten Änderungen werden beim Neustart des {rancher-short-name}-Containers zurückgesetzt.
+* Beginnend mit Harvester Node Driver v0.6.3 wurde die automatische Injektion des `qemu-guest-agent` aus dem Backend entfernt. Wenn das von Ihnen verwendete Image das `qemu-guest-agent`-Paket nicht enthält, können Sie es dennoch über die `userdata`-Konfiguration installieren. Andernfalls wird der Cluster nicht erfolgreich bereitgestellt.
++
+[,yaml]
+----
+ #cloud-config
+ package_update: true
+ packages:
+ - qemu-guest-agent
+ runcmd:
+ - - systemctl
+   - enable
+   - '--now'
+   - qemu-guest-agent.service
+----
+====
+
+== Bekannte Probleme
+
+=== {rancher-short-name} verliert die Fähigkeit, Gastcluster zu verwalten oder zu skalieren, wenn die entsprechenden API-Token ablaufen.
+
+*Problem*: https://github.com/harvester/harvester/issues/5827[#5827]
+
+*Beschreibung*: {rancher-short-name} verwendet kubeconfigs mit eingebetteten Authentifizierungs-Token, um Gast-Kubernetes-Cluster auf {harvester-product-name} bereitzustellen. Wenn diese Tokens ablaufen, verliert {rancher-short-name} die Fähigkeit, Verwaltungsoperationen für den entsprechenden, von {rancher-short-name} verwalteten Gast-Kubernetes-Cluster durchzuführen. Dieses Problem betrifft nur Gast-Kubernetes-Cluster, die auf {harvester-product-name} laufen und Cloud-Anmeldeinformationen verwenden, die nach der Installation oder dem Upgrade auf {rancher-short-name} v2.8.x erstellt wurden, was die https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_kubeconfig_default_token_ttl_minutes[kubeconfig-default-token-ttl-minutes]-Einstellung sowie die https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_auth_token_max_ttl_minutes[auth-token-max-ttl-minutes]-Einstellung auf 30 Tage bzw. 90 Tage reduzierte.
+
+*Status*: Ein https://harvesterhci.io/kb/renew_harvester_cloud_credentials[vorübergehender Workaround] ist verfügbar.
+
+*Zuletzt aktualisiert*: 2024-05-21
+
+== RKE2 Kubernetes-Cluster
+
+Siehe xref:./rke2-cluster.adoc[Erstellen eines RKE2 Kubernetes-Clusters].
+
+== K3s Kubernetes-Cluster
+
+Siehe xref:./k3s-cluster.adoc[Erstellen eines K3s Kubernetes-Clusters].
+
+== Topologie-Verbreitungsbeschränkungen
+
+Innerhalb Ihres Gast-Kubernetes-Clusters können Sie https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[Topologie-Verbreitungsbeschränkungen] verwenden, um zu verwalten, wie Arbeitslasten über Knoten verteilt werden, wobei Faktoren wie Ausfallbereiche wie Regionen und Zonen berücksichtigt werden. Dies hilft, hohe Verfügbarkeit und effiziente Ressourcennutzung der {harvester-product-name}-Clusterressourcen zu erreichen.
+
+Für RKE2-Versionen vor `v1.25.x` sind die minimal erforderlichen Versionen zur Unterstützung der Topologie-Label-Synchronisierungsfunktion wie folgt:
+
+|===
+| Minimale erforderliche RKE2-Version
+
+| >=  v1.24.3+rke2r1
+| >=  v1.23.9+rke2r1
+| >=  v1.22.12+rke2r1
+|===
+
+Darüber hinaus sollte für die benutzerdefinierte Installation die Version des Harvester Cloud Providers `>= v0.1.4` sein.
+
+=== Synchronisieren Sie die Topologie-Labels auf dem Gast-Cluster-Knoten.
+
+Während der Cluster-Installation wird der Harvester Node Driver automatisch helfen, die Topologie-Labels von VM-Knoten zu Gast-Cluster-Knoten zu synchronisieren. Derzeit werden nur die Topologie-Labels `region` und `zone` unterstützt.
+
+. Konfigurieren Sie die Topologie-Labels auf den {harvester-product-name} Knoten auf der Seite *Hosts* > *Edit Config* > *Labels*. Fügen Sie beispielsweise die Topologie-Labels wie folgt hinzu:
++
+[,yaml]
+----
+topology.kubernetes.io/region: us-east-1
+topology.kubernetes.io/zone: us-east-1a
+----
++
+image::rancher/node-add-affinity-labels.png[]
+
+. Erstellen Sie einen Downstream-RKE2-Cluster mit dem Harvester Node Driver und aktiviertem Harvester Cloud Provider. Wir empfehlen, die xref:./rke2-cluster.adoc#_add_node_affinity[Node-Affinitätsregeln] hinzuzufügen, um zu verhindern, dass Knoten nach dem Wiederaufbau von VMs in andere Zonen abdriften.
++
+image::rancher/create-rke2-harvester-cluster-3.png[]
+
+. Nachdem der Cluster bereit ist, bestätigen Sie, dass diese Topologie-Labels erfolgreich auf die Knoten im Gast-Kubernetes-Cluster synchronisiert wurden.
+. Jetzt können Sie Workloads in Ihrem Gast-Kubernetes-Cluster bereitstellen, und Sie sollten in der Lage sein, diese mit den https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[Topologie-Verbreitungsbeschränkungen] zu verwalten.
+
+[NOTE]
+====
+Für Harvester Cloud Provider >= v0.2.0 werden die Topologie-Labels auf dem {harvester-product-name} Knoten automatisch resynchronisiert, wenn eine VM (entsprechend dem Gastknoten) migriert oder aktualisiert wird.
+
+Für Harvester Cloud Provider < v0.2.0 erfolgt die Labelsynchronisation nur während der Initialisierung der Gastknoten. Um zu verhindern, dass Knoten in verschiedene Regionen oder Zonen abdriften, empfehlen wir, während der Clusterbereitstellung xref:./rke2-cluster.adoc#_add_node_affinity[Node-Affinitätsregeln] hinzuzufügen. Dies ermöglicht es Ihnen, VMs in derselben Zone zu planen, selbst nach dem Wiederaufbau.
+====

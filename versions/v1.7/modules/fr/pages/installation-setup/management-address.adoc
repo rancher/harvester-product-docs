@@ -1,0 +1,88 @@
+= Adresse de gestion
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} fournit une adresse IP virtuelle fixe (VIP) en tant qu'adresse de gestion, la VIP doit être différente de toute adresse IP de nœud. Vous pouvez trouver l'adresse de gestion sur le tableau de bord de la console après l'installation.
+
+[NOTE]
+====
+
+Si vous avez sélectionné que l'adresse IP soit configurée via DHCP, vous devrez configurer un mappage MAC-IP statique sur votre serveur DHCP afin d'avoir une IP virtuelle persistante.
+====
+
+image::install/iso-installed.png[]
+
+== Configuration requise
+
+* La VIP et les interfaces de gestion des nœuds doivent appartenir au même sous-réseau.
+* Toutes {harvester-product-name} les interfaces de gestion des nœuds doivent être sur le même segment de réseau de couche 2.
+
+Les deux sont nécessaires car la VIP repose sur le protocole de résolution d'adresse (ARP), qui est un protocole de couche 2.
+
+La VIP peut être assignée à {harvester-product-name} n'importe quelle interface de gestion de nœud et peut changer à tout moment (pas seulement lorsqu'un échec de nœud survient). Lorsque la VIP change d'hôte, des _ARP gratuits_ sont envoyés afin que d'autres hôtes sur le réseau sachent où diriger le trafic destiné à l'adresse IP de gestion du {harvester-product-name} cluster (la VIP).
+
+[CAUTION]
+====
+
+Si vous prévoyez d'héberger un {harvester-product-name} cluster dans un centre de données constitué de matériel sans système d'exploitation, le fournisseur de services désignera probablement une adresse IP « flottante » ou « réservée » comme la VIP que vous pouvez assigner à l'un de vos serveurs. La mise à jour de cette assignation fait que le trafic commence instantanément à circuler vers le nouveau nœud auquel il est assigné. Dans ces situations, {harvester-product-name} est incapable de mettre à jour l'assignation de l'IP flottante/réservée dans les systèmes de votre fournisseur lorsque la VIP change d'hôte.
+
+De plus, les "ARP gratuits" de la VIP peuvent également être inefficaces en fonction de la configuration réseau de votre fournisseur entre vos {harvester-product-name} nœuds (par exemple, si vos {harvester-product-name} hôtes ne sont pas sur le même réseau de couche 2). Vous devez mettre à jour manuellement l'assignation de l'IP flottante/réservée lorsque la VIP change d'hôte pour garantir que le cluster fonctionne correctement. Pour plus d'informations, voir <<Identifying the node the VIP is assigned to,Identifier le nœud auquel la VIP est assignée>>.
+====
+
+== Comment obtenir l'adresse MAC de la VIP
+
+Pour obtenir l'adresse MAC de la VIP, vous pouvez exécuter la commande suivante sur le nœud de gestion{nbsp}:
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+Exemple de sortie{nbsp}:
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== Identifier le nœud auquel la VIP est assignée
+
+Vous pouvez utiliser kubectl (soit sur votre machine locale avec le {harvester-product-name} fichier kubeconfig, soit en utilisant SSH pour vous connecter à n'importe quel {harvester-product-name} nœud de gestion en tant qu'utilisateur root).
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+Exemple de sortie :
+
+[,console]
+----
+harvester-xzj76
+----
+
+Alternativement, vous pouvez utiliser SSH pour vous connecter à chaque {harvester-product-name} nœud de gestion puis exécuter la commande `ip address show mgmt-br`.
+
+Exemple :
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+Lorsque la sortie inclut à la fois l'adresse VIP et l'adresse du nœud, la VIP est attribuée au nœud auquel vous êtes connecté.
+
+== Usages
+
+L'adresse de gestion{nbsp}:
+
+* Permet l'accès à l'API/UI {harvester-product-name} via le protocole `HTTPS`.
+* Permet à d'autres nœuds de rejoindre le cluster.
++
+image:install/configure-management-address.png[]

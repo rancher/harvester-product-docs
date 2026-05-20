@@ -1,0 +1,92 @@
+= Fijación de CPU
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} admite la fijación de CPU para máquinas virtuales. Para utilizar esta función, primero debes habilitar el Administrador de CPU en los nodos y luego habilitar la fijación de CPU al crear la máquina virtual.
+
+== Kubernetes CPU Manager
+
+La función https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[Administrador de CPU] mejora la asignación de recursos de CPU en clústeres de Kubernetes, asegurando que las cargas de trabajo con necesidades de rendimiento estrictas reciban recursos de CPU estables y predecibles. Esto es especialmente importante para aplicaciones de alto rendimiento y sensibles a la latencia.
+
+{harvester-product-name} utiliza la directiva del Administrador de CPU `static` cuando el Administrador de CPU está habilitado. Esta política gestiona un grupo compartido de CPU que inicialmente incluye todas las CPU en nodos con la siguiente configuración:
+
+* Los pods en la clase de calidad de servicio (QoS) https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`] que solicitan núcleos de CPU completos (por ejemplo, CPU: "2") se asignan CPU dedicadas. Estas CPU están "fijadas" al pod y se eliminan del grupo compartido de CPU.
++
+* Los pods en las clases QoS https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`] y https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] comparten las CPU restantes en el grupo compartido.
+
+=== Cálculo del Grupo Compartido de CPU
+
+{harvester-product-name} reserva recursos de CPU para operaciones a nivel de sistema basándose en la https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[fórmula GKE], con los valores https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`] y https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`] asignados en una proporción de 2:3.
+
+Ejemplo (nodo con 16 núcleos de CPU):
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+En este ejemplo, aproximadamente 15 núcleos (14980 milicores) están disponibles para cargas de trabajo.
+
+Cuando una máquina virtual (pod) en la clase QoS Garantizada solicita 4 CPUs, se dedican 4 núcleos a esa máquina virtual. Los pods en las otras clases QoS comparten los 11 núcleos restantes en el grupo compartido.
+
+== Habilitar y Deshabilitar el Gestor de CPU
+
+Cuando habilitas el Administrador de CPU, {harvester-product-name} establece la directiva del Administrador de CPU en `static`. Cuando deshabilitas la función, {harvester-product-name} cambia la directiva del Administrador de CPU de nuevo a `none`. 
+
+Debes habilitar o deshabilitar el Administrador de CPU en cada nodo por separado.
+
+. En la interfaz de {harvester-product-name}, ve a *Hosts*.
++
+. Localiza el nodo en la lista y luego selecciona *⋮ -> Habilitar Administrador de CPU* o *Deshabilitar Administrador de CPU*.
++
+Permite algo de tiempo para que {harvester-product-name} aplique la directiva correspondiente del Administrador de CPU.
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== limitaciones
+
+* El Administrador de CPU no se puede habilitar en el nodo testigo.
++
+* El Administrador de CPU debe ser habilitado o deshabilitado en cada nodo de gestión por separado. Debes esperar a que la operación se complete antes de iniciar otra.
++
+* Las máquinas virtuales con la fijación de CPU habilitada deben ser detenidas antes de que se deshabilite el CPU Manager en el nodo correspondiente.
+
+== Habilitar la fijación de CPU en una nueva máquina virtual
+
+. Verifica que el Administrador de CPU esté habilitado en uno o más nodos.
++
+[IMPORTANT]
+====
+Si el Administrador de CPU no está habilitado en al menos un nodo, la máquina virtual queda atascada en el estado `Unschedulable` después del inicio. Para más información, consulta xref:virtual-machines/create-vm.adoc#_related_cpu_pinning_concepts[Conceptos relacionados con la fijación de CPU].
+====
++
+. Ve a *Máquinas Virtuales*.
++
+. Haga clic en *Crear*.
++
+image::vm/cpu-pinning-create-vm.png[create-vm]
++
+. En la pestaña *Opciones Avanzadas*, selecciona *Habilitar fijación de CPU*.
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-advanced-options]
++
+. Haga clic en *Guardar*.
+
+Habilitar la fijación de CPU añade `dedicatedCpuPlacement: true` a `.spec.template.spec.domain.cpu` en la configuración de la máquina virtual (YAML). Cuando `dedicatedCpuPlacement` se establece en `true`, las solicitudes de recursos de CPU y memoria se configuran automáticamente para coincidir con los límites para garantizar que se cumplan los criterios de QoS Garantizado.
+
+Debido a que las solicitudes y límites son idénticos, la configuración de xref:./resource-overcommit.adoc[Sobrecompromiso de Recursos] de CPU y memoria no se aplica a las máquinas virtuales con la fijación de CPU habilitada.
+
+[NOTE]
+====
+Para utilizar la fijación de CPU en una máquina virtual existente, debes reiniciar la máquina virtual después de habilitar la función y guardar el cambio.
+====
+
+== Migración en Vivo de Máquinas Virtuales
+
+Las máquinas virtuales con la fijación de CPU habilitada solo se pueden migrar si el Administrador de CPU está habilitado en el nodo de destino.
+
+== Actualizaciones
+
+Al actualizar un nodo, {harvester-product-name} drena todos los pods y migra en vivo las máquinas virtuales a otro nodo. Para evitar interrupciones en el proceso de actualización, asegúrese de que el Administrador de CPU esté habilitado en otros nodos y que haya suficientes recursos disponibles siempre que utilice máquinas virtuales con la fijación de CPU habilitada.

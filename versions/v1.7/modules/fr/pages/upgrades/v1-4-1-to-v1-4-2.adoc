@@ -1,0 +1,95 @@
+= Mise à niveau de v1.4.1 à v1.4.2
+:revdate: 2025-11-10
+:page-revdate: {revdate}
+
+== informations générales
+
+Un bouton *Mise à niveau* apparaît sur l'écran *Tableau de bord* chaque fois qu'une nouvelle {harvester-product-name} version à laquelle vous pouvez mettre à niveau est disponible. Pour plus d'informations, voir xref:./upgrades.adoc#_start_an_upgrade[Démarrer une mise à niveau].
+
+Pour les environnements isolés physiquement, voir xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Préparer une mise à niveau isolée physiquement].
+
+=== Mettre à jour l'extension UI Harvester sur {rancher-product-name} v2.10.1
+
+Pour importer des clusters {harvester-product-name} v1.4.2 sur {rancher-short-name} v2.10.1, vous devez utiliser **v1.0.3** de l'extension UI {rancher-short-name} pour {harvester-product-name}.
+
+. Sur l'UI {rancher-short-name}, allez à *Local -> Applis -> Dépôts*.
+
+. Localisez le dépôt nommé *harvester*, puis sélectionnez *⋮ -> Actualiser*.
++
+Ce dépôt a les propriétés suivantes{nbsp}:
++
+* URL{nbsp}: **https://github.com/harvester/harvester-ui-extension**
+* Branche{nbsp}: **gh-pages**
++
+image::upgrade/rancher-2.10.1-repository-page.png[]
+
+. Allez à l'écran *Extensions*.
+
+. Localisez l'extension nommée *Harvester*, puis cliquez sur *Mettre à jour*.
+
+. Sélectionnez la version *1.0.3*, puis cliquez sur *Mettre à jour*.
++
+image::upgrade/update-harvester-ui-extension-modal.png[]
+
+. Laissez un certain temps pour que l'extension soit mise à jour, puis actualisez l'écran.
+
+[IMPORTANT]
+====
+L'UI {rancher-short-name} affiche un message d'erreur après la mise à jour de l'extension. Le message d'erreur disparaît lorsque vous actualisez l'écran.
+
+Ce problème, qui existe dans {rancher-short-name} v2.10.0 et v2.10.1, sera corrigé dans v2.10.2. 
+====
+
+Problèmes connexes{nbsp}: https://github.com/harvester/harvester/issues/7234[#7234], https://github.com/rancher/capi-ui-extension/issues/107[#107]
+
+== Compatibilité de la sauvegarde des machines virtuelles.
+
+Vous pouvez rencontrer certaines limitations lors de la création et de la restauration de sauvegardes impliquant un stockage externe.
+
+== Problèmes connus
+
+=== Utilisation élevée de l'UC
+
+Une utilisation élevée de l'UC peut se produire en raison du champ `refreshIntervalInSeconds` du paramètre `backup-target`. Si le champ est laissé vide ou est défini sur `0`, {harvester-product-name} actualise constamment la cible de sauvegarde, entraînant une utilisation élevée de l'UC.
+
+Pour résoudre le problème, mettez à jour la valeur de `refreshIntervalInSeconds` à un nombre plus élevé (par exemple, `60`) en utilisant la commande `kubectl edit setting backup-target`.
+
+Exemple :
+
+[,shell]
+----
+value: '{"type":"nfs","endpoint":"nfs://longhorn-test-nfs-svc.default:/opt/backupstore", "refreshIntervalInSeconds": 60}'
+----
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/7885[#7885]
+
+=== La mise à niveau redémarre de manière inattendue après avoir cliqué sur le bouton "Ignorer"
+
+Lorsque vous utilisez {rancher-short-name} pour mettre à niveau {harvester-product-name}, l'interface utilisateur {rancher-short-name} affiche une boîte de dialogue avec un bouton étiqueté "Ignorer". Cliquer sur ce bouton peut entraîner les problèmes suivants{nbsp}:
+
+* La section `status` du `harvesterhci.io/v1beta1/upgrade` CR est effacée, entraînant la perte de toutes les informations importantes concernant la mise à niveau.
+* Le processus de mise à niveau redémarre de manière inattendue.
+
+Ce problème affecte {rancher-short-name} v2.10.x, qui utilise v1.0.2, v1.0.3 et v1.0.4 de l'extension UI xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[Harvester]. Aucune version de l'UI {harvester-product-name} n'est affectée. Le problème est corrigé dans l'extension UI Harvester v1.0.5 et v1.5.0.
+
+Pour éviter ce problème, effectuez l'une des actions suivantes{nbsp}:
+
+* Utilisez l'UI {harvester-product-name} pour les mises à niveau. Cliquer sur le bouton "Ignorer" dans l'UI {harvester-product-name} ne provoque pas de comportement inattendu.
+* Au lieu de cliquer sur le bouton dans l'UI {rancher-short-name}, exécutez la commande suivante contre le cluster{nbsp}:
++
+[,shell]
+----
+kubectl -n harvester-system label upgrades -l harvesterhci.io/latestUpgrade=true harvesterhci.io/read-message=true
+----
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/7791[#7791]
+
+=== Les machines virtuelles qui utilisent des volumes RWX migrables redémarrent de manière inattendue.
+
+Les machines virtuelles qui utilisent des volumes xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX] migrables redémarrent de manière inattendue lorsque les pods du plugin CSI sont redémarrés. Ce problème affecte {harvester-product-name} v1.4.x, v1.5.0 et v1.5.1.
+
+La solution de contournement consiste à désactiver le paramètre https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[Supprimer automatiquement le pod de charge de travail lorsque le volume est détaché de manière inattendue] sur l'UI {longhorn-product-name} avant de commencer la mise à niveau. Vous devez réactiver le paramètre une fois la mise à niveau terminée.
+
+Le problème sera corrigé dans {longhorn-product-name} v1.8.3, v1.9.1 et les versions ultérieures. {harvester-product-name} v1.6.0 inclura {longhorn-product-name} v1.9.1. 
+
+Problèmes connexes{nbsp}: https://github.com/harvester/harvester/issues/8534[#8534] et https://github.com/longhorn/longhorn/issues/11158[#11158]

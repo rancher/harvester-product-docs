@@ -1,0 +1,285 @@
+= Actualiza de v1.5.x a v1.6.x
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+== Información general
+
+Un botón de *Actualizar versión* aparece en la pantalla del *Panel* siempre que esté disponible una nueva {harvester-product-name} versión a la que puedas actualizar. Para más información, consulta xref:./upgrades.adoc#_start_an_upgrade[Iniciar una actualización de versión].
+
+Los clústeres que ejecutan v1.5.x pueden actualizar la versión directamente a v1.6.x porque {harvester-product-name} permite un máximo de una actualización menor para los componentes subyacentes. v1.5.0, v1.5.1 y v1.5.2 utilizan la misma versión menor de {rke2-short-name} (v1.32), mientras que v1.6.0 y v1.6.1 utilizan la siguiente versión menor (v1.33). Para más información, consulta xref:upgrades/upgrades.adoc#_upgrade_paths)[Vías de actualización de versión].
+
+[NOTE]
+====
+Solo los clientes afectados por los problemas listados en la sección de Corrección de fallos de las https://github.com/harvester/harvester/releases/tag/v1.5.2[notas de la versión] deben instalar v1.5.2.
+====
+
+Para obtener información sobre cómo actualizar la versión {harvester-product-name} en entornos aislados, consulta xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar una actualización en entorno aislado].
+
+=== Actualiza la extensión de la IU de Harvester en {rancher-product-name} v2.12
+
+Debes usar una versión compatible (v1.6.x) de la Extensión de la IU de Harvester para importar clústeres de {harvester-product-name} v1.6.x en {rancher-short-name} v2.12.
+
+. En la IU de {rancher-short-name}, ve a *local -> Apps -> Repositorios*.
+
+. Localiza el repositorio llamado *harvester*, y luego selecciona *⋮ -> Actualizar*.
+
+. Ve a la pantalla de *Extensiones*.
+
+. Localiza la extensión llamada *Harvester*, y luego haz clic en *Actualizar*.
+
+. Selecciona una versión compatible, y luego haz clic en *Actualizar*.
+
+. Espera un tiempo para que la extensión se actualice, y luego actualiza la pantalla.
+
+== Problemas conocidos
+
+=== La actualización está atascada en el estado "Pre-drenado"
+
+En ciertas situaciones, el Gestor de Instancias puede no limpiar una instancia de motor, incluso después de que el estado del CR del motor haya cambiado a "Detenido". El proceso de actualización se queda atascado en el estado "Pre-drenado" porque el pod del gestor de instancias no puede ser eliminado mientras el correspondiente Presupuesto de Disrupción de Pods (PDB) aún exista.
+
+La solución alternativa es eliminar el PDB del gestor de instancias después de asegurarte de que todos los volúmenes estén saludables.
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8977[#8977] y https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== El clúster de invitados está atascado en el estado "Actualizando"
+
+Un clúster de invitados {rke2-short-name} puede quedar atascado en el estado "Actualizando" después de que se actualice {harvester-product-name}. El siguiente mensaje de error se muestra en la IU de {harvester-product-name}:
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+El problema ocurre cuando la dirección IP del nodo invitado cambia después de la actualización de versión, causando un mal funcionamiento de etcd. Es probable que la máquina virtual subyacente se haya reiniciado varias veces y haya recibido una nueva dirección IP del servidor DHCP.
+
+Para abordar el problema, realiza los siguientes pasos:
+
+. En la IU de {rancher-short-name}, elimina el nodo que causa el error del clúster de invitados.
+. En la IU de {harvester-product-name}, verifica el estado de la máquina virtual subyacente.
+. Si es necesario, reinicia la máquina virtual.
+
+La máquina virtual se elimina y el clúster de invitados intenta crear un nuevo nodo. Una vez que se crea el nodo, el estado del clúster de invitados cambia a "Activo".
+
+Problema relacionado: https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== La máquina virtual detenida está atascada en el estado "Iniciando"
+
+Un volumen {longhorn-product-name} puede alternar entre los estados "Desconectando" y "Desconectado" después de una migración en vivo. Debido a que el volumen no está listo, la máquina virtual asociada no puede iniciarse completamente.
+
+La solución alternativa es limpiar el `status.currentMigrationNodeID` del volumen utilizando el siguiente comando:
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8949[#8949] y https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+=== Nodos atascados en el estado "Esperando Reinicio" debido a un error en la configuración de la red
+
+Los nodos pueden quedar atascados en el estado `Waiting Reboot` durante una actualización de versión si se cumplen los siguientes criterios:
+
+* {harvester-product-name} v1.2.1 o una versión anterior se instaló inicialmente, y los nodos se actualizaron de forma incremental.
+* El campo `vlan_id` en la configuración `install.management_interface` está configurado en `1` o está vacío.
+
+El problema ocurre debido a un error en la configuración de la red, como indica el mensaje `yaml: line did not find expected key` en los registros de los nodos.
+
+Durante la actualización de versión, el archivo `/oem/90_custom.yaml` se actualiza para reflejar los cambios en el comportamiento de v1.5.x, que añadió VLANs 2–4094 a `mgmt-br` y `mgmt-bo`. Dos scripts en ese archivo (`/etc/wicked/scripts/setup_bond.sh` y `/etc/wicked/scripts/setup_bridge.sh`) pueden ser truncados por una operación `sed` si utilizan el formato generado por `gopkg.in/yaml.v2`, que se utilizó en el instalador de versiones de {harvester-product-name} anteriores a 1.2.2. La operación `sed` elimina la línea `bridge vlan add vid 2-4094 dev $INTERFACE`. Este problema de truncamiento no afecta a los scripts que utilizan el formato generado por `gopkg.in/yaml.v3`.
+
+Los siguientes son los contenidos del script `/etc/wicked/scripts/setup_bond.sh` en el archivo `/oem/90_custom.yaml`:
+
+* Generado a partir de `gopkg.in/yaml.v2`:
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpost-up)\n\t\t#
+inherit MAC address\n\t\tip link set dev mgmt-br address $(ip -json link show
+dev $INTERFACE | jq -j '.[0][\"address\"]')\n\n\t\t# accept all vlan, PVID=1
+by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE\n\t\t;;\n\nesac\n"
+```
+----
+
+* Generado a partir de `gopkg.in/yaml.v3`:
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        post-up)
+                # inherit MAC address
+                ip link set dev mgmt-br address $(ip -json link show dev $INTERFACE | jq -j '.[0]["address"]')
+                #accept all vlan,PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE
+                ;;
+esac
+----
+
+Los siguientes son los contenidos del script `/etc/wicked/scripts/setup_bridge.sh` en el archivo `/oem/90_custom.yaml`:
+
+* Generado a partir de `gopkg.in/yaml.v2`:
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpre-up)\n\t\t#
+enable vlan-aware\n\t\tip link set dev $INTERFACE type bridge vlan_filtering 1\n\t\t\t;;\n\n\tpost-up)\n\t\t#
+accept all vlan, PVID=1 by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE
+self\n\t\tbridge vlan add vid 2-4094 dev mgmt-bo\n\t\t;;\n\nesac\n"
+----
+
+* Generado a partir de `gopkg.in/yaml.v3`:
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        pre-up)
+               #enable vlan-aware
+               ip link set $INTERFACE type bridge vlan_filtering 1
+               ;;
+        post-up)
+                #accept all vlan, PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE self
+                bridge vlan add vid 2-4094 dev mgmt-bo
+                ;;
+esac
+----
+
+La solución alternativa es reemplazar el contenido del script obsoleto. Utiliza los scripts en el archivo `/oem/90_custom.yaml` generados a partir de `gopkg.in/yaml.v3`. Una vez que los scripts están actualizados, se reanuda la actualización.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/9033[#9033]
+
+=== Conectividad de red perdida en las interfaces VLAN secundarias en la red del clúster `mgmt`.
+
+{harvester-product-name} v1.6.0 introdujo un cambio para reducir la provisión innecesaria de VLAN. Anteriormente, todas las interfaces VLAN secundarias estaban conectadas al puente `mgmt-br` y a la interfaz `mgmt-bo`. Ahora, solo se conectan las interfaces VLAN necesarias. En consecuencia, cuando un clúster se actualiza a v1.6.x, todas las interfaces VLAN secundarias que estaban previamente conectadas a `mgmt-br` y `mgmt-bo` se eliminan de los hosts de gestión.
+
+[WARNING]
+====
+Las cargas de trabajo que dependen de estas interfaces perderán conectividad de red.
+
+Para obtener más información, consulta https://github.com/harvester/harvester/issues/7650[problema #7650].
+====
+
+Después de actualizar a v1.6.x, efectúe los siguientes pasos:
+
+. Verifique las VLANs adjuntas a `mgmt-br` y `mgmt-bo` ejecutando el siguiente comando en los hosts de gestión:
++
+[,shell]
+----
+bridge vlan show
+----
++
+Este comando solo muestra la VLAN principal de `mgmt-br` y `mgmt-bo`.
+
+. Añada manualmente las VLANs secundarias requeridas al puente `mgmt-br` y a la interfaz `mgmt-bo`, añadiendo los siguientes comandos al archivo `/oem/90_custom.yaml`:
++
+** Sección `/etc/wicked/scripts/setup_bond.sh`
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE
+----
++
+** Sección `/etc/wicked/scripts/setup_bridge.sh`
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE self
+bridge vlan add vid <vlan-id> dev mgmt-bo
+----
++
+[IMPORTANT]
+====
+Debe incluir un comando separado para cada ID de VLAN distinto. Asegúrese de que el marcador `vlan-id` sea reemplazado por el ID real.
+====
+
+. Una vez que el archivo `/oem/90_custom.yaml` esté actualizado, reinicie los hosts de gestión.
+
+. Verifique que todas las VLANs requeridas se hayan añadido ejecutando el siguiente comando en los hosts:
++
+[,shell]
+----
+bridge vlan show
+----
+
+==== Ejemplo de escenario de actualización
+
+En el siguiente ejemplo, un clúster v1.5.x fue instalado inicialmente con una xref:installation-setup/config/configuration-file.adoc#_install_management_interface[interfaz de VLAN primaria] (ID de VLAN: `2021`). Para añadir una interfaz de VLAN secundaria (ID de VLAN: `2113`), se creó el archivo `/oem/99_vlan-ifcfg.yaml` en los hosts de gestión con el siguiente contenido:
+
+[,yaml]
+----
+stages:
+  initramfs:
+    - name: "Host VLAN interface mgmt-br.353"
+      files:
+        - path: /etc/sysconfig/network/ifcfg-mgmt-br.2113
+          owner: 0
+          group: 0
+          permissions: 384
+          content: |
+            STARTMODE='onboot'
+            BOOTPROTO='static'
+            IPADDR='10.255.113.150/24'
+            VLAN_ID='2113'
+            ETHERDEVICE='mgmt-br'
+            VLAN='yes'
+            DEFROUTE='no'
+----
+
+La expectativa típica es que se cree una sub-interfaz de VLAN adicional en la interfaz `mgmt` (`mgmt-br.2113`) y se le asigne una dirección IPv4. Además, se espera que esta sub-interfaz y la interfaz principal (`mgmt-br.2021`) se utilicen para conectividad L3 después de que el clúster se actualice a v1.6.x.
+
+En realidad, después de la actualización a v1.6.0, se crea la sub-interfaz de VLAN, pero la VLAN secundaria (ID de VLAN: `2113`) se elimina del puente `mgmt-br` y de la interfaz `mgmt-bo`. Después de un reinicio, solo se asigna el ID de VLAN principal al puente `mgmt-br` y a la interfaz `mgmt-bo` (usando el archivo `/oem/90_custom.yaml`).
+
+Para mitigar los efectos de este cambio, debe realizar la solución alternativa descrita en la <<Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network,sección anterior>>. Esto implica identificar las interfaces de VLAN secundarias y luego añadir las necesarias al puente `mgmt-br` y a la interfaz `mgmt-bo`.
+
+=== Las máquinas virtuales en ejecución muestran el mensaje `Restart action is required`
+
+La interfaz de usuario {harvester-product-name} puede mostrar el mensaje `Restart action is required for the virtual machine configuration change to take effect` para algunas máquinas virtuales en ejecución en las siguientes situaciones:
+
+* {harvester-product-name} se actualiza de v1.5.x a v1.6.x.
+* La extensión de la IU de Harvester se actualiza a v1.6.x. 
+* {harvester-product-name} clústeres se importan en {rancher-short-name} v2.12.x.
+
+Debes reiniciar la máquina virtual para aplicar los cambios de configuración y limpiar el mensaje.
+
+El mensaje aparece porque la interfaz de usuario en {harvester-product-name} v1.6.0 y versiones posteriores expone la condición `RestartRequired`, que anteriormente solo era visible en la configuración YAML de la máquina virtual. Esta visibilidad es esencial para características como la conexión en caliente de CPU y memoria, que implican cambios de configuración que solo tienen efecto después de reiniciar la máquina virtual.
+
+La condición `RestartRequired` se introdujo para manejar un desajuste de estado causado por el método de sincronización de dirección MAC heredado. En versiones anteriores a v1.6.0, el controlador de KubeVirt aplicó automáticamente un parche a la dirección MAC de la instancia de la máquina virtual en la especificación durante el proceso de creación. Esto aseguraba que la dirección MAC permaneciera consistente a través de los reinicios. Sin embargo, dado que la especificación se modificó mientras la máquina virtual estaba activa, el controlador añadió la condición `RestartRequired` para señalar que era necesario un reinicio manual para sincronizar el estado.
+
+=== La máquina virtual no se puede migrar en vivo al nodo de destino.
+
+Tras una actualización a v1.6.x, algunas máquinas virtuales pueden permanecer en el estado _pendiente de reinicio_. Estas máquinas virtuales no se pueden migrar en vivo al nodo de destino especificado hasta que se reinicien.
+
+La solución alternativa es reiniciar las máquinas virtuales. Una vez reiniciadas, las migraciones en vivo específicas del nodo posteriores funcionarán.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/9739[#9739]
+
+=== La característica `cpu-feature.node.kubevirt.io/ipred-ctrl=true` aparece durante la actualización de versión.
+
+Harvester migra en vivo las máquinas virtuales para garantizar cero tiempo de inactividad durante las actualizaciones de versión de nodo. Si tu clúster utiliza alguno de los siguientes modelos de CPU, puedes notar que aparece un indicador de característica temporal (`cpu-feature.node.kubevirt.io/ipred-ctrl=true`) mientras la actualización de versión está en progreso.
+
+* Intel(R) Xeon(R) Gold 5418Y
+* Intel(R) Xeon(R) Silver 4509Y
+
+Aunque esta bandera de función se elimina automáticamente de los nodos después de la actualización de versión, el selector de nodo correspondiente se conserva en la configuración de la máquina virtual. Esta discrepancia entre los requisitos de la máquina virtual y las etiquetas del nodo provoca que las migraciones en vivo posteriores fallen.
+
+Para resolver este problema, realiza cualquiera de las siguientes acciones _antes de iniciar la actualización de versión_:
+
+* *Opción 1:* https://harvesterhci.io/kb/setup_common_cpu_model_for_vm_live_migration[Configura un modelo de CPU común] para las máquinas virtuales.
+
+* *Opción 2:* Detén el etiquetador de KubeVirt https://kubevirt.io/user-guide/compute/virtual_hardware/#labeling-nodes-with-cpu-models-cpu-features-and-machine-types[añadiendo la `node-labeller.kubevirt.io/skip-node` anotación a los nodos], y luego elimina la anotación después de la actualización de versión. Aunque es más complejo, esta opción es útil si las máquinas virtuales no pueden reiniciarse. Para más información, consulta https://harvesterhci.io/kb/troubleshooting_vm_scheduling_issues_nodeselector[Resolución de problemas de migración en vivo de VM causados por selectores de nodo].
+
+=== Cambio en el comportamiento predeterminado de VLAN para interfaces de pod secundarias
+
+En v1.6.0 y versiones anteriores, los pods con interfaces de red secundarias (como redes de VM y redes de almacenamiento) se asignaban automáticamente al ID de VLAN 1 y al ID de VLAN configurado en la red VLAN. Esta configuración de ID de VLAN dual permitía que el puente de red {harvester-product-name} reenviara tráfico sin etiquetar a las interfaces veth de estos pods.
+
+Este comportamiento cambió en v1.6.1, que utiliza v1.8.0 del plugin de puente CNI. Las interfaces de pod secundarias ahora están asociadas únicamente con el ID de VLAN asignado a la red de VM. Debido a que el ID de VLAN 1 ya no se añade, el puente no puede reenviar tráfico sin etiquetar a estas interfaces.
+
+El cambio afecta a los clústeres actualizados de v1.5.x a v1.6.1 si el puerto del switch externo está configurado como un puerto de acceso que envía tramas sin etiquetar. Actualizar la configuración del switch externo para usar un puerto troncal resuelve el problema. Los pods con interfaces secundarias que están conectadas a redes sin etiquetar o asociadas con el ID de VLAN 1 no se ven afectados.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/8816[#8816]

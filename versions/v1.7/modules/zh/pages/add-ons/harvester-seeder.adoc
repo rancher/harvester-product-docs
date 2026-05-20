@@ -1,0 +1,81 @@
+= Harvester Seeder
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*Harvester Seeder* 是一个 *实验性* 附加产品。有关实验性功能的更多信息，请参见 xref:introduction/document-conventions.adoc#_feature_labels[功能标签]。
+====
+
+*Harvester Seeder* 附加产品允许您使用智能平台管理接口 (IPMI) 对 {harvester-product-name} 主机执行带外操作。
+
+该附加产品还可以发现支持 https://www.dmtf.org/standards/redfish[Redfish] 访问的主机上的硬件及相关事件，并将这些硬件与相应的主机关联。
+
+== 先决条件
+
+在启用附加产品之前，请确保满足以下要求。
+
+* 主机上已启用 IPMI 访问，并且您的用户帐户具有执行相关操作所需的权限。
++
+如果您使用 https://github.com/ipmitool/ipmitool[ipmitool]，可以运行 `ipmitool -I lanplus -H iloOriDracIPAddress -U admin -P admin sel list` 来验证是否满足这两个要求。
+
+* 已启用 Redfish。
++
+您可以运行 `curl -vk https://iloOriDracIPAddress/redfish/v1` 来验证 Redfish 是否已启用。
+
+* 端口 443 和 623 可访问。
++
+某些 IPMI 实现允许您通过端口 443 使用 Web 界面访问设备。然而，IPMI 设备更常通过 UDP 端口 623（IPMI over IP）使用命令行界面访问。
+
+* 主机上已启用警报。
++
+某些硬件供应商可能要求您启用警报。
+
+== 启用附加产品并配置主机
+
+. 在 {harvester-product-name} 用户界面上，转到 *高级 -> 附加产品*。
+
+. 选择 *Harvester Seeder*，然后选择 *⋮ -> 启用*。
++
+几秒钟后，*状态* 的值更改为 *部署成功*。
++
+image::vm-import-controller/EnableAddon.png[]
+
+. 转到 *主机* 屏幕。
++
+您必须编辑此屏幕上列出的每个主机的配置。
+
+. 选择一个主机，然后选择*⋮ -> 编辑配置*。
++
+image::seeder/EditConfig.png[]
+
+. 在*带外访问*选项卡上，选择*启用*，配置设置，然后选择*保存*。
++
+该附加产品使用这些信息连接到您的IPMI接口。
++
+image::seeder/OutOfBandAccess.png[]
+
+== 电源相关操作
+
+一旦配置了带外访问设置，您可以使用 {harvester-product-name} 用户界面关闭和重启主机。但是，您必须首先启用xref:hosts/hosts.adoc#_node_maintenance[维护模式]，这会自动将所有虚拟机迁移到其他节点。*Harvester Seeder* 在执行所选操作时通过 IPMI 与主机通信。
+
+image::seeder/ShutdownReboot.png[]
+
+在启用维护模式时，您也可以启动虚拟机。
+
+image::seeder/PowerOn.png[]
+
+== 硬件事件聚合
+
+如果您在*带外访问*设置屏幕的*事件*部分选择了*启用*，*Harvester Seeder*将使用Redfish查询硬件以获取有关组件故障和风扇温度的信息。在硬件协调期间，这些信息会被转换为Kubernetes事件，并随后由Kubernetes垃圾回收策略处理。{harvester-product-name}默认情况下会将这些事件存储1小时。
+
+image::seeder/HardwareEvents.png[]
+
+== 查错
+
+*带外访问*设置屏幕可能会变得无响应，并显示消息 `Waiting for "inventories.metal.harvesterhci.io" to be ready`。每当发生这种情况时，您必须刷新页面。有关更多信息，请参见 https://github.com/harvester/harvester/issues/4412[问题#4412]。
+
+如果在使用*Harvester Seeder*时遇到持续问题，请向SUSE支持提交以下内容：
+
+* 支持包
+* 命令 `kubectl get machine -n harvester-system -o yaml` 的输出

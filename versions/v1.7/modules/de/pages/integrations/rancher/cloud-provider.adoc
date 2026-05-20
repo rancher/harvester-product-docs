@@ -1,0 +1,394 @@
+= Harvester Cloud-Anbieter
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+Sie können xref:../../integrations/rancher/node-driver/rke2-cluster.adoc[RKE2] Cluster in Rancher mit dem integrierten Harvester Node Driver bereitstellen. Harvester bietet <<Load Balancer Support,Lastenausgleich>> und Harvester Cluster xref:./csi-driver.adoc[Speicher-Passthrough] Unterstützung für den Gast-Kubernetes-Cluster.
+
+== Hinweis zur Abwärtskompatibilität
+
+[NOTE]
+====
+Bitte beachten Sie ein bekanntes Problem mit der Abwärtskompatibilität, wenn Sie die Harvester-Cloud-Anbieter-Version *v0.2.2* oder höher verwenden. Wenn Ihre Harvester-Version unter *v1.2.0* liegt und Sie beabsichtigen, neuere RKE2-Versionen (d.h. >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`) zu verwenden, ist es wichtig, Ihren Harvester-Cluster vor dem Upgrade des Gast-Kubernetes-Clusters oder des Harvester-Cloud-Anbieters auf v1.2.0 oder eine höhere Version upzugraden.
+
+Für eine detaillierte Unterstützungs-Matrix beziehen Sie sich bitte auf den Abschnitt *Harvester CCM & CSI Driver mit RKE2-Versionen* der offiziellen https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[Website].
+====
+
+== Bereitstellung
+
+=== Voraussetzungen
+
+* Der Kubernetes-Cluster basiert auf Harvester-VMs.
+* Die Harvester-VMs, die als Gast-Kubernetes-Knoten fungieren, befinden sich im selben Namespace.
+* Die Hostnamen der Harvester-VM-Gäste stimmen mit den entsprechenden Namen der Harvester-VMs überein. Gast-Cluster-Harvester-VMs dürfen beim Einsatz des Harvester-CSI-Treibers keine anderen Hostnamen als ihre Harvester-VM-Namen haben. Wir hoffen, https://github.com/harvester/harvester/issues/4396[diese Einschränkung in einer zukünftigen Version von Harvester] zu entfernen.
+
+[IMPORTANT]
+====
+Jede Harvester-VM muss das `macvlan` Kernel-Modul haben, das für die `LoadBalancer` Dienste des *DHCP* IPAM-Modus erforderlich ist.
+
+Um zu überprüfen, ob das Kernel-Modul verfügbar ist, greifen Sie auf die VM zu und führen Sie die folgenden Befehle aus:
+
+[,sh]
+----
+lsmod | grep macvlan
+sudo modprobe macvlan
+----
+
+Das Kernel-Modul fehlt wahrscheinlich, wenn Folgendes auftritt:
+
+* `$ lsmod | grep macvlan` erzeugt keine Ausgabe.
+* `$ sudo modprobe macvlan` zeigt eine Fehlermeldung ähnlich `modprobe: FATAL: Module macvlan not found in directory /lib/modules/5.14.21-150400.22-default` an.
+
+Standardmäßig ist das `macvlan` Kernel-Modul nicht in den minimalen Cloud-Images von SUSE Linux Enterprise 15 Service Pack 4/5/6 enthalten (siehe https://github.com/harvester/harvester/issues/6418[Issue #6418]). Diese Images enthalten das https://software.opensuse.org/package/kernel-default-base[`kernel-default-base`] Paket, das nur die Basis-Module umfasst. Der `macvlan` Kernel-Treiber wird verfügbar, wenn Sie das `kernel-default` Paket installieren.
+
+Um die Notwendigkeit manueller Eingriffe nach der Bereitstellung des Gastclusters zu beseitigen, erstellen Sie Ihre eigenen Cloud-Images mit dem openSUSE Build Service (OBS). Sie müssen das `kernel-default-base` Paket entfernen und das `kernel-default` Paket in die `Minimal.kiwi` Datei hinzufügen, um sicherzustellen, dass das resultierende Cloud-Image das `macvlan` Kernel-Modul enthält. Für weitere Informationen siehe xref:../../virtual-machines/vm-images/custom-suse-images.adoc[Benutzerdefinierte SUSE VM-Images].
+====
+
+=== Bereitstellung im RKE2-Cluster mit dem Harvester-Knotentreiber
+
+Beim Erstellen eines RKE2-Clusters mit dem Harvester-Knotentreiber wählen Sie den `Harvester` Cloud-Anbieter aus. Der Knotentreiber hilft dann automatisch bei der Bereitstellung sowohl des CSI-Treibers als auch des CCM.
+
+image::rancher/rke2-cloud-provider.png[]
+
+Ab Rancher v2.9.0 können Sie über das Feld *Datenverzeichnis-Konfigurationspfad* ein bestimmtes Verzeichnis für Cloud-Konfigurationsdaten festlegen.
+
+image::rancher/rke2-cloud-provider-custom-data-dir.png[]
+
+=== Manuelle Bereitstellung im RKE2-Cluster
+
+. Generieren Sie Cloud-Konfigurationsdaten mit dem Skript `generate_addon.sh` und platzieren Sie die Daten dann auf jedem benutzerdefinierten Knoten (Verzeichnis: `/etc/kubernetes/cloud-config`).
++
+[,bash]
+----
+    curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+[NOTE]
+====
+Das Skript hängt von `kubectl` und `jq` ab, wenn der Harvester-Cluster betrieben wird, und funktioniert nur, wenn es Zugriff auf die `Harvester Cluster` kubeconfig-Datei hat.
+
+Sie finden die `kubeconfig` Datei in einem der Harvester-Management-Knoten im `/etc/rancher/rke2/rke2.yaml` Pfad. Die Server-IP muss durch die VIP-Adresse ersetzt werden.
+
+Beispiel für Inhalt:
+
+[,yaml]
+----
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <redacted>
+    server: https://127.0.0.1:6443
+  name: default
+# ...
+----
+
+Sie müssen den Namespace angeben, in dem der Gastcluster erstellt wird.
+====
++
+Beispiel für Ausgabe:
++
+[,yaml]
+----
+########## cloud config ############
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <CACERT>
+    server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+  name: local
+contexts:
+- context:
+    cluster: local
+    namespace: default
+    user: harvester-cloud-provider-default-local
+  name: harvester-cloud-provider-default-local
+current-context: harvester-cloud-provider-default-local
+kind: Config
+preferences: {}
+users:
+- name: harvester-cloud-provider-default-local
+  user:
+    token: <TOKEN>
+
+########## cloud-init user data ############
+write_files:
+- encoding: b64
+  content: <CONTENT>
+  owner: root:root
+  path: /etc/kubernetes/cloud-config
+  permissions: '0644'
+----
++
+. Auf der Seite zur Erstellung des RKE2-Clusters gehen Sie zum Bildschirm *Cluster-Konfiguration* und setzen Sie den Wert von *Cloud-Anbieter* auf *Extern*.
++
+image::rancher/external-harvester-cloud-provider.png[]
+
+. Kopieren Sie den Inhalt von `cloud-init user data` und fügen Sie ihn in *Maschinenpools* > *Erweiterte Optionen anzeigen* > *Benutzerdaten* ein.
++
+image::rancher/cloud-config-userdata.png[]
+
+. Fügen Sie die `HelmChart` CRD für `harvester-cloud-provider` zu *Cluster-Konfiguration* > *Add-On-Konfiguration* > *Zusätzliche Manifestdatei* hinzu.
++
+Sie müssen `<cluster-name>` durch den Namen Ihres Clusters ersetzen.
++
+[,yaml]
+----
+ apiVersion: helm.cattle.io/v1
+ kind: HelmChart
+ metadata:
+   name: harvester-cloud-provider
+   namespace: kube-system
+ spec:
+   targetNamespace: kube-system
+   bootstrap: true
+   repo: https://raw.githubusercontent.com/rancher/charts/dev-v2.9
+   chart: harvester-cloud-provider
+   version:  104.0.2+up0.2.6
+   helmVersion: v3
+   valuesContent: |-
+     global:
+       cattle:
+         clusterName: <cluster-name>
+----
++
+image::rancher/external-cloud-provider-addon.png[]
+
+. Um den Lastenausgleich zu erstellen, fügen Sie die Annotation `cloudprovider.harvesterhci.io/ipam: <dhcp|pool>` hinzu.
++
+image::rancher/harvester-cloud-provider-loadbalancer-annotation.png[]
+
+=== Bereitstellung im RKE2 benutzerdefinierten Cluster (experimentell)
+
+image::rancher/custom.png[]
+
+. Generieren Sie Cloud-Konfigurationsdaten mit dem Skript `generate_addon.sh` und platzieren Sie die Daten dann auf jedem benutzerdefinierten Knoten (Verzeichnis: `/etc/kubernetes/cloud-config`).
++
+[,bash]
+----
+ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+[NOTE]
+====
+Das Skript hängt von `kubectl` und `jq` ab, wenn der Harvester-Cluster betrieben wird, und funktioniert nur, wenn es Zugriff auf die `Harvester Cluster` kubeconfig-Datei hat.
+
+Sie finden die `kubeconfig` Datei in einem der Harvester-Management-Knoten im `/etc/rancher/rke2/rke2.yaml` Pfad. Die Server-IP muss durch die VIP-Adresse ersetzt werden.
+
+Beispiel für Inhalt:
+
+[,yaml]
+----
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <redacted>
+    server: https://127.0.0.1:6443
+  name: default
+# ...
+----
+
+Sie müssen den Namespace angeben, in dem der Gastcluster erstellt wird.
+====
++
+Beispiel für Ausgabe:
++
+[,yaml]
+----
+########## cloud config ############
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <CACERT>
+    server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+  name: local
+contexts:
+- context:
+    cluster: local
+    namespace: default
+    user: harvester-cloud-provider-default-local
+  name: harvester-cloud-provider-default-local
+current-context: harvester-cloud-provider-default-local
+kind: Config
+preferences: {}
+users:
+- name: harvester-cloud-provider-default-local
+  user:
+    token: <TOKEN>
+
+########## cloud-init user data ############
+write_files:
+- encoding: b64
+  content: <CONTENT>
+  owner: root:root
+  path: /etc/kubernetes/cloud-config
+  permissions: '0644'
+----
+
+. Erstellen Sie eine VM im Harvester-Cluster mit den folgenden Einstellungen:
+ ** *Grundlagen* Registerkarte: Die Mindestanforderungen sind 2 CPUs und 4 GiB RAM. Der erforderliche Speicherplatz hängt vom VM-Image ab.
++
+image::rancher/custom-cluster-vm-cpu-and-ram.png[]
+
+ ** *Netzwerke* Registerkarte: Geben Sie einen Netzwerknamen im Format `nic-<number>` an.
++
+image::rancher/custom-cluster-vm-network.png[]
+
+ ** *Erweiterte Optionen* Registerkarte: Kopieren Sie den Inhalt des Bildschirms *Cloud Config User Data* und fügen Sie ihn ein.
++
+image::rancher/custom-cluster-vm-user-data.png[]
+. Wählen Sie auf der Registerkarte *Grundlagen* des Bildschirms *Cluster-Konfiguration* *Harvester* als *Cloud-Anbieter* aus und wählen Sie dann *Erstellen*, um den Cluster zu starten.
++
+image::rancher/create-custom-rke2.png[]
+
+. Führen Sie auf der Registerkarte *Registrierung* die erforderlichen Schritte aus, um den RKE2-Registrierungsbefehl auf der VM auszuführen.
++
+image::rancher/custom-cluster-registration.png[]
+
+=== Bereitstellung im K3s-Cluster mit Harvester-Knotentreiber (experimentell)
+
+Beim Starten eines K3s-Clusters mit dem Harvester-Knotentreiber können Sie die folgenden Schritte ausführen, um den Harvester-Cloud-Anbieter bereitzustellen:
+
+. Verwenden Sie `generate_addon.sh`, um die Cloud-Konfiguration zu generieren.
++
+----
+ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
++
+Die Ausgabe sieht wie folgt aus:
++
+----
+ ########## cloud config ############
+ apiVersion: v1
+ clusters:
+ - cluster:
+     certificate-authority-data: <CACERT>
+     server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+   name: local
+ contexts:
+ - context:
+     cluster: local
+     namespace: default
+     user: harvester-cloud-provider-default-local
+   name: harvester-cloud-provider-default-local
+ current-context: harvester-cloud-provider-default-local
+ kind: Config
+ preferences: {}
+ users:
+ - name: harvester-cloud-provider-default-local
+   user:
+     token: <TOKEN>
+
+
+ ########## cloud-init user data ############
+ write_files:
+ - encoding: b64
+   content: <CONTENT>
+   owner: root:root
+   path: /etc/kubernetes/cloud-config
+   permissions: '0644'
+----
+
+. Kopieren Sie den Inhalt von `cloud-init user data` und fügen Sie ihn in *Maschinenpools > Erweiterte Optionen anzeigen > Benutzerdaten* ein.
+image:rancher/cloud-config-userdata.png[]
+. Fügen Sie das folgende `HelmChart` yaml von `harvester-cloud-provider` zu *Cluster-Konfiguration > Add-On-Konfiguration > Zusätzliches Manifest* hinzu.
++
+----
+ apiVersion: helm.cattle.io/v1
+ kind: HelmChart
+ metadata:
+   name: harvester-cloud-provider
+   namespace: kube-system
+ spec:
+   targetNamespace: kube-system
+   bootstrap: true
+   repo: https://charts.harvesterhci.io/
+   chart: harvester-cloud-provider
+   version: 0.2.2
+   helmVersion: v3
+----
++
+image::rancher/external-cloud-provider-addon.png[]
+
+. Deaktivieren Sie den `in-tree` Cloud-Anbieter auf folgende Weise:
+ ** Klicken Sie auf die Schaltfläche `Edit as YAML`.
+
++
+image::rancher/edit-k3s-cluster-yaml.png[]
+ ** Deaktivieren Sie `servicelb` und setzen Sie `disable-cloud-controller: true`, um den Standard-K3s-Cloud-Controller zu deaktivieren.
++
+[,yaml]
+----
+  machineGlobalConfig:
+    disable:
+      - servicelb
+    disable-cloud-controller: true
+----
+
+ ** Fügen Sie `cloud-provider=external` hinzu, um den Harvester-Cloud-Anbieter zu verwenden.
++
+[,yaml]
+----
+  machineSelectorConfig:
+    - config:
+        kubelet-arg:
+        - cloud-provider=external
+        protect-kernel-defaults: false
+----
+
++
+image::rancher/k3s-cluster-yaml-content-for-harvester-cloud-provider.png[]
+
+Mit diesen Einstellungen sollte ein K3s-Cluster erfolgreich bereitgestellt werden, während der externe Cloud-Anbieter verwendet wird.
+
+== Upgrade des Cloud-Anbieters
+
+=== Upgrade RKE2
+
+Der Cloud-Anbieter kann durch ein Upgrade der RKE2-Version vorgenommen werden. Sie können den RKE2-Cluster über die Rancher-Benutzeroberfläche wie folgt upgraden:
+
+. Klicken Sie auf *☰ > Clusterverwaltung*.
+. Suchen Sie den Gast-Cluster, den Sie aktualisieren möchten, und wählen Sie ⋮ *> Konfiguration bearbeiten* aus.
+. Wählen Sie *Kubernetes-Version* aus.
+. Klicken Sie auf *Speichern*.
+
+=== Upgrade von K3s
+
+K3s-Cloud-Anbieter über die Rancher-Benutzeroberfläche upgraden, wie folgt:
+
+. Klicken Sie auf *☰ > K3s-Cluster > Apps > Installierte Apps*.
+. Suchen Sie das Cloud-Anbieter-Diagramm und wählen Sie ⋮ *> Bearbeiten/Upgrade* aus.
+. Wählen Sie *Version* aus.
+. Klicken Sie auf *Nächster Schritt > Aktualisieren*.
+
+[IMPORTANT]
+====
+Der Aktualisierungsprozess für einen xref:../../installation-setup/single-node-clusters.adoc[einzelnen Gast-Cluster] kann ins Stocken geraten, wenn das neue `harvester-cloud-provider` Pod im _Ausstehend_ Zustand feststeckt. Dieses Problem wird durch einen Abschnitt in der `harvester-cloud-provider` Bereitstellung verursacht, der die Rolling-Update-Strategie beschreibt. Insbesondere steht der Standardwert im Konflikt mit der `podAntiAffinity` Konfiguration in Einzelknoten-Clustern.
+
+Für weitere Informationen siehe https://github.com/harvester/harvester/issues/5348#issuecomment-2055453709[diesen GitHub-Issue-Kommentar]. Um das Problem zu beheben, löschen Sie manuell den alten `harvester-cloud-provider`-Pod. Sie müssen dies möglicherweise mehrere Male tun, bis der neue Pod erfolgreich geplant werden kann.
+====
+
+== Lastenausgleichsunterstützung
+
+Sobald Sie den Harvester-Cloud-Anbieter bereitgestellt haben, können Sie den Kubernetes `LoadBalancer` Dienst nutzen, um einen Microservice innerhalb des Gastclusters der Außenwelt zugänglich zu machen. Die Erstellung eines Kubernetes `LoadBalancer` Dienstes weist dem Dienst einen dedizierten Harvester-Load Balancer zu, und Sie können Anpassungen über das `Add-on Config` in der Rancher-Benutzeroberfläche vornehmen.
+
+image::rancher/lb-svc.png[]
+
+=== IPAM
+
+Der integrierte Lastenausgleich von Harvester bietet sowohl *DHCP* als auch *Pool* Modi, und Sie können ihn konfigurieren, indem Sie die Annotation `cloudprovider.harvesterhci.io/ipam: $mode` zu seinem entsprechenden Dienst hinzufügen. Beginnend mit dem Harvester-Cloud-Anbieter >= v0.2.0 führt er auch einen einzigartigen *Share-IP-Modus* ein. Ein Dienst teilt in diesem Modus seine Lastenausgleichs-IP mit anderen Diensten.
+
+* *DHCP:* Ein DHCP-Server ist erforderlich. Der Harvester-Load-Balancer wird eine IP-Adresse vom DHCP-Server anfordern.
+
+* *Pool:* Sie müssen zuerst einen xref:networking/ip-pool.adoc[IP-Pool] erstellen, entweder über die xref:networking/ip-pool.adoc#_creating_an_IP_pool[{harvester-product-name} Benutzeroberfläche] oder die xref:networking/ip-pool.adoc#_creating_an_IP_pool_using_the_rancher_ui[{rancher-short-name} Benutzeroberfläche] (siehe xref:networking/ip-pool.adoc#_best_practices[Best Practices] für Informationen über die Unterschiede zwischen den beiden Methoden). Der {harvester-product-name} Lastenausgleichscontroller wird eine IP für den Lastenausgleichsdienst gemäß xref:networking/ip-pool.adoc#_selection_policy[der IP-Pool-Auswahlrichtlinie] zuweisen.
+
+* *Share IP:* Bei der Erstellung eines neuen Lastenausgleichsdienstes können Sie eine vorhandene Lastenausgleichsdienst-IP wiederverwenden. Der neue Dienst wird als sekundärer Dienst bezeichnet, während der derzeit gewählte Dienst der primäre ist. Um den primären Dienst im sekundären Dienst anzugeben, können Sie die Annotation `cloudprovider.harvesterhci.io/primary-service: $primary-service-name` hinzufügen.  Es gibt jedoch zwei bekannte Einschränkungen:
+ ** Dienste, die dieselbe IP-Adresse teilen, können nicht denselben Port verwenden.
+ ** Sekundäre Dienste können ihre IP nicht mit zusätzlichen Diensten teilen.
+
+[NOTE]
+====
+Das Ändern des `IPAM` Modus ist nicht erlaubt. Sie müssen einen neuen Dienst erstellen, wenn Sie den `IPAM` Modus ändern möchten.
+====
+
+== Zustandsprüfungen
+
+Beginnend mit der Harvester-Cloud-Anbieter-Version v0.2.0 sind zusätzliche Zustandsprüfungen des `LoadBalancer` Dienstes innerhalb des Gast-Kubernetes-Clusters nicht mehr erforderlich. Stattdessen können Sie https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-a-tcp-liveness-probe[Liveness] und https://kubernetes.io/docs/tasks/configure-pod-container/configure-liveness-readiness-startup-probes/#define-readiness-probes[readiness] Prüfungen für Ihre Arbeitslasten konfigurieren. Folglich werden alle nicht verfügbaren Pods automatisch von den Endpunkten des Lastenausgleichs entfernt, um dasselbe gewünschte Ergebnis zu erzielen.

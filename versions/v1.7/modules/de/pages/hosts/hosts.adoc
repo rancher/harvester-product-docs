@@ -1,0 +1,714 @@
+= Hostverwaltung
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+Benutzer können {harvester-product-name} Knoten von der Host-Seite aus anzeigen und verwalten. Der erste Knoten ist immer standardmäßig ein Verwaltungsknoten des Clusters. Wenn es drei oder mehr Knoten gibt, werden die zwei anderen Knoten, die zuerst beigetreten sind, automatisch zu Verwaltungsknoten befördert, um einen HA-Cluster zu bilden.
+
+[NOTE]
+====
+Da {harvester-product-name} auf Kubernetes basiert und etcd als Datenbank verwendet, beträgt die maximale Fehlertoleranz für Knoten eins, wenn es drei Verwaltungsknoten gibt.
+====
+
+image::host/host.png[host.png]
+
+{harvester-product-name} reserviert CPU-Ressourcen für systemnahe Operationen, weshalb die insgesamt in der *CPU* Spalte angegebene Anzahl an Kernen leicht geringer ist als die tatsächliche Anzahl an Kernen auf jedem Host. Für weitere Informationen siehe xref:virtual-machines/cpu-pinning.adoc#_calculation_of_shared_cpu_pool[Berechnung des gemeinsamen CPU-Pools].
+
+== Knotenwartung
+
+Administratoren können den Wartungsmodus aktivieren (wählen Sie *⋮ > Wartungsmodus aktivieren*), um alle virtuellen Maschinen automatisch von einem Knoten zu evakuieren. Dieser Modus nutzt xref:virtual-machines/live-migration.adoc#_automatically_triggered_batch_migration[Batch-Migration], um die xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[live-migrierbaren virtuellen Maschinen] auf andere Knoten zu verschieben, was nützlich ist, wenn Sie den Knoten neu starten, die Firmware aktualisieren oder Hardwarekomponenten ersetzen müssen. Mindestens zwei aktive Knoten sind erforderlich, um diese Funktion zu nutzen.
+
+xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[Nicht-migrierbare virtuelle Maschinen] können verhindern, dass der Knoten den Wartungsmodus aktiviert. Wenn dies geschieht, müssen Sie diese virtuellen Maschinen identifizieren und manuell herunterfahren. Für weitere Informationen siehe xref:../virtual-machines/live-migration.adoc[Live-Migration].
+
+Um einzelne VMs zum Herunterfahren zu zwingen, anstatt sie auf andere Knoten zu migrieren, fügen Sie das Label `harvesterhci.io/maintain-mode-strategy` und einen der folgenden Werte zu diesen VMs hinzu:
+
+* `Migrate`: Migriert die VM live zu einem anderen Knoten im Cluster. Dies ist das Standardverhalten, wenn das Label `harvesterhci.io/maintain-mode-strategy` nicht gesetzt ist.
+* `ShutdownAndRestartAfterEnable`: Startet die VM neu, nachdem der Knoten in den Wartungsmodus wechselt. Die VM wird auf einem anderen Knoten geplant.
+* `ShutdownAndRestartAfterDisable`: Fährt die VM herunter, wenn der Wartungsmodus aktiviert ist, und startet die VM neu, wenn der Wartungsmodus deaktiviert ist. Die VM bleibt auf demselben Knoten.
+* `Shutdown`: Die VM wird heruntergefahren, wenn der Wartungsmodus aktiviert ist. Die VM bleibt ausgeschaltet, anstatt neu zu starten.
+
+Sie können das kollektive Herunterfahren aller VMs auf einem Knoten über den Bildschirm *Wartungsmodus aktivieren* erzwingen. Dies deaktiviert individuelle Einstellungen mit dem `harvesterhci.io/maintain-mode-strategy`-Label.
+
+Um einen speziellen Befehl vor dem Herunterfahren einer VM auszuführen, sollten Sie den https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks[Container-Lebenszyklus-Hook] `PreStop` verwenden.
+
+image::host/node-maintenance.png[node-maintenance.png]
+
+== Einen Knoten absperren
+
+Abgesperrte Knoten werden als nicht planbar markiert. Das Absperren ist nützlich, wenn Sie verhindern möchten, dass neue Arbeitslasten auf einem Knoten geplant werden. Sie können einen Knoten entsperren, um ihn wieder planbar zu machen.
+
+image::host/cordon-nodes.png[cordon-node.png]
+
+== Einen Knoten löschen
+
+[CAUTION]
+====
+Bevor Sie einen Knoten aus einem {harvester-product-name} Cluster entfernen, stellen Sie fest, ob die verbleibenden Knoten über genügend Rechen- und Speicherressourcen verfügen, um die Arbeitslast des zu entfernenden Knotens zu übernehmen. Weitere Informationen finden Sie in den folgenden Abschnitten:
+
+* Aktuelle Ressourcennutzung im Cluster (auf der *Hosts* Ansicht der {harvester-product-name} Benutzeroberfläche)
+* Fähigkeit der verbleibenden Knoten, genügend Replikate für alle Volumes aufrechtzuerhalten
+
+Wenn die verbleibenden Knoten nicht über genügend Ressourcen verfügen, können VMs möglicherweise nicht migrieren und Volumes können sich verschlechtern, wenn Sie einen Knoten entfernen.
+====
+
+=== 1. Überprüfen Sie, ob der Knoten aus dem Cluster entfernt werden kann.
+
+Sie können einen Steuerungsknoten sicher entfernen, abhängig von der Anzahl und Verfügbarkeit anderer Knoten im Cluster.
+
+* Der Cluster hat drei Steuerungsknoten und einen oder mehrere Arbeitsknoten.
++
+Wenn Sie einen Steuerungsknoten entfernen, wird ein Arbeitsknoten zum Steuerungsknoten befördert. {harvester-product-name} ermöglicht es Ihnen, jedem Knoten, der einem Cluster beitritt, eine Rolle zuzuweisen. In früheren Versionen wurden Arbeitsknoten zufällig für die Beförderung ausgewählt. Wenn Sie bestimmte Knoten befördern möchten, siehe <<Role Management,Rollenverwaltung>> und xref:../installation-setup/config/configuration-file.adoc#_install_role[Konfigurationsdatei] für weitere Informationen.
++
+[NOTE]
+====
+Die automatische Beförderung von Knoten erfolgt nur, wenn ein Steuerungsknoten aus dem Cluster gelöscht wird. Dies schließt keine Situationen ein, in denen ein Knoten aufgrund fehlgeschlagener Gesundheitsprüfungen nicht verfügbar wird. Der ungesunde Knoten behält seine Rolle.
+====
+
+* Der Cluster hat drei Steuerungsknoten und keine Arbeitsknoten.
++
+Sie müssen einen neuen Knoten zum Cluster hinzufügen, bevor Sie einen Steuerungsknoten entfernen. Dies stellt sicher, dass der Cluster immer drei Steuerungsknoten hat und dass ein Quorum gebildet werden kann, selbst wenn ein Steuerungsknoten ausfällt.
+
+* Der Cluster hat nur zwei Steuerungsknoten und keine Arbeitsknoten.
++
+Das Entfernen eines Steuerungsknotens in dieser Situation wird nicht empfohlen, da die etcd-Daten in einem Einzelknoten-Cluster nicht repliziert werden. Der Ausfall eines einzelnen Knotens kann dazu führen, dass etcd sein Quorum verliert und den Cluster herunterfährt.
+
+=== 2. Überprüfen Sie den Status der Volumes.
+
+. Greifen Sie auf die xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[eingebettete {longhorn-product-name} Benutzeroberfläche] zu.
+. Gehen Sie zum *Volume*-Bildschirm.
+. Überprüfen Sie, dass der Zustand aller Volumes *Gesund* ist.
+
+=== 3. Evakuieren Sie Replikate von dem Knoten, der entfernt werden soll.
+
+. Greifen Sie auf die xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[eingebettete {longhorn-product-name} Benutzeroberfläche] zu.
+. Gehen Sie zum *Knoten* Bildschirm.
+. Wählen Sie den Knoten aus, den Sie entfernen möchten, klicken Sie auf das Symbol in der *Operation*-Spalte und wählen Sie dann *Knoten und Festplatten bearbeiten*.
+. Konfigurieren Sie die folgenden Einstellungen:
+ ** *Knotenplanung*: Wählen Sie *Deaktivieren*.
+ ** *Evakuierung angefordert*: Wählen Sie *Wahr*.
+. Klicken Sie auf *Speichern*.
+. Gehen Sie zurück zum *Knoten*-Bildschirm und überprüfen Sie, dass der *Replicas*-Wert für den zu entfernenden Knoten *0* beträgt.
+
+[IMPORTANT]
+====
+Die Ausweisung kann nicht abgeschlossen werden, wenn die verbleibenden Knoten keine Replikate vom zu entfernenden Knoten akzeptieren können. In diesem Fall bleiben einige Volumes im *Degraded*-Zustand, bis Sie weitere Knoten zum Cluster hinzufügen.
+====
+
+=== 4. Verwalten Sie nicht migrierbare virtuelle Maschinen.
+
+Überprüfen Sie, ob es xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[nicht migrierbare virtuelle Maschinen] gibt.
+
+[TIP]
+====
+* Erstellen Sie eine Sicherung oder einen Snapshot für jede nicht migrierbare virtuelle Maschine.
+* Sie können die knotespezifischen Volumes, Geräte und Knoten-Selektoren entfernen, um es den virtuellen Maschinen zu ermöglichen, auf anderen Knoten geplant zu werden. 
++
+NOTE: Da der aktuelle Knoten gelöscht werden soll, gehen die nicht gespeicherten/nicht migrierten virtuellen Maschinen verloren.
+* Stoppen Sie die verbleibenden nicht migrierbaren virtuellen Maschinen manuell.
+====
+
+=== 5. Weisen Sie Arbeitslasten vom zu entfernenden Knoten aus.
+
+Sie können den <<Node Maintenance,Wartungsmodus>> auf dem Knoten aktivieren, um VMs und Arbeitslasten automatisch live zu migrieren. Sie können auch VMs manuell auf andere Knoten live migrieren.
+
+Alle Arbeitslasten wurden erfolgreich ausgewiesen, wenn der Knotenstatus *Wartung* ist.
+
+image::host/node-maintain-completed.png[node-maintain-completed.png]
+
+[IMPORTANT]
+====
+Wenn ein Cluster nur zwei Steuerungsknoten hat, erlaubt {harvester-product-name} nicht, den Wartungsmodus auf einem Knoten zu aktivieren. Sie können den zu entfernenden Knoten manuell mit dem folgenden Befehl entleeren:
+
+----
+kubectl drain <node_name> --force --ignore-daemonsets --delete-local-data --pod-selector='app!=csi-attacher,app!=csi-provisioner'
+----
+
+Das Entfernen eines Steuerungsknotens in dieser Situation wird *nicht empfohlen*, da die etcd-Daten nicht repliziert werden. Der Ausfall eines einzelnen Knotens kann dazu führen, dass etcd sein Quorum verliert und den Cluster herunterfährt.
+====
+
+=== 6. Löschen Sie die RKE2-Dienste und fahren Sie den Knoten herunter.
+
+. Melden Sie sich am Knoten mit dem Root-Konto an.
++
+. Führen Sie das Skript `/opt/rke2/bin/rke2-uninstall.sh` aus, um die auf dem Knoten laufenden RKE2-Dienste zu löschen.
++
+. Fahren Sie den Knoten herunter.
+
+=== 7. Entfernen Sie den Knoten.
+
+. Gehen Sie in der Benutzeroberfläche zum **Hosts**-Bildschirm.
++
+. Suchen Sie den Knoten, den Sie entfernen möchten, und klicken Sie dann auf **⋮ -> Löschen**.
++
+image::host/delete-node.png[]
+
+[NOTE]
+====
+Es gibt ein https://github.com/harvester/harvester/issues/1497[bekanntes Problem] mit dem harten Löschen von Knoten.
+Sobald das Problem behoben ist, können Sie diesen Schritt überspringen.
+====
+
+== Rollenverwaltung
+
+Hardwareprobleme können Sie zwingen, den Verwaltungsknoten zu ersetzen. {harvester-product-name} verbessert den Prozess, indem die folgenden Rollen eingeführt werden:
+
+* *Management*: Ermöglicht es einem Knoten, priorisiert zu werden, wenn {harvester-product-name} Knoten zu Verwaltungsknoten befördert werden.
+* *Zeuge*: Beschränkt einen Knoten darauf, ein Zeugenknoten (funktioniert nur als etcd-Knoten) in einem bestimmten Cluster zu sein.
+* *Arbeiter*: Beschränkt einen Knoten darauf, ein Arbeiterknoten (niemals zum Verwaltungsknoten befördert) in einem bestimmten Cluster zu sein.
+
+[CAUTION]
+====
+{harvester-product-name} erlaubt derzeit nur einen Zeugenknoten im Cluster.
+====
+
+Für weitere Informationen zur Zuweisung von Rollen an Knoten siehe xref:../installation-setup/methods/iso-install.adoc[ISO-Installation].
+
+== Multi-Disk-Verwaltung
+
+=== Zusätzliche Festplatten hinzufügen
+
+Benutzer können mehrere Festplatten als zusätzliche Datenvolumen von der Seite "Host bearbeiten" anzeigen und hinzufügen.
+
+. Gehen Sie zur Seite *Hosts*.
+. Klicken Sie auf dem Knoten, den Sie ändern möchten, auf *⋮ -> Konfiguration bearbeiten*.
++
+image::host/multidisk-mgmt-01.png[Konfiguration bearbeiten]
+
+. Wählen Sie die *Speicher*-Registerkarte und klicken Sie auf *Festplatte hinzufügen*.
++
+image::host/multidisk-mgmt-02.png[Festplatten hinzufügen]
++
+[CAUTION]
+====
+{harvester-product-name} unterstützt das Hinzufügen von Partitionen als zusätzliche Festplatten nicht. Wenn Sie es als zusätzliche Festplatte hinzufügen möchten, stellen Sie sicher, dass Sie zuerst alle Partitionen löschen (z. B. mit `fdisk`).
+====
+
+. Wählen Sie einen Bereitsteller für die Festplatte aus.
++
+** *LonghornV1 (CSI)*: Dies ist der standardmäßige Bereitsteller.
++
+image::host/multidisk-mgmt-03.png[Provisioner LonghornV1]
++
+Sie müssen *Erzwingen der Formatierung* auf *Ja* setzen, wenn das Blockgerät noch nie zwangsformatiert wurde.
++
+image::host/multidisk-mgmt-08.png[Erzwinge Formatierung]
++
+** *LVM*: Wählen Sie diesen Bereitsteller, wenn Sie xref:../add-ons/lvm-local-storage.adoc[] verwenden möchten, um persistente Volumes für Ihre Workloads zu erstellen.
++
+image::host/multidisk-mgmt-05.png[Provisioner LVM]
+
+. Klicken Sie auf *Speichern*.
+
+. Überprüfen Sie auf dem Bildschirm mit den Hostdetails, ob die Festplatten hinzugefügt wurden und der richtige Bereitsteller eingestellt wurde.
++
+Sie können auch <<Storage Tags,Speichertags>> hinzufügen, wenn Sie möchten, dass {longhorn-product-name} Volumendaten auf bestimmten Knoten oder Festplatten gespeichert werden. Speichertags können nur mit den Bereitstellern *LonghornV1 (CSI)* und *LonghornV2 (CSI)* verwendet werden.
++
+image::host/multidisk-mgmt-06.png[Festplattentag 01]
++
+image::host/multidisk-mgmt-07.png[Festplattentag 02]
+
+[NOTE]
+====
+Damit {harvester-product-name} die Festplatten identifizieren kann, muss jede Festplatte eine eindeutige https://en.wikipedia.org/wiki/World_Wide_Name[WWN] haben. Andernfalls wird {harvester-product-name} sich weigern, die Festplatte hinzuzufügen.
+Wenn Ihre Festplatte keine WWN hat, können Sie sie mit dem `EXT4` Dateisystem formatieren, um {harvester-product-name} zu helfen, die Festplatte zu erkennen.
+====
++
+[NOTE]
+====
+Wenn Sie {harvester-product-name} in einer QEMU-Umgebung testen, müssen Sie QEMU v6.0 oder höher verwenden. Frühere Versionen von QEMU generieren immer die gleiche WWN für die NVMe-Festplattensimulation. Dies wird dazu führen, dass {harvester-product-name} die zusätzlichen Festplatten nicht hinzufügt, wie oben erklärt. Sie können jedoch weiterhin eine virtuelle Festplatte mit dem SCSI-Controller hinzufügen. Die WWN-Informationen können manuell zusammen mit dem Vorgang zum Anhängen der Festplatte hinzugefügt werden. Für weitere Details verweisen Sie bitte auf das https://github.com/harvester/vagrant-rancherd/blob/2782981b6017754d016f5b72d630dff4895f7ad6/scripts/attach-disk.sh#L75[Skript].
+====
+
+=== Speicher-Tags
+
+Die Funktion der Speichertags ermöglicht es, nur bestimmte Knoten oder Festplatten für die Speicherung von {longhorn-product-name} Volumendaten zu verwenden. Zum Beispiel können leistungssensitive Daten nur die Hochleistungsfestplatten verwenden, die als `fast`, `ssd` oder `nvme` gekennzeichnet werden können, oder nur die Hochleistungsknoten, die als `baremetal` gekennzeichnet sind.
+
+Diese Funktion unterstützt sowohl Festplatten als auch Knoten.
+
+==== Einrichtung
+
+Die Tags können über die {harvester-product-name} Benutzeroberfläche auf der Hostseite eingerichtet werden:
+
+. Klicken Sie auf `Hosts` \-> `Edit Config` \-> `Storage`
+. Klicken Sie auf `Add Host/Disk Tags` , um mit dem Tippen zu beginnen, und drücken Sie die Eingabetaste, um neue Tags hinzuzufügen.
+. Klicken Sie auf `Save` , um die Tags zu aktualisieren.
+. Auf der xref:../storage/storageclass.adoc[StorageClasses] Seite erstellen Sie eine neue Speicherklasse und wählen Sie die definierten Tags in den Feldern `Node Selector` und `Disk Selector` aus.
+
+Alle bestehenden geplanten Volumen auf dem Knoten oder der Festplatte werden von den neuen Tags nicht betroffen sein.
+
+[NOTE]
+====
+Wenn mehrere Tags für ein Volumen angegeben sind, müssen die Festplatte und die Knoten (zu denen die Festplatte gehört) alle angegebenen Tags haben, um verwendbar zu werden.
+====
+
+=== Festplatten entfernen
+
+Bevor Sie eine Festplatte entfernen, müssen Sie zuerst {longhorn-product-name} Replikate auf der Festplatte auslagern.
+
+[NOTE]
+====
+Die Replikatdaten würden automatisch auf eine andere Festplatte neu aufgebaut, um die hohe Verfügbarkeit zu gewährleisten.
+====
+
+==== Identifizieren Sie die zu entfernende Festplatte
+
+. Gehen Sie zur Seite *Hosts*.
+. Wählen Sie im Knoten, der die Festplatte enthält, den Knotennamen aus und gehen Sie zum *Speicher*-Tab.
+. Finden Sie die Festplatte, die Sie entfernen möchten. Angenommen, wir möchten `/dev/sdb` entfernen, und der Einhängepunkt der Festplatte ist `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04`.
+
+image::host/remove-disks-harvester-find-disk.png[Festplatte zum Entfernen finden]
+
+==== Replikate auslagern ({longhorn-product-name} Dashboard)
+
+. Bitte folgen Sie xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[dieser Sitzung], um das eingebettete {longhorn-product-name} Dashboard zu aktivieren.
+. Besuchen Sie das {longhorn-product-name} Dashboard und gehen Sie zur *Knoten* Seite.
+. Klappen Sie den Knoten auf, der die Festplatte enthält. Bestätigen Sie, dass der Einhängepunkt `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04` in der Liste der Festplatten enthalten ist.
++
+image::host/remove-disks-longhorn-nodes.png[Überprüfen Sie die zu entfernende Festplatte]
+
+. Wählen Sie *Knoten und Festplatten bearbeiten* aus.
++
+image::host/remove-disks-longhorn-nodes-edit.png[Knoten und Festplatten bearbeiten]
+
+. Scrollen Sie zu der Festplatte, die Sie entfernen möchten.
+ ** Setzen Sie `Scheduling` auf `Disable`.
+ ** Setzen Sie `Eviction Requested` auf `True`.
+ ** Wählen Sie *Speichern* aus. Wählen Sie nicht das Löschsymbol aus.
++
+image::host/remove-disks-longhorn-nodes-evict-disk.png[Festplatte auslagern]
+
+. Die Festplatte wird deaktiviert. Bitte warten Sie, bis die Anzahl der Festplattenreplikate `0` beträgt, um mit der Entfernung der Festplatte fortzufahren.
++
+image::host/remove-disks-longhorn-wait-replicas.png[Warte auf Replikate]
+
+==== Entfernen Sie die Festplatte
+
+. Gehen Sie zur Seite *Hosts*.
+. Wählen Sie auf dem Knoten, der die Festplatte enthält, *⋮ -> Konfiguration bearbeiten* aus.
+. Gehen Sie zum *Speicher*-Tab und wählen Sie *x* aus, um die Festplatte zu entfernen.
++
+image::host/remove-disks-harvester-remove.png[Festplatte entfernen]
+
+. Wählen Sie *Speichern* aus, um die Festplatte zu entfernen.
+
+== Topologieverbreitungsbeschränkungen
+
+https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#node-labels[Knotenbeschriftungen] werden verwendet, um die Topologiedomänen zu identifizieren, in denen sich jeder Knoten befindet. Sie können Beschriftungen wie https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone[`topology.kubernetes.io/zone`] in der {harvester-product-name} Benutzeroberfläche konfigurieren.
+
+. Gehen Sie zu *Hosts*.
++
+. Wählen Sie den Zielknoten aus und wählen Sie dann *⋮ -> Konfiguration bearbeiten* aus.
++
+. Klicken Sie auf dem *Labels*-Tab auf *Label hinzufügen* und geben Sie dann das Label `topology.kubernetes.io/zone` und einen Wert an.
++
+. Klicken Sie auf *Speichern*.
+
+Das Label wird automatisch mit dem entsprechenden {longhorn-product-name} Knoten synchronisiert.
+
+== Hugepages
+
+Hugepages verbessern das Speichermanagement in Linux, indem sie dem Kernel ermöglichen, Speicher in deutlich größeren Blöcken als den Standard von 4 KB zuzuweisen. Größere Seitengrößen verbessern die Effizienz, indem sie die CPU-Zeit reduzieren, die der Kernel benötigt, um Speicherzuweisungen zu verarbeiten. Dies kann wiederum die Gesamtleistung des Systems erhöhen.
+
+Es gibt zwei Arten von Hugepages:
+
+* Persistente oder statische: Vorab zugewiesen basierend auf relevanten Kernel-Bootparametern oder {harvester-product-name} Einstellungen.
+* Anonym oder transparent: Automatisch vom Kernel zugewiesen und freigegeben.
+
+Sie können Informationen über die aktuelle Hugepages-Zuweisung für jeden Knoten einsehen.
+
+. Gehen Sie im {harvester-product-name} UI zum Bildschirm *Hosts*.
+
+. Klicken Sie auf den Zielknoten und wählen Sie dann die Registerkarte *Hugepages* aus.
+
+Die Informationen auf der Registerkarte *Hugepages* sind in zwei Abschnitte unterteilt:
+
+* *Meminfo*: Zeigt die gesamte Menge an Speicher an, die für anonyme (transparente) Hugepages verwendet wird, die Standard-Hugepage-Größe und Details zu persistenten (statischen) Hugepages.
++
+Das Feld *Anonymous Hugepages (bytes)* zeigt typischerweise einen großen Wert an, der den vom Kernel automatisch für transparente Hugepages genutzten RAM widerspiegelt.
++
+Im Gegensatz dazu bleibt das Feld *Total Hugepages*, das die statisch zugewiesenen Hugepages darstellt, typischerweise bei `0`. Wenn jedoch der Longhorn V2 Data Engine aktiviert ist, ändert sich dieser Wert auf `1024`.
+
+* *Transparent Hugepages*: Zeigt die aktuellen Einstellungen für transparente Hugepages an.
++
+Die folgende Tabelle skizziert die Optionen und Standardwerte für jede Einstellung:
++
+|===
+| Option | Unterstützte Werte | Standardwert
+
+| *Aktiviert*
+| `Always`, `Madvise`, `Never`
+| `Always`
+
+| *Shared Memory Enabled*
+| `Always`, `Within Size`, `Advise`, `Never`, `Deny`, `Force`
+| `Never`
+
+| *Defragmentierung*
+| `Always`, `Defer`, `Defer+Madvise`, `Madvise`, `Never`
+| `Madvise`
+|===
++
+Sie können diese Einstellungen für jeden Knoten ändern, indem Sie *⋮ -> Konfiguration bearbeiten* auswählen und dann auf die Registerkarte *Hugepages* klicken.
++
+Für weitere Informationen zu den Optionen siehe https://docs.kernel.org/admin-guide/mm/transhuge.html[Transparent Hugepage Support] in der Linux-Kernel-Dokumentation.
+
+== Ksmtuned-Modus
+
+Ksmtuned ist ein KSM-Automatisierungstool, das als DaemonSet bereitgestellt wird, um Ksmtuned auf jedem Knoten auszuführen. Es wird KSM starten oder stoppen, indem es den Prozentsatz des verfügbaren Speichers überwacht (*d.h. Schwellenwertkoeffizient*). Standardmäßig müssen Sie Ksmtuned manuell auf jeder Knotenbenutzeroberfläche aktivieren. Sie können die KSM-Statistiken nach 1-2 Minuten von der Knotenbenutzeroberfläche sehen. (Überprüfen Sie https://www.kernel.org/doc/html/latest/admin-guide/mm/ksm.html#ksm-daemon-sysfs-interface[KSM] für weitere Details).
+
+=== Schnellstart
+
+. Gehen Sie zur Seite *Hosts*.
+. Klicken Sie auf dem Knoten, den Sie ändern möchten, auf *⋮ -> Konfiguration bearbeiten*.
+. Wählen Sie die *Ksmtuned*-Registerkarte und wählen Sie *Ausführen* in *Ausführungsstrategie*.
+. (Optional) Sie können den *Schwellenwertkoeffizienten* nach Bedarf ändern.
++
+image::host/edit-ksmtuned.png[Ksmtuned bearbeiten]
+
+. Klicken Sie auf *Speichern*, um zu aktualisieren.
+. Warten Sie etwa 1-2 Minuten, und Sie können die *Statistiken* überprüfen, indem Sie auf *Ihren Knoten -> Ksmtuned-Tab* klicken.
++
+image::host/view-ksmtuned-statistics.png[Ksmtuned-Statistiken anzeigen]
+
+=== Parameter
+
+*Ausführungsstrategie:*
+
+* *Beenden:* Beenden Sie Ksmtuned und KSM. VMs können weiterhin gemeinsam genutzte Speicherseiten verwenden.
+* *Führen Sie den folgendes Kommando aus:* Führen Sie Ksmtuned aus.
+* *Bereinigen:* Beenden Sie Ksmtuned und bereinigen Sie die KSM-Speicherseiten.
+
+*Schwellenwertkoeffizient*: konfiguriert das Verhältnis des verfügbaren Speichers in Prozent. Wenn der verfügbare Speicher unter dem Schwellenwert liegt, wird KSM gestartet; andernfalls wird KSM beendet.
+
+*Zusammenführen über Knoten:* gibt an, ob Seiten von verschiedenen NUMA-Knoten zusammengeführt werden können.
+
+*Modus:*
+
+* *Standard:* Der Standardmodus. Der Steuerknoten ksmd verwendet etwa 20 % einer einzelnen CPU. Es verwendet die folgenden Parameter:
+
+[,yaml]
+----
+Boost: 0
+Decay: 0
+Maximum Pages: 100
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Hochleistung:* Der Steuerknoten ksmd verwendet 20 % bis 100 % einer einzelnen CPU und erzielt eine höhere Scan- und Zusammenführungseffizienz. Es verwendet die folgenden Parameter:
+
+[,yaml]
+----
+Boost: 200
+Decay: 50
+Maximum Pages: 10000
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Benutzerdefiniert:* Sie können die Konfiguration anpassen, um die gewünschte Leistung zu erreichen.
+
+Ksmtuned verwendet die folgenden Parameter zur Steuerung der KSM-Effizienz:
+
+|===
+| Parameter | Beschreibung
+
+| Mitarbeiter-
+| Die Anzahl der gescannten Seiten wird jedes Mal erhöht, wenn der verfügbare Speicher kleiner ist als der *Schwellenwertkoeffizient*.
+
+| Abbau
+| Die Anzahl der gescannten Seiten wird jedes Mal verringert, wenn der verfügbare Speicher größer ist als der *Schwellenwertkoeffizient*.
+
+| Maximale Seiten
+| Maximale Anzahl von Seiten pro Scan.
+
+| Minimale Seiten
+| Die minimale Anzahl von Seiten pro Scan, auch die Konfiguration für den ersten Durchlauf.
+
+| Schlafzeit (ms)
+| Das Intervall zwischen zwei Scans, das mit der Formel (*Schlafzeit* * 16 * 1024 * 1024 / Gesamtspeicher) berechnet wird. Minimum: 10ms.
+|===
+
+*Zum Beispiel, nehmen wir an, Sie haben einen 512GiB-Speicherknoten, der die folgenden Parameter verwendet:*
+
+[,yaml]
+----
+Boost: 300
+Decay: 100
+Maximum Pages: 5000
+Minimum Pages: 1000
+Sleep Time: 50
+----
+
+Wenn Ksmtuned startet, initialisiere `pages_to_scan` in KSM auf 1000 (*Minimale Seiten*) und setze `sleep_millisecs` auf 10 (50 * 16 * 1024 * 1024 / 536870912 KiB < 10).
+
+KSM startet, wenn der verfügbare Speicher unter dem *Schwellenwertkoeffizienten* fällt. Wenn es erkennt, dass es läuft, erhöht sich `pages_to_scan` jede Minute um 300 (*Boost*), bis es 5000 (*Maximale Seiten*) erreicht.
+
+KSM wird beendet, wenn der verfügbare Speicher über dem *Schwellenwertkoeffizienten* liegt. Wenn es erkennt, dass es gestoppt ist, verringert sich `pages_to_scan` jede Minute um 100 (*Abbau*), bis es 1000 (*Minimale Seiten*) erreicht.
+
+== NTP-Konfiguration
+
+Die Zeitsynchronisation ist ein wichtiger Aspekt der verteilten Clusterarchitektur. Aus diesem Grund bietet {harvester-product-name} eine einfachere Möglichkeit zur Konfiguration der NTP-Einstellungen.
+
+{harvester-product-name} unterstützt die NTP-Konfiguration auf dem {harvester-product-name} UI-Einstellungsbildschirm (*Erweitert* > *Einstellungen*). Sie können die NTP-Einstellungen für das gesamte {harvester-product-name} Cluster jederzeit konfigurieren, und die Einstellungen werden auf alle Knoten im Cluster angewendet.
+
+image::host/harvester-ntp-settings.png[]
+
+Sie können mehrere NTP-Server gleichzeitig einrichten.
+
+image::host/harvester-ntp-settings-multiple.png[]
+
+Sie können die Einstellungen in der `node.harvesterhci.io/ntp-service` Annotation in Kubernetes-Knoten überprüfen:
+
+* `ntpSyncStatus`: Status der Verbindung zu NTP-Servern (mögliche Werte: `disabled`, `synced` und `unsynced`)
+* `currentNtpServers`: Liste der vorhandenen NTP-Server
+
+ $ kubectl get nodes harvester-node-0 -o yaml |yq -e '.metadata.annotations.["node.harvesterhci.io/ntp-service"]'
+ {"ntpSyncStatus":"synced","currentNtpServers":"0.suse.pool.ntp.org 1.suse.pool.ntp.org"}
+
+[NOTE]
+====
+
+
+. Ändern Sie nicht die NTP-Konfigurationsdatei auf jedem Knoten. {harvester-product-name} wird automatisch die Einstellungen synchronisieren, die Sie auf der {harvester-product-name} UI konfiguriert haben, an die Knoten.
+. Wenn Sie {harvester-product-name} von einer früheren Version aktualisiert haben, wird die *NTP-Server*-Liste auf dem Einstellungsbildschirm leer sein (siehe Screenshot). Sie müssen die NTP-Einstellungen manuell konfigurieren, da {harvester-product-name} sich der vorherigen Einstellungen nicht bewusst ist und Konflikte nicht erkennen kann.
+====
+
+image::host/harvester-ntp-settings-empty.png[]
+
+== Cloudnativ-Knotenkonfiguration
+
+Sie müssen möglicherweise einen oder mehrere Knoten nach der Installation von {harvester-product-name} anpassen. Dieser Prozess umfasst in der Regel die Aktualisierung der xref:../installation-setup/config/update-configuration.adoc[Laufzeitkonfiguration] und die Modifizierung von Dateien im `/oem` Verzeichnis jedes Knotens, um Änderungen nach einem Neustart beizubehalten.
+
+Diese Anpassungen können in einem Kubernetes-Manifest beschrieben und dann mit kubectl oder anderen GitOps-zentrierten Tools wie https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] auf das zugrunde liegende Cluster angewendet werden.
+
+[WARNING]
+====
+Fehlkonfigurationen könnten die Fähigkeit eines {harvester-product-name} Knotens beeinträchtigen, zu starten, oder sogar die allgemeine Stabilität des Clusters gefährden. Sie können solche Probleme verhindern, indem Sie die Dokumentation des Elemental-Toolkits lesen, um zu lernen, wie Sie https://rancher.github.io/elemental-toolkit/docs/customizing/[Elemental korrekt anpassen].
+====
+
+=== Erstellen einer CloudInit-Ressource
+
+Die Anpassung des {harvester-product-name} Knotens ist nur durch Ihre Kreativität und durch das, was die Markup-Syntax des Elemental-Toolkits ausdrücken kann, begrenzt. Die Dokumentation kann daher keine erschöpfende Liste möglicher Anpassungen und Anwendungsfälle bereitstellen.
+
+*Beispiel: Sie möchten einen SSH-autorisierten Schlüssel für den Standardbenutzer `rancher` auf allen Knoten hinzufügen.*
+
+Beginnen Sie mit der Erstellung eines Kubernetes-Manifests für eine CloudInit-Ressource.
+
+----
+file: ssh_access.yaml
+----
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-access
+spec:
+  matchSelector: {}
+  filename: 99_ssh.yaml
+  contents: |
+    stages:
+      network:
+        - authorized_keys:
+            rancher:
+              - ssh-ed25519 AAAA...
+----
+
+Dieses Manifest beschreibt ein Elemental cloud-init-Dokument, das auf _alle Knoten_ angewendet wird (da das leere `matchSelector: {}` Feld alles entspricht). Das YAML-Dokument im `.spec.contents` Feld wird in `/oem/99_ssh.yaml` gerendert (wegen des `.spec.filename` Feldes).
+
+Wenden Sie dieses Beispiel mit dem Befehl `kubectl apply -f ssh_access.yaml` an.
+
+[TIP]
+====
+Starten Sie die relevanten {harvester-product-name} Knoten neu, damit der Executor des Elemental-Toolkits die neue Konfiguration beim Booten anwenden kann.
+====
+
+==== CloudInit Resource Spec
+
+|===
+| Feld | required | Beschreibung
+
+| matchSelector
+| Ja
+| Einstellung, die es Ihnen ermöglicht, die Knoten anzugeben, die die Konfigurationsänderungen erhalten werden.
+
+| filename
+| Ja
+| Name der Datei, die in `/oem` erscheint.
+
+| Inhalt
+| Ja
+| Elemental-Toolkit cloud-init-Stil-Datei, die in eine Datei in `/oem` gerendert wird.
+
+| pausiert
+| Nein
+| Wenn auf `true` gesetzt, wird die Datei nicht aktualisiert, wenn sie sich ändert.
+|===
+
+Das `matchSelector` Feld kann verwendet werden, um bestimmte Knoten oder Gruppen von Knoten basierend auf ihren Labels anzusprechen.
+
+Beispiel:
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+----
+
+[NOTE]
+====
+Alle im `matchSelector` Feld aufgelisteten Schlüssel-Wert-Paare müssen mit den Labels der beabsichtigten Knoten übereinstimmen.
+
+Im folgenden Beispiel wird `matchSelector` nur mit `harvester-node-1` übereinstimmen, wenn dieser Knoten auch das `example.com/role`-Label mit dem Wert `role-a` hat.
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+  example.com/role: "role-a"
+----
+====
+
+=== Aktualisierung einer CloudInit-Ressource
+
+Sie können den Befehl `kubectl edit` verwenden, um eine CloudInit-Ressource zu aktualisieren. Es gibt jedoch eine Einschränkung, wenn das `matchSelector`-Feld aktualisiert wird, um einen oder mehrere Knoten von der Anpassung auszuschließen. Siehe die Anmerkung im Abschnitt <<Deleting a CloudInit Resource>> bezüglich des Zurückrollens von Anpassungen.
+
+[,console]
+----
+# kubectl edit cloudinit CLOUDINIT_NAME
+----
+
+=== Löschen einer CloudInit-Ressource
+
+Sie können den Befehl `kubectl delete` verwenden, um eine CloudInit-Ressource aus dem {harvester-product-name}-Cluster zu entfernen.
+
+[,console]
+----
+# kubectl delete cloudinit CLOUDINIT_NAME
+----
+
+[NOTE]
+====
+{harvester-product-name} kann keine zuvor beschriebenen Anpassungen "zurückrollen", da die CloudInit-Ressource alles beschreiben kann, was als Anpassung des Elemental-Toolkits ausgedrückt werden kann, einschließlich beliebiger Shell-Befehle.
+
+Im <<Creating a CloudInit Resource>>-Beispiel enthält die YAML-Datei den `authorized_keys`-Abschnitt. Dies ist eine Aktion im Elemental-Toolkit, die ausschließlich dazu dient, Daten anzuhängen. Wenn die Ressource geändert oder gelöscht wird, enthält die `authorized_keys`-Datei in {rancher-product-name} weiterhin den alten öffentlichen Schlüssel.
+
+*Sie sind verantwortlich für die Änderung oder Erstellung einer CloudInit-Ressource, die die Änderungen zurückrollt (falls erforderlich), bevor Sie den Knoten neu starten.*
+====
+
+=== Fehlerbehebung bei CloudInit-Rollouts
+
+Wenn ein cloud-init-Dokument des Elemental-Toolkits nicht in `/oem` erscheint oder nicht die erwarteten Inhalte enthält, könnte der Statusblock der CloudInit-Ressource nützliche Hinweise enthalten.
+
+[,console]
+----
+# kubectl get cloudinit CLOUDINIT_NAME -o yaml
+----
+
+[,yaml]
+----
+status:
+  rollouts:
+    harvester-dngmf:
+      conditions:
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: 99_ssh.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+Die `harvester-node-manager` Pod(s) im `harvester-system` Namespace können ebenfalls einige Hinweise darauf enthalten, warum es keine Datei an einen Knoten rendert.
+Dieser Pod ist Teil eines Daemonsets, daher könnte es sich lohnen, den Pod zu überprüfen, der auf dem interessierenden Knoten läuft.
+
+== Fernkonsole
+
+Sie können die URL der Konsole für die Verwaltung von Remote-Servern konfigurieren. Diese Konsole ist besonders nützlich in Umgebungen, in denen der physische Zugang eingeschränkt ist.
+
+. Gehen Sie in der {harvester-product-name}-Benutzeroberfläche zu *Hosts*.
++
+. Suchen Sie den Zielhost und wählen Sie dann *⋮ -> Konfiguration bearbeiten*.
++
+image::host/remote_console_config.png[]
++
+. Geben Sie die *URL der Konsole* an und klicken Sie dann auf *Speichern*.
++
+Beispiel (mit HPE iLO):
++
+image::host/remote_console_url.png[]
++
+. Klicken Sie auf *Konsole*, um auf den Remote-Server zuzugreifen.
++
+image::host/remote_console_button.png[]
+
+== Rotieren abgelaufener Zertifikate
+
+Wenn die RKE2-Zertifikate abgelaufen sind, können Sie die `auto-rotate-rke2-certificates`-Einstellung nicht verwenden, um sie zu rotieren. Die Einstellung funktioniert nur, wenn der Cluster (`cluster.provisioning`) als `Ready` markiert ist.
+
+[,shell]
+----
+> kubectl get cluster.provisioning -n fleet-local local -o yaml | yq -e '.status.conditions[] | select(.type=="Ready")'
+lastUpdateTime: "2025-10-22T06:41:33Z"
+status: "True"
+type: Ready
+----
+
+Wenn der Wert des `status`-Feldes `False` ist, müssen Sie die Zertifikate manuell rotieren, indem Sie diese Schritte auf jedem Knoten befolgen:
+
+. Melden Sie sich am Knoten mit dem Root-Konto an.
+
+. Stoppen Sie den RKE2-Dienst.
++
+** Verwaltungs-Knoten
++
+[,shell]
+----
+systemctl stop rke2-server
+----
++
+** Arbeits-Knoten
++
+[,shell]
+----
+systemctl stop rke2-agent
+----
+
+. Rotieren Sie die RKE2-Zertifikate.
++
+[,shell]
+----
+/opt/rke2/bin/rke2 certificate rotate
+----
+
+. Starten Sie den RKE2-Dienst.
++
+** Verwaltungs-Knoten
++
+[,shell]
+----
+systemctl start rke2-server
+----
++
+** Arbeits-Knoten
++
+[,shell]
+----
+systemctl start rke2-agent
+----
+
+. Starten Sie den `rancher-system-agent`-Dienst neu.
++
+[,shell]
+----
+systemctl restart rancher-system-agent
+----

@@ -1,0 +1,97 @@
+= 见证节点
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+在生产环境中部署的{harvester-product-name}个集群需要一个控制平面来管理节点和Pod。一个典型的三节点集群有三个管理节点，每个节点都包含完整的控制平面组件。一个关键组件是etcd，Kubernetes用它来存储数据（配置、状态和元数据）。etcd节点的数量必须始终是奇数（例如，{harvester-product-name}中的默认数量是3），以确保维持法定人数。
+
+某些情况下，您可能需要避免将工作负载和用户数据部署到管理节点。在这些情况下，可以将一个集群节点分配为_见证_角色，这限制它仅作为etcd集群成员运行。见证节点负责建立成员法定人数（大多数节点），这些节点必须就集群状态的更新达成一致。
+
+见证节点不存储任何数据，但仍必须考虑 https://etcd.io/docs/v3.3/op-guide/hardware/[etcd节点的硬件建议]。使用资源有限的硬件会显著影响集群性能，如文章 https://www.suse.com/support/kb/doc/?id=000020100[慢速etcd性能（性能测试和优化）]中所述。
+
+{harvester-product-name}支持具有两个管理节点和一个见证节点的集群（可选地，一个或多个工作节点）。有关节点角色的更多信息，请参见xref:../hosts/hosts.adoc#_role_management[角色管理]。
+
+[IMPORTANT]
+====
+节点只能在加入集群时被分配_见证_角色。每个集群只能有一个见证节点。
+====
+
+== 创建带有见证节点的{harvester-product-name}集群
+
+您可以在节点加入新创建的集群时将其分配为_见证_角色。
+
+在以下示例中，创建了一个包含三个节点的集群，节点`harvester-node-1`被分配为_见证_角色。`harvester-node-1`消耗更少的资源，仅具有etcd功能。
+
+----
+NAME↑               STATUS   ROLE                         VERSION               PODS     CPU      MEM    %CPU    %MEM    CPU/A    MEM/A AGE
+harvester-node-0    Ready    control-plane,etcd,master    v1.27.10+rke2r1         70    1095    10143      10      63    10000    15976 4d13h
+harvester-node-1    Ready    etcd                         v1.27.10+rke2r1          7     258     2258       2      14    10000    15976 4d13h
+harvester-node-2    Ready    control-plane,etcd,master    v1.27.10+rke2r1         36     840     6905       8      43    10000    15976 4d13h
+----
+
+因为集群必须有三个节点，提升控制器将提升其他两个节点。之后，集群将有两个控制平面节点和一个见证节点。
+
+== 见证节点上的工作负载
+
+见证节点仅运行以下基本工作负载：
+
+* *harvester-node-manager*
+* *cloud-controller-manager*
+* *etcd*
+* *kube-proxy*
+* *rke2-canal*
+* *rke2-multus*
+
+== 使用见证节点升级集群
+
+一般的升级要求和程序适用于具有见证节点的集群。然而，这些集群中存在降级卷可能导致升级操作失败。
+
+== 具有见证节点的集群中的 Longhorn 副本
+
+{harvester-product-name} 使用 Longhorn，一个分布式块存储系统，来管理块设备卷。Longhorn 被配置到管理节点和工作节点，但不配置到见证节点，因为它们不存储任何数据。
+
+Longhorn 创建每个卷的副本以提高可用性。副本包含卷的快照链，每个快照存储与前一个快照的变化。在 {harvester-product-name} 中，默认的 StorageClass `harvester-longhorn` 的副本数量值为 `3`。
+
+== 局限性
+
+见证节点不存储任何数据。这意味着在三节点集群（没有工作节点）中，每个Longhorn卷仅创建两个副本。然而，默认的 StorageClass `harvester-longhorn` 为高可用性设置了副本数量值 `3`。如果您使用此 StorageClass 创建卷，Longhorn 将无法创建配置的副本数量。这导致卷在 Longhorn UI 上被标记为 *降级*。
+
+总之，您必须使用与集群配置匹配的 StorageClass。
+
+* 2 个管理节点 + 1 个见证节点：创建一个新的默认 StorageClass，参数 *副本数量* 设置为 *2*。这确保每个Longhorn卷仅创建两个副本。
+* 2 个管理节点 + 1 个见证节点 + 1 个或更多工作节点：您可以使用现有的默认 StorageClass。
+
+image::advanced/new-storageclass-rep-2.png[新的存储类副本 2]
+
+image::advanced/set-to-default-sc.png[设置为默认]
+
+如果您已经使用原始默认 StorageClass 创建了卷，您可以在 *卷* 屏幕的 xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[嵌入式 Longhorn UI] 上修改副本数量。
+
+image::advanced/redirect-to-longhorn-vol-page.png[redirect-to-longhorn-volume-page]
+
+image::advanced/update-replica-2.png[update-replica-count-to-2]
+
+== 已知问题
+
+=== 1.创建带有见证节点的集群时，*网络配置：在 {harvester-product-name} UI 上的创建*屏幕无法识别可以与所有节点一起使用的任何 NIC。
+
+image::advanced/create-policy-with-all-nodes.png[与所有节点创建网络配置]
+
+image::advanced/no-uplink.png[没有上行链路]
+
+解决方法是选择一个非见证节点，然后选择可以与该特定节点一起使用的 NIC。
+
+image::advanced/create-policy-with-specific-node.png[与特定节点创建网络配置]
+
+image::advanced/get-uplink.png[获取上行链路]
+
+您必须对集群中的每个非见证节点重复此过程。相同的上行链路设置可以在节点之间使用。
+
+相关问题： https://github.com/harvester/harvester/issues/5325[[BUG\] 当集群包含见证节点时，无法选择 NIC 创建网络配置]
+
+=== 2.在选择 VM 迁移的目标节点时，目标列表包括见证节点。
+
+image::advanced/vm-migration-witness-node.png[虚拟机迁移目标见证节点]
+
+请不要将见证节点选择为迁移目标。如果这样做，虚拟机迁移将会失败。
+
+相关问题： https://github.com/harvester/harvester/issues/5338[[BUG\] 不应将见证节点选择为迁移目标]

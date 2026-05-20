@@ -1,0 +1,133 @@
+= Mettez à niveau de v1.4.2 ou v1.4.3 vers v1.5.2
+:revdate: 2025-11-11
+:page-revdate: {revdate}
+
+== informations générales
+
+Un bouton *Mettre à niveau* apparaît sur l'écran *Tableau de bord* chaque fois qu'une nouvelle version {harvester-product-name} à laquelle vous pouvez mettre à niveau est disponible. Pour plus d'informations, consultez xref:./upgrades.adoc#_start_an_upgrade[Démarrer une mise à niveau].
+
+Vous pouvez directement mettre à niveau de v1.4.2 à v1.5.2 car {harvester-product-name} permet un maximum d'une mise à niveau mineure pour les composants sous-jacents. v1.4.2 et v1.4.3 utilisent la même version mineure de {rke2-short-name} (v1.31), tandis que v1.5.0, v1.5.1 et v1.5.2 utilisent la prochaine version mineure (v1.32).
+
+Pour des informations sur la mise à niveau de {harvester-product-name} dans des environnements isolés physiquement, consultez xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Préparer une mise à niveau isolée physiquement].
+
+=== Mettez à jour l'extension UI Harvester sur {rancher-product-name} v2.11.0
+
+Vous devez utiliser **v1.5.2** de l'extension UI Harvester pour importer des clusters {harvester-product-name} v1.5.2 sur {rancher-short-name} v2.11.0.
+
+. Sur l'interface {rancher-short-name}, allez à *local -> Applications -> Dépôts*.
+
+. Localisez le dépôt nommé *harvester*, puis sélectionnez *⋮ -> Actualiser*.
+
+. Allez à l'écran *Extensions*.
+
+. Localisez l'extension nommée *Harvester*, puis cliquez sur *Mettre à jour*.
+
+. Sélectionnez la version *1.5.2*, puis cliquez sur *Mettre à jour*.
+
+. Laissez un certain temps pour que l'extension soit mise à jour, puis actualisez l'écran.
+
+== Problèmes connus
+
+=== La mise à niveau isolée physiquement est bloquée avec l'erreur `ImagePullBackOff` dans les pods Fluentd et Fluent Bit.
+
+La mise à niveau peut être bloquée au tout début du processus, comme l'indique un progrès de 0 % et des éléments marqués *En attente* dans la boîte de dialogue *Mise à niveau* de l'interface {harvester-product-name}.
+
+image::upgrade/upgrade-dialog-with-empty-status.png[]
+
+Plus précisément, les pods Fluentd et Fluent Bit peuvent rester bloqués dans l'état `ImagePullBackOff`. Pour vérifier l'état des pods, exécutez les commandes suivantes{nbsp}:
+
+[,bash]
+----
+$ kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-x2hz8   7m14s
+
+$ kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=hvst-upgrade-x2hz8
+NAME                            UPGRADE
+hvst-upgrade-x2hz8-upgradelog   hvst-upgrade-x2hz8
+
+$ kubectl -n harvester-system get pods -l harvesterhci.io/upgradeLog=hvst-upgrade-x2hz8-upgradelog
+NAME                                                        READY   STATUS             RESTARTS   AGE
+hvst-upgrade-x2hz8-upgradelog-downloader-6cdb864dd9-6bw98   1/1     Running            0          7m7s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-2nq7q         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-697wf         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-kd8kl         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentd-0               0/2     ImagePullBackOff   0          7m42s
+----
+
+Cela se produit parce que les images de conteneur suivantes ne sont ni préchargées dans les nœuds du cluster ni téléchargées depuis Internet{nbsp}:
+
+* `ghcr.io/kube-logging/fluentd:v1.15-ruby3`
+* `ghcr.io/kube-logging/config-reloader:v0.0.5`
+* `fluent/fluent-bit:2.1.8`
+
+Pour résoudre le problème, effectuez l'une des actions suivantes{nbsp}:
+
+* Mettez à jour le CR de journalisation pour utiliser les images déjà préchargées dans les nœuds du cluster. Pour ce faire, exécutez les commandes suivantes sur le cluster{nbsp}:
++
+[,bash]
+----
+# Get the Logging CR names
+OPERATOR_LOGGING_NAME=$(kubectl get loggings -l app.kubernetes.io/name=rancher-logging -o jsonpath="{.items[0].metadata.name}")
+INFRA_LOGGING_NAME=$(kubectl get loggings -l harvesterhci.io/upgradeLogComponent=infra -o jsonpath="{.items[0].metadata.name}")
+
+# Gather image info from operator's Logging CR
+FLUENTD_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.repository}")
+FLUENTD_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.tag}")
+
+FLUENTBIT_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.repository}")
+FLUENTBIT_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.tag}")
+
+CONFIG_RELOADER_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.repository}")
+CONFIG_RELOADER_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.tag}")
+
+# Patch the Logging CR
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentbit/image\",\"value\":{\"repository\":\"$FLUENTBIT_IMAGE_REPO\",\"tag\":\"$FLUENTBIT_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/image\",\"value\":{\"repository\":\"$FLUENTD_IMAGE_REPO\",\"tag\":\"$FLUENTD_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/configReloaderImage\",\"value\":{\"repository\":\"$CONFIG_RELOADER_IMAGE_REPO\",\"tag\":\"$CONFIG_RELOADER_IMAGE_TAG\"}}]"
+----
++
+Le statut des pods Fluentd et Fluent Bit devrait changer en `Running` dans un instant et le processus de mise à niveau devrait se poursuivre après la mise à jour du CR de journalisation. Si le statut du pod Fluentd est toujours `ImagePullBackOff`, vous pouvez supprimer le pod pour forcer son redémarrage.
++
+[,bash]
+----
+UPGRADE_NAME=$(kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true -o jsonpath='{.items[0].metadata.name}')
+UPGRADELOG_NAME=$(kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=$UPGRADE_NAME -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n harvester-system delete pods -l harvesterhci.io/upgradeLog=$UPGRADELOG_NAME,harvesterhci.io/upgradeLogComponent=aggregator
+----
+
+* Sur un ordinateur avec accès à Internet, récupérez les images de conteneurs requises puis exportez-les dans un fichier TAR. Ensuite, transférez le fichier TAR vers les nœuds du cluster puis importez les images en exécutant les commandes suivantes sur chaque nœud{nbsp}:
++
+[,bash]
+----
+# Pull down the three container images
+docker pull ghcr.io/kube-logging/fluentd:v1.15-ruby3
+docker pull ghcr.io/kube-logging/config-reloader:v0.0.5
+docker pull fluent/fluent-bit:2.1.8
+
+# Export the images to a tar file
+docker save \
+  ghcr.io/kube-logging/fluentd:v1.15-ruby3 \
+  ghcr.io/kube-logging/config-reloader:v0.0.5 \
+  fluent/fluent-bit:2.1.8 > upgradelog-images.tar
+
+# After transferring the tar file to the cluster nodes, import the images (need to be run on each node)
+ctr -n k8s.io images import upgradelog-images.tar
+----
++
+Le processus de mise à niveau devrait se poursuivre après que les images soient préchargées.
+
+- (Non recommandé) Redémarrez le processus de mise à niveau avec la journalisation désactivée. Assurez-vous que la case à cocher *Activer la journalisation* dans la boîte de dialogue *Mise à niveau* n'est pas sélectionnée.
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/7955[#7955]
+
+=== Les machines virtuelles utilisant des volumes RWX migrables redémarrent de manière inattendue
+
+Les machines virtuelles utilisant des xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[volumes RWX] migrables redémarrent de manière inattendue lorsque les pods du plugin CSI sont redémarrés. Ce problème affecte {harvester-product-name} v1.4.x, v1.5.0 et v1.5.1.
+
+La solution de contournement consiste à désactiver le paramètre https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[Supprimer automatiquement le pod de charge de travail lorsque le volume est détaché de manière inattendue] dans l'interface {longhorn-product-name} avant de commencer la mise à niveau. Vous devez réactiver le paramètre une fois la mise à niveau terminée.
+
+Le problème sera corrigé dans {longhorn-product-name} v1.8.3, v1.9.1 et les versions ultérieures. {harvester-product-name} v1.6.0 inclura {longhorn-product-name} v1.9.1. 
+
+Problèmes connexes{nbsp}: https://github.com/harvester/harvester/issues/8534[#8534] et https://github.com/longhorn/longhorn/issues/11158[#11158]

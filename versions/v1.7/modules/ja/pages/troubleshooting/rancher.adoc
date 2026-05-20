@@ -1,0 +1,83 @@
+= Rancherの問題
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== ゲストクラスターのログ収集
+
+ゲストクラスターのログと設定ファイルを収集できます。各ゲストクラスターのノードで以下の手順を実行してください：
+
+. ノードにログインします。
+
+. Rancher v2.x Linuxログコレクタースクリプトをダウンロードし、以下のコマンドを使用してログバンドルを生成します：
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+スクリプトの出力は、生成されたtarballの場所を示します。
+
+詳細については、 https://www.suse.com/support/kb/doc/?id=000020191[Rancher v2.x Linuxログコレクタースクリプト]を参照してください。
+
+== HarvesterクラスターをRancherにインポートする
+
+`cluster-registration-url`がHarvesterに設定されると、HarvesterクラスターをRancherにインポートするための`cattle-system/cattle-cluster-agent`という名前のデプロイメントが作成されます。
+
+=== `unable to read CA file`エラーによるインポート保留中
+
+`cattle-cluster-agent-*`ポッドログの以下のエラーメッセージは、HarvesterクラスターがRancherにインポートできないことを示しています。
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+根本的な原因は、Rancherの`agent-tls-mode`設定が不適切であることであり、これはRancherのエージェント（`cluster-agent`、`fleet-agent`、および`system-agent`）が接続を確立する際にRancherの証明書を検証する方法を制御します。この設定のデフォルト値は、Rancherのバージョンとインストールタイプによって異なります。
+
+|===
+| タイプ | バージョン | デフォルト値
+
+| 新規インストール
+| v2.8
+| `system-store`
+
+| 新規インストール
+| v2.9以降
+| `strict`
+
+| アップグレード
+| v2.8からv2.9
+| `system-store`
+|===
+
+この設定を要件に合わせて構成するには、以下の手順を実行してください：
+
+. Rancher UIにログインします。
+
+. *グローバル設定 -> 設定*に移動します。
+
+. *agent-tls-mode*を選択し、次に*⋮ -> 設定を編集*を選択して設定オプションにアクセスします。
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. 次のいずれかの値を選択してください:
++
+* *厳密*:Rancherのエージェントは、`cacerts`設定で指定された認証局（CA）によって生成された証明書のみを信頼します。これは推奨されるデフォルトのTLS設定です。
++
+*厳密*オプションは、Rancherがエージェントに表示される証明書を生成したCAにアクセスすることを要求することにより、より高いセキュリティレベルを有効にします。特定の証明書設定（特に外部証明書）の場合、これは自動ではなく、*追加の設定が必要です*。追加の設定が必要なシナリオに関する詳細は、Rancherのドキュメントの https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[SSL設定を選択してください]を参照してください。
++
+* *システムストア*:Rancherのエージェントは、オペレーティングシステムの信頼ストアで指定された公開CAによって生成された任意の証明書を信頼します。あなたのセットアップが外部信頼機関を使用しており、認証局の所有権がない場合は、この設定を使用してください。
++
+[IMPORTANT]
+====
+*システムストア*設定を使用すると、エージェントはオペレーティングシステムの信頼ストアに見つかるすべての外部機関を信頼することを意味します。ユーザーの制御外にある機関も含まれます。
+====
+
+. ［*保存*］をクリックします。
+
+関連する問題:
+
+- Harvester: https://github.com/harvester/harvester/issues/7105[#7105] および https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher:https://github.com/rancher/rancher/issues/45628[#45628] （ https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[このコメント]を参照してください。）

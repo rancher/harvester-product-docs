@@ -1,0 +1,543 @@
+= Backup, Instantâneo e Restauração de Máquina Virtual
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+== Backup e Restauração de Máquina Virtual
+
+Os backups de máquina virtual são criados a partir da página *Máquinas Virtuais*. Os volumes de backup da máquina virtual serão armazenados no *Destino de Backup* (um servidor NFS ou S3), e podem ser usados para restaurar uma nova máquina virtual ou substituir uma máquina virtual existente.
+
+image::vm/vm-backup.png[]
+
+[NOTE]
+====
+Um destino de backup deve ser configurado. Para obter mais informações, consulte <<Configure Backup Target>>.  Se nenhum destino de backup estiver configurado, uma mensagem solicitará que você configure um.
+
+O suporte a backup é atualmente limitado a {longhorn-product-name} volumes. {harvester-product-name} não consegue criar backups de volumes em armazenamento externo.
+====
+
+=== Configurar Destino de Backup
+
+Um destino de backup é um ponto final usado para acessar um backup store em {harvester-product-name}. Um backup store é um servidor NFS ou um servidor compatível com S3 que armazena os backups dos volumes da máquina virtual. O destino de backup pode ser configurado em `Settings > backup-target`.
+
+A tabela a seguir descreve os parâmetros comuns a todos os destinos de backup.
+
+|===
+| Parâmetro | Tipo | Descrição
+
+| `Type`
+| string
+| Tipo de servidor que armazena os backups dos volumes usados por máquinas virtuais. Você pode selecionar `NFS` ou `S3`.
+
+| `Refresh Interval`
+| inteiro
+| Número de segundos que {harvester-product-name} aguarda antes de sincronizar os backups com o backupstore. Quando o valor é `0`, os backups são sincronizados apenas se todos os volumes de backup estiverem no estado `Ready`.
+|===
+
+[tabs]
+======
+S3::
++
+--
+|===
+| Parâmetro | Tipo | Descrição
+
+| `Endpoint`
+| string
+| (Opcional) Nome do host ou endereço IP do ponto final usado para acessar o servidor S3
+
+| `BucketName`
+| string
+| Nome do bucket S3
+
+| `BucketRegion`
+| string
+| Região da AWS na qual o bucket S3 foi criado
+
+| `AccessKeyID`
+| string
+| Primeira parte da chave de acesso que você usa para autenticar solicitações aos serviços da AWS (por exemplo, `AKIAIOSFODNN7EXAMPLE`)
+
+| `SecretAccessKey`
+| string
+| Segunda parte da chave de acesso que você usa para autenticar solicitações aos serviços da AWS (por exemplo, `wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY`)
+
+| Certificado
+| string
+| Certificado SSL autoassinado do servidor S3
+
+| VirtualHostedStyle
+| boolean
+| Opção para usar URLs no estilo de host virtual, onde o nome do bucket faz parte do nome de domínio na URL (`bucket.example.com`)
+|===
+--
+
+NFS::
++
+--
+|===
+| Parâmetro | Tipo | Descrição
+
+| Segurança
+| string
+| URL do https://longhorn.io/docs/1.8.0/snapshots-and-backups/backup-and-restore/set-backup-target/#set-up-nfs-backupstore[servidor NFS]
+|===
+--
+======
+
+=== Criar um backup de Máquina Virtual
+
+. Uma vez que o destino de backup esteja configurado, vá para a página `Virtual Machines`.
+. Clique em `Take Backup` das ações da máquina virtual para criar um novo backup de máquina virtual.
+. Defina um nome de backup personalizado e clique em `Create` para criar um novo backup de máquina virtual.
++
+image::vm/create-backup.png[]
+
+*Resultado:* O backup é criado. Você receberá uma mensagem de notificação, e também pode ir para a página `Backup & Snapshot > VM Backups` para visualizar todos os backups de máquinas virtuais.
+
+O `State` será definido como `Ready` assim que o backup for concluído.
+
+image::vm/vm-backup-results.png[]
+
+Os usuários podem restaurar uma nova máquina virtual ou substituir uma máquina virtual existente usando este backup.
+
+[NOTE]
+====
+A configuração de rede de uma máquina virtual executando uma versão do Ubuntu posterior à 16.04 é provavelmente gerenciada por `netplan` por padrão. Antes de criar backups, você deve parar a máquina virtual, editar a configuração (*Editar Config -> Opções Avançadas*), e então reiniciar a máquina virtual. Use as seguintes configurações `network` como referência para a configuração de DHCP.
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+A máquina virtual restaurada mantém o ID da máquina da máquina virtual original. Se `dhcp-identifier: mac` não for especificado, a máquina virtual restaurada recebe o mesmo endereço IP do servidor DHCP porque `netplan` usa o ID da máquina como o identificador do cliente DHCP por padrão. É por isso que você deve configurar as opções `network` antes de criar backups de máquinas virtuais executando o Ubuntu. Não fazê-lo pode resultar em comportamento inesperado e potenciais conflitos de rede.
+====
+
+[CAUTION]
+====
+A partir da versão v1.7.0, {harvester-product-name} suporta backups e instantâneos para volumes do Longhorn V2 Data Engine.
+
+No entanto, excluir o backup mais recente de uma máquina virtual ou habilitar a configuração {longhorn-product-name} https://documentation.suse.com/cloudnative/storage/latest/en/longhorn-system/settings.html#_auto_cleanup_snapshot_when_delete_backup[Limpeza Automática de Instantâneo ao Excluir Backup] bloqueia todas as operações subsequentes em volumes relacionados. Este é um https://github.com/longhorn/longhorn/issues/9064[problema conhecido] que afeta operações como instantâneos de volume, backups e migração ao vivo.
+
+Atualmente, não há uma solução viável disponível. Resolver o estado bloqueado requer a exclusão do volume afetado para restaurar a funcionalidade do Longhorn Manager.
+====
+
+=== Restaure uma nova máquina virtual usando um backup
+
+. Vá para a página `VM Backups`.
+. Clique no botão `Restore Backup` no canto superior direito.
+. Especifique o novo nome da máquina virtual e clique em `Create`.
+. Uma nova máquina virtual será restaurada usando os volumes de backup e os metadados, e você poderá acessá-la a partir da página `Virtual Machines`.
++
+image::vm/restore-vm.png[]
+
+=== Substitua uma máquina virtual existente usando um backup
+
+Você pode substituir uma máquina virtual existente usando o backup com o mesmo destino de backup da máquina virtual.
+
+Você pode optar por excluir ou manter os volumes anteriores. Por padrão, todos os volumes anteriores são excluídos.
+
+*Requisitos:* A máquina virtual deve existir e estar desligada.
+
+. Vá para a página `VM Backups`.
+. Clique no botão `Restore Backup` no canto superior direito.
+. Clique em `Replace Existing`.
+. Você pode visualizar o processo de restauração a partir da página `Virtual Machines`.
++
+image::vm/vm-restore-existing.png[]
+
+=== Restaure uma nova máquina virtual em outro cluster {harvester-product-name}
+
+Os usuários agora podem restaurar uma nova máquina virtual em outro cluster aproveitando o recurso de backup de metadados e conteúdo da máquina virtual.
+
+==== Pré-requisitos
+
+* v1.4.0 e posteriores: O controlador sincroniza automaticamente as imagens da máquina virtual com o novo cluster, exceto quando uma imagem da máquina virtual com o mesmo nome ou nome de exibição já existe no novo cluster.
++
+* Anterior a v1.4.0: Você deve fazer o upload e configurar as imagens da máquina virtual no <<Upload the same virtual machine images to a new cluster,novo cluster>>. Certifique-se de que os nomes das imagens e a configuração sejam idênticos para que as máquinas virtuais possam ser restauradas.
+
+==== Carregue as mesmas imagens de máquinas virtuais para um novo cluster.
+
+. Baixe a imagem da máquina virtual do cluster existente.
++
+image::vm/download-vm-image.png[]
+
+. Descompacte a imagem baixada.
++
+----
+$ gzip -d <image.gz>
+----
+
+. Hospede a imagem em um servidor que seja acessível ao novo cluster.
++
+Exemplo (servidor HTTP simples):
++
+----
+$ python -m http.server
+----
+
+. Verifique o nome da imagem existente (normalmente começa com `image-`) e crie o mesmo no novo cluster.
++
+[,shell]
+----
+$ kubectl get vmimages -A
+NAMESPACE   NAME                               DISPLAY-NAME                              SIZE         AGE
+default     image-79hdq                        focal-server-cloudimg-amd64.img           566886400    5h36m
+default     image-l7924                        harvester-v1.0.0-rc2-amd64.iso            3964551168   137m
+default     image-lvqxn                        opensuse-leap-15.3.x86_64-nocloud.qcow2   568524800    5h35m
+----
+
+. Aplique um YAML `VirtualMachineImage` com o mesmo nome e configuração no novo cluster.
++
+Exemplo:
++
+----
+$ cat <<EOF | kubectl apply -f -
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: image-79hdq
+  namespace: default
+spec:
+  displayName: focal-server-cloudimg-amd64.img
+  pvcName: ""
+  pvcNamespace: ""
+  sourceType: download
+  url: https://<server-ip-to-host-image>:8000/<image-name>
+EOF
+----
++
+[IMPORTANT]
+====
+{harvester-product-name} pode restaurar máquinas virtuais apenas se o nome da imagem e a configuração em ambos os clusters, antigo e novo, forem idênticos.
+====
+
+==== Restaure uma nova máquina virtual em um novo cluster.
+
+. Configure o mesmo destino de backup em um novo cluster. E o controlador de backup sincronizará automaticamente os metadados de backup para o novo cluster.
+. Vá para a página `VM Backups`.
+. Selecione os metadados de backup da máquina virtual sincronizados e escolha restaurar uma nova máquina virtual com um nome de máquina virtual especificado.
+. Uma nova máquina virtual será restaurada usando os volumes e metadados de backup. Você pode acessá-la a partir da página `Virtual Machines`.
+
+== Instantâneo e Restauração de Máquina Virtual
+
+Os instantâneos de máquinas virtuais são criados a partir da página *Máquinas Virtuais*. Os volumes de instantâneo da máquina virtual serão armazenados no cluster e podem ser usados para restaurar uma nova máquina virtual ou substituir uma máquina virtual existente.
+
+image::vm/vm-snapshot.png[]
+
+=== Crie um Instantâneo de Máquina Virtual
+
+. Vá para a página `Virtual Machines`.
+. Clique em `Take VM Snapshot` das ações da VM para criar um novo instantâneo de máquina virtual.
+. Defina um nome de instantâneo personalizado e clique em `Create` para criar um novo instantâneo de máquina virtual.
++
+image::vm/create-snapshot.png[]
+
+*Resultado:* O instantâneo é criado. Você também pode ir para a página `Backup & Snapshot > virtual machine Snapshots` para visualizar todos os instantâneos de VM.
+
+O `State` será definido como `Ready` assim que o instantâneo estiver completo.
+
+image::vm/vm-snapshot-results.png[]
+
+Os usuários podem restaurar uma nova máquina virtual ou substituir uma máquina virtual existente usando este instantâneo.
+
+[NOTE]
+====
+A configuração de rede de uma máquina virtual executando uma versão do Ubuntu posterior à 16.04 é provavelmente gerenciada por `netplan` por padrão. Antes de criar backups, você deve parar a máquina virtual, editar a configuração (*Editar Config -> Opções Avançadas*), e então reiniciar a máquina virtual. Use as seguintes configurações `network` como referência para a configuração de DHCP.
+
+[,yaml]
+----
+network:
+  ethernets:
+    enp1s0:
+      dhcp4: true
+      dhcp6: true
+      dhcp-identifier: mac
+  version: 2
+----
+
+A máquina virtual restaurada mantém o ID da máquina da máquina virtual original. Se `dhcp-identifier: mac` não for especificado, a máquina virtual restaurada recebe o mesmo endereço IP do servidor DHCP porque `netplan` usa o ID da máquina como o identificador do cliente DHCP por padrão. É por isso que você deve configurar as opções `network` antes de criar backups de máquinas virtuais executando o Ubuntu. Não fazê-lo pode resultar em comportamento inesperado e potenciais conflitos de rede.
+====
+
+[CAUTION]
+====
+A partir da versão v1.7.0, {harvester-product-name} suporta backups e instantâneos para volumes do Longhorn V2 Data Engine.
+
+No entanto, excluir o backup mais recente de uma máquina virtual bloqueia todas as operações subsequentes em volumes relacionados. Este é um https://github.com/longhorn/longhorn/issues/9064[problema conhecido] que afeta operações como instantâneos de volume, backups e migração ao vivo.
+
+Atualmente, não há uma solução viável disponível. Resolver o estado bloqueado requer a exclusão do volume afetado para restaurar a funcionalidade do Longhorn Manager.
+====
+
+=== Restaure uma nova máquina virtual usando um instantâneo
+
+. Vá para a página `VM Snapshots`.
+. Clique no botão `Restore Snapshot` no canto superior direito.
+. Especifique o novo nome da máquina virtual e clique em `Create`.
+. Uma nova máquina virtual será restaurada usando os volumes e metadados do instantâneo, e você pode acessá-la a partir da página `Virtual Machines`.
++
+image::vm/restore-vm-snapshot.png[]
+
+=== Substitua uma máquina virtual existente usando um instantâneo
+
+Você pode substituir uma máquina virtual existente usando o instantâneo.
+
+[NOTE]
+====
+Você só pode optar por reter os volumes anteriores.
+====
+
+. Vá para a página `VM Snapshots`.
+. Clique no botão `Restore Snapshot` no canto superior direito.
+. Clique em `Replace Existing`.
+. Você pode visualizar o processo de restauração a partir da página `Virtual Machines`.
++
+image::vm/restore-vm-snapshot-existing.png[]
+
+== Gerenciamento de Espaço de Instantâneo de Máquina Virtual
+
+Os volumes consomem espaço em disco extra no cluster sempre que você cria um novo backup ou instantâneo de máquina virtual. Para gerenciar isso, você pode configurar limites de uso de espaço nos níveis de namespace e máquina virtual. Os valores configurados representam a quantidade máxima de espaço em disco que pode ser usada por todos os backups e instantâneos. Nenhum limite é definido por padrão.
+
+=== Configure o Limite de Uso de Espaço de Instantâneo no Nível de Namespace
+
+. Vá para a tela *Namespaces*.
++
+. Localize o namespace de destino e, em seguida, selecione *⋮ -> Editar Cota*.
++
+image::vm/edit-quota-namespace.png[]
++
+. Especifique a quantidade máxima de espaço em disco que pode ser consumida por todos os instantâneos no namespace e clique em *Salvar*.
++
+image::vm/edit-quota-namespace-save.png[]
++
+. Verifique se o valor configurado é exibido na tela de *Namespaces*.
++
+image::vm/edit-quota-namespace-read.png[]
+
+=== Configure o Limite de Uso de Espaço de Instantâneo no Nível da Máquina Virtual
+
+. Vá para a tela de *Máquinas Virtuais*.
++
+. Localize a máquina virtual de destino e selecione *⋮ -> Editar Cota da VM*.
++
+image::vm/edit-quota-vm.png[]
++
+. Especifique a quantidade máxima total de espaço em disco que pode ser consumida por todos os instantâneos da máquina virtual e clique em *Salvar*.
++
+image::vm/edit-quota-vm-save.png[]
++
+. Verifique se o valor configurado é exibido na aba *Cotas* da tela de detalhes da máquina virtual.
++
+image::vm/edit-quota-vm-read.png[]
+
+== Congelamento de sistema de arquivos para backups e instantâneos de máquinas virtuais
+
+Quando uma máquina virtual convidada está conectada com o *Agente Convidado QEMU*, o {harvester-product-name} controlador realiza operações de congelamento de sistema de arquivos através do aplicativo https://github.com/kubevirt/kubevirt/blob/main/docs/freeze.md#virt-freezer[virt-freezer] do Kubevirt para garantir a consistência do sistema de arquivos durante backups e instantâneos de máquinas virtuais.
+
+Esse recurso é particularmente valioso para máquinas virtuais com alta atividade de E/S ou dados críticos que requerem garantias de consistência em um ponto no tempo.
+
+=== Pré-requisitos
+
+A funcionalidade de congelamento e descongelamento de sistema de arquivos depende da configuração da máquina virtual, que _não é controlada por {harvester-product-name}_. Você deve garantir que as máquinas virtuais estejam configuradas corretamente e suportem os comandos libvirt necessários.
+
+* *Red Hat Enterprise Linux (RHEL)* e *SUSE Linux Enterprise (SLE) Micro*: Esses sistemas podem não ter permissões suficientes para operações de congelamento de sistema de arquivos por padrão. Você pode ser solicitado a criar políticas SELinux personalizadas.
+
+* *Windows*: As operações de congelamento de sistema de arquivos estão disponíveis nesses sistemas apenas quando o serviço Volume Shadow Copy Service (VSS) está habilitado.
+
+[NOTE]
+====
+Quando o aplicativo virt-freezer é acionado, o KubeVirt se comunica com o Agente Convidado QEMU para traduzir chamadas específicas do sistema operacional. Sistemas Linux usam chamadas de sistema fsfreeze, enquanto sistemas Windows usam APIs VSS.
+====
+
+=== Verificando a compatibilidade de congelamento de sistema de arquivos
+
+Para verificar se sua máquina virtual suporta operações de congelamento de sistema de arquivos, execute os seguintes passos:
+
+. Acesse o contêiner virt-launcher `compute` da máquina virtual.
++
+[,bash]
+----
+POD=$(kubectl get pods -n default \
+  -l vm.kubevirt.io/name=vm1 \
+  -o jsonpath='{.items[0].metadata.name}')
+kubectl exec -it $POD -n default -c compute -- bash
+----
+
+. Tente congelar o sistema de arquivos usando o aplicativo virt-freezer, que está disponível no contêiner `compute`:
++
+[,bash]
+----
+virt-freezer --freeze --namespace <VM namespace> --name <VM name>
+----
+
+. Verifique o resultado da operação de congelamento.
++
+[IMPORTANT]
+====
+Não pule esta etapa. Além disso, você deve descongelar os sistemas de arquivos da máquina virtual antes de realizar qualquer outra operação.
+====
+
+=== Solução de problemas de congelamento de sistema de arquivos
+
+==== Erro de congelamento de sistema de arquivos devido a permissões insuficientes
+
+Um erro `Failed to freeze filesystem` pode causar falhas de backup ou de instantâneos em algumas distribuições Linux.
+
+Esse problema geralmente ocorre quando o SELinux nega acesso de leitura ao QEMU Guest Agent (`qemu-ga`). Você pode verificar a causa usando os seguintes passos:
+
+. [Verifique se sua máquina virtual suporta operações de congelamento de sistema de arquivos](#verifying-filesystem-freeze-compatibility).
+
+. Verifique se há erros `Permission denied` do SELinux nos logs do sistema.
++
+Se você ver uma mensagem semelhante à seguinte, o SELinux está bloqueando o acesso necessário:
++
+[,console]
+----
+{"component":"freezer","level":"error","msg":"Freezing VMI failed","reason":"server error. command Freeze failed: \"LibvirtError(Code=1, Domain=10, Message='internal error: unable to execute QEMU agent command 'guest-fsfreeze-freeze': failed to open /data: Permission denied')\""}
+----
+
+Para resolver o problema, você deve criar e instalar um módulo de política SELinux personalizado. Esta solução foi verificada para funcionar com *RHEL* e *SLE Micro*.
+
+[CAUTION]
+====
+Usar `audit2allow` pode conceder permissões amplas, pois permite todas as ações encontradas nos logs. Revise cuidadosamente a política gerada ou considere montar volumes com rótulos SELinux apropriados para maior segurança.
+====
+
+. Gere um módulo de política SELinux personalizado a partir dos logs de auditoria.
++
+[,bash]
+----
+grep qemu-ga /var/log/audit/audit.log | audit2allow -M my_qemu_ga
+----
+
+. Instale o módulo de política gerado.
++
+[,bash]
+----
+semodule -i my_qemu_ga.pp
+----
+
+. Repita os passos 1 e 2 até que *virt-freezer* consiga congelar os sistemas de arquivos com sucesso.
++
+[IMPORTANT]
+====
+Você deve descongelar os sistemas de arquivos da máquina virtual antes de realizar outras operações.
+
+[,bash]
+----
+virt-freezer --unfreeze --namespace <VM namespace> --name <VM name>
+----
+====
+
+== Backups e instantâneos de máquinas virtuais agendados
+
+{harvester-product-name} suporta a criação de backups e instantâneos de máquinas virtuais de forma agendada, com a opção de reter um número específico de backups e instantâneos. Você pode suspender, retomar e atualizar a programação em tempo de execução.
+
+=== Crie a Programação da Máquina Virtual
+
+. Vá para a tela *Programações de Máquina Virtual* e clique em *Criar Programação*.
++
+image::vm/create-schedule.png[]
++
+. Defina as seguintes configurações:
++
+image::vm/configure-schedule.png[]
++
+** *Tipo*: Selecione *Backup* ou *Instantâneo*.
++
+** *Namespace* e *Nome da Máquina Virtual*: Especifique o namespace e o nome da máquina virtual de origem.
++
+** *Programação Cron*: Especifique a expressão cron (uma string composta por campos separados por caracteres de espaço em branco) que define as propriedades do agendamento.
++
+[IMPORTANT]
+====
+O intervalo de criação de backup ou instantâneo deve ser de *pelo menos uma hora*. A exclusão frequente de backups ou instantâneos resulta em alta carga de E/S.
+
+Se duas programações tiverem o mesmo nível de granularidade, o deslocamento de tempo de cada iteração deve ser de *pelo menos 10 minutos*.
+====
++
+** *Reter*: Especifique o número de backups ou instantâneos atualizados a serem retidos.
++
+Quando esse valor for excedido, o controlador {harvester-product-name} exclui os backups ou instantâneos mais antigos, e o Longhorn inicia a purga de instantâneos.
++
+** *Máximo de Falha*: Especifique o número máximo de tentativas consecutivas de criação de backup ou instantâneos com falha que devem ser permitidas.
++
+Quando esse valor for excedido, o controlador {harvester-product-name} suspende a programação.
++
+. Clique em *Criar*.
+
+=== Verifique o Status de um Agendamento de Máquina Virtual
+
+. Vá para a tela de *Agendamentos de Máquinas Virtuais*.
++
+. Localize o agendamento alvo e clique no nome para abrir a tela de detalhes.
++
+. Na aba *Informações Básicas*, verifique se as configurações estão corretas.
++
+image::vm/check-schedule-basic.png[]
++
+. Na aba *Backups*, verifique o status dos backups ou instantâneos que foram criados de acordo com o agendamento.
++
+image::vm/check-schedule-backups.png[]
++
+Backups e instantâneos marcados como *Pronto* podem ser usados para restaurar a máquina virtual de origem. Para obter mais informações, consulte a <<Virtual Machine Backup & Restore>> e o <<Virtual Machine Snapshot & Restore>>.
++
+image::vm/check-schedule-restore.png[]
+
+=== Editar um Agendamento de Máquina Virtual
+
+. Vá para a tela de *Agendamentos de Máquinas Virtuais*.
++
+. Localize o agendamento alvo e selecione *⋮ -> Editar Config*.
++
+image::vm/edit-schedule-config.png[]
++
+. Edite os valores de *Agendamento Cron*, *Retenção* ou *Máximo de Falha*.
++
+image::vm/edit-schedule-parameters.png[]
++
+. Clique em *Salvar* para aplicar as mudanças.
+
+=== Suspender ou Retomar um Agendamento de Máquina Virtual
+
+Você pode suspender agendamentos ativos e retomar agendamentos suspensos.
+
+. Vá para a tela de *Agendamentos de Máquinas Virtuais*.
++
+. Localize o agendamento alvo e selecione *⋮ -> Suspender* ou *Retomar*.
++
+image::vm/suspend-resume-schedule.png[]
++
+O agendamento é automaticamente suspenso quando o número de tentativas consecutivas de falha na criação de backup ou instantâneos excede o valor de *Máximo de Falha*.
++
+{harvester-product-name} não permite que você retome um agendamento suspenso para criação de backup se o destino do backup não estiver acessível.
+
+[NOTE]
+====
+Se um agendamento foi automaticamente suspenso porque o valor de *Máximo de Falha* foi excedido, você deve retomar explicitamente esse agendamento após verificar que o backup ou instantâneo pode ser criado com sucesso. Por exemplo, quando o destino do backup se torna acessível novamente após um período de desconexão, você pode primeiro criar um backup manualmente e verificar o resultado.
+====
+
+=== Operações de Máquina Virtual e {harvester-product-name} Atualizações
+
+Antes de fazer upgrade do {harvester-product-name}, certifique-se de que nenhum backup ou instantâneo de máquina virtual esteja em uso e que todos os agendamentos de máquinas virtuais estejam suspensos. A interface {harvester-product-name} exibe as seguintes mensagens de erro quando as tentativas de fazer upgrade são rejeitadas:
+
+* Backups ou instantâneos de máquinas virtuais estão sendo criados, excluídos ou utilizados durante a tentativa de fazer upgrade
++
+image::vm/upgrade-vmbackup.png[]
++
+* Os agendamentos de máquinas virtuais estão ativos durante a tentativa de fazer upgrade
++
+image::vm/upgrade-svmbackup.png[]
+
+Para evitar tais problemas, a SUSE planeja implementar a suspensão automática de todos os agendamentos de máquinas virtuais antes que o processo de fazer upgrade seja iniciado. Os agendamentos suspensos também serão retomados automaticamente após a conclusão do upgrade. Para mais informações, veja https://github.com/harvester/harvester/issues/6759[Problema #6759].
+
+[CAUTION]
+====
+{longhorn-product-name} possui um recurso semelhante chamado https://longhorn.io/docs/1.10.0/snapshots-and-backups/scheduling-backups-and-snapshots/[instantâneos recorrentes e backups recorrentes], que utiliza trabalhos recorrentes para criar instantâneos ou backups dos volumes {longhorn-product-name}. Esse recurso não está integrado ao {harvester-product-name} porque entra em conflito com certas operações (por exemplo, anexação de máquinas virtuais e upgrade do cluster). Trabalhos recorrentes de instantâneos e backups {longhorn-product-name} também podem gerar E/S intensa sem o conhecimento do {harvester-product-name}, e, em alguns casos, até desestabilizar o cluster.
+
+Para melhores resultados, utilize o recurso <<Scheduled virtual machine backups and snapshots,backups e instantâneos agendados de máquinas virtuais>> no {harvester-product-name}, que possui mecanismos de proteção que mitigam E/S intensa quando possível. Novamente, {harvester-product-name} não suporta instantâneos recorrentes {longhorn-product-name} e backups recorrentes.
+====

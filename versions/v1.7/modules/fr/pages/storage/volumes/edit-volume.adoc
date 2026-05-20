@@ -1,0 +1,39 @@
+= Modifier un volume
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+Après avoir créé un volume, vous pouvez modifier votre volume en cliquant sur le bouton `⋮` et en sélectionnant l'option `Edit Config`.
+
+== Développer un volume
+
+Vous pouvez développer un volume en augmentant directement la valeur du paramètre `Size`. Pour éviter que le développement ne soit perturbé par des données R/W inattendues, {harvester-product-name} ne prend en charge que le développement `offline`. Vous devez d'abord éteindre la VM ou détacher le volume s'il est attaché à une VM, et le volume détaché sera automatiquement attaché à un nœud aléatoire avec https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[mode de maintenance] pour développer automatiquement.
+
+image::volume/expand-volume.png[développer-volume]
+
+=== Développement de volume en ligne
+
+Pour minimiser le temps d'arrêt, {harvester-product-name} vous permet de développer des volumes qui sont attachés à une machine virtuelle en cours d'exécution ou qui ont un PVC attaché à un pod en cours d'exécution dans le cluster invité. Selon le fournisseur de stockage sous-jacent, vous devrez peut-être prendre des mesures supplémentaires pour utiliser cette fonctionnalité.
+
+* *{longhorn-product-name}*{nbsp}: {harvester-product-name} considère que {longhorn-product-name} prend en charge le développement de volume en ligne, même s'il existe des différences entre les versions du moteur de données Longhorn. Actuellement, le moteur de données V1 prend entièrement en charge le développement de volume en ligne, tandis que le moteur de données V2 ne prend pas du tout en charge le développement de volume (quel que soit l'état d'attachement du volume).
+
+* *Stockage tiers*{nbsp}: {harvester-product-name} rejette par défaut les demandes de développement de volume en ligne pour le stockage tiers. Si vous avez confirmé que votre fournisseur de stockage prend en charge le développement de volume en ligne, vous pouvez utiliser le paramètre xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`] pour marquer ce fournisseur de stockage comme validé.
+
+[IMPORTANT]
+====
+Le redimensionnement en ligne des volumes de système de fichiers ajoutés à chaud n'est pas pris en charge. Lorsqu'un volume de système de fichiers est monté en liaison dans le pod `virt-launcher`, la connexion à chaud d'un nouveau volume de système de fichiers déclenche des opérations `NodeUnPublish` et `NodeUnstage` sur le volume précédent, ce qui empêche un redimensionnement supplémentaire.
+
+De plus, vous ne pouvez pas utiliser la fonctionnalité xref:virtual-machines/edit-vm.adoc[Modifier la configuration] sur l'interface utilisateur {harvester-product-name} *Machines virtuelles* pour redimensionner un volume pendant que la machine virtuelle est en cours d'exécution. Certaines limitations empêchent l'interface utilisateur actuelle d'afficher avec précision les résultats des opérations de développement de volume. Pour plus d'informations, voir https://github.com/harvester/harvester/issues/8669[problème #8669].
+====
+
+== Annuler un développement de volume échoué
+
+Si vous spécifiez une taille supérieure à la capacité de {longhorn-product-name} pendant le développement, l'état du développement du volume restera bloqué à `Resizing`. Vous pouvez annuler le développement de volume échoué en cliquant sur le bouton `⋮` et en sélectionnant l'option `Cancel Expand`.
+
+image::volume/cancel-failed-volume-expansion.png[annuler-développement-volume-échoué]
+
+== Changer la classe de stockage d'un volume existant
+
+La classe de stockage d'un volume existant ne peut pas être changée. Cependant, vous pouvez changer la classe de stockage lors de la restauration d'un nouveau volume à partir de l'instantané en suivant les étapes ci-dessous{nbsp}:
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[Prendre un instantané du volume].
+. Sélectionnez la classe de stockage lors de xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[la restauration du volume à l'aide de l'instantané].

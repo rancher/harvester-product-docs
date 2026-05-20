@@ -1,0 +1,109 @@
+= Pilote de nœud Harvester
+:revdate: 2025-09-18
+:page-revdate: {revdate}
+
+Le https://github.com/harvester/docker-machine-driver-harvester[Pilote de nœud Harvester], similaire au pilote Docker Machine, est utilisé pour provisionner des VM dans le cluster {harvester-product-name}, et {rancher-short-name} l'utilise pour lancer et gérer des clusters Kubernetes.
+
+Un avantage de l'installation de Kubernetes sur des pools de nœuds hébergés par le pilote de nœud est que si un nœud perd la connectivité avec le cluster, Rancher peut automatiquement créer un autre nœud pour rejoindre le cluster afin de garantir que le nombre de nœuds dans le pool est conforme aux attentes.
+De plus, le pilote de nœud Harvester est intégré par défaut au fournisseur de cloud Harvester, offrant xref:/integrations/rancher/cloud-provider.adoc#_load_balancer_support[un support de répartition de charge intégré] ainsi que xref:/integrations/rancher/csi-driver.adoc[un passage de stockage] du cluster de matériel sans système d'exploitation aux clusters Kubernetes invités afin de bénéficier de performances de stockage natives.
+
+Dans cette section, vous apprendrez à configurer {rancher-short-name} pour utiliser le pilote de nœud Harvester afin de lancer et gérer des clusters Kubernetes.
+
+[NOTE]
+====
+Le pilote de nœud Harvester ne prend en charge que les images cloud. Cela est dû au fait que les images ISO nécessitent généralement une configuration supplémentaire qui interfère avec un déploiement propre (sans nécessiter d'intervention de l'utilisateur), et elles ne sont pas typiquement utilisées dans des environnements cloud.
+====
+
+== Pilote de nœud Harvester
+
+À partir de {rancher-short-name} `v2.6.3`, le pilote de nœud Harvester est activé par défaut. Vous pouvez vous rendre sur la page *Gestion des clusters* > *Pilotes* > *Pilotes de nœuds* pour vérifier l'état du pilote de nœud Harvester.
+
+image::rancher/edit-node-driver.png[modifier-le-pilote-de-nœud]
+
+Lorsque le pilote de nœud Harvester est activé, vous pouvez créer des clusters Kubernetes au-dessus du cluster {harvester-product-name} et les gérer depuis {rancher-short-name}.
+
+image::rancher/harvester-node-driver.png[pilote-de-nœud-harvester]
+
+[NOTE]
+====
+* Consultez la https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-7-5[{rancher-short-name} matrice de support des clusters en aval] pour ses versions RKE2 prises en charge et les versions de système d'exploitation invité.
+* Les modifications apportées à la configuration du pilote de nœud Harvester ne sont pas persistées. Toute modification appliquée sera réinitialisée lors du redémarrage du conteneur {rancher-short-name}.
+* À partir de la version 0.6.3 du pilote de nœud Harvester, l'injection automatique du `qemu-guest-agent` a été supprimée du backend. Si l'image que vous utilisez ne contient pas le paquet `qemu-guest-agent`, vous pouvez toujours l'installer via la configuration `userdata`. Sinon, le cluster ne sera pas provisionné avec succès.
++
+[,yaml]
+----
+ #cloud-config
+ package_update: true
+ packages:
+ - qemu-guest-agent
+ runcmd:
+ - - systemctl
+   - enable
+   - '--now'
+   - qemu-guest-agent.service
+----
+====
+
+== Problèmes connus
+
+=== {rancher-short-name} perd la capacité de gérer ou de mettre à l'échelle les clusters invités lorsque les jetons API correspondants expirent.
+
+*Problème*{nbsp}: https://github.com/harvester/harvester/issues/5827[#5827]
+
+*Description*{nbsp}: {rancher-short-name} utilise des kubeconfigs avec des jetons d'authentification intégrés pour provisionner des clusters Kubernetes invités sur {harvester-product-name}. Lorsque ces tokens expirent, {rancher-short-name} perd la capacité d'effectuer des opérations de gestion pour le cluster Kubernetes invité correspondant {rancher-short-name} géré par. Ce problème n'affecte que les clusters Kubernetes invités fonctionnant sur {harvester-product-name} et utilisant des identifiants cloud créés après l'installation ou la mise à niveau vers {rancher-short-name} v2.8.x, qui a réduit le paramètre https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_kubeconfig_default_token_ttl_minutes[kubeconfig-default-token-ttl-minutes] ainsi que le paramètre https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_auth_token_max_ttl_minutes[auth-token-max-ttl-minutes] à 30 jours et 90 jours respectivement.
+
+*État*{nbsp}: Un https://harvesterhci.io/kb/renew_harvester_cloud_credentials[contournement temporaire] est disponible.
+
+*Dernière mise à jour*{nbsp}: 2024-05-21
+
+== Cluster Kubernetes RKE2
+
+Voir xref:./rke2-cluster.adoc[Créer un cluster Kubernetes RKE2].
+
+== Cluster Kubernetes K3s
+
+Voir xref:./k3s-cluster.adoc[Créer un cluster Kubernetes K3s].
+
+== Contraintes de répartition de topologie
+
+Au sein de votre cluster Kubernetes invité, vous pouvez utiliser https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[contraintes de répartition de topologie] pour gérer la façon dont les charges de travail sont réparties sur les nœuds, en tenant compte de facteurs tels que les domaines de défaillance comme les régions et les zones. Cela aide à atteindre une haute disponibilité et une utilisation efficace des ressources du cluster {harvester-product-name}.
+
+Pour les versions RKE2 antérieures à `v1.25.x`, les versions minimales requises pour prendre en charge la fonctionnalité de synchronisation des étiquettes de topologie sont les suivantes{nbsp}:
+
+|===
+| Version RKE2 minimale requise
+
+| >=  v1.24.3+rke2r1
+| >=  v1.23.9+rke2r1
+| >=  v1.22.12+rke2r1
+|===
+
+De plus, pour une installation personnalisée, la version du fournisseur de cloud Harvester doit être `>= v0.1.4`.
+
+=== Synchroniser les étiquettes de topologie avec le nœud du cluster invité
+
+Lors de l'installation du cluster, le pilote de nœud Harvester aidera automatiquement à synchroniser les étiquettes de topologie des nœuds VM aux nœuds du cluster invité. Actuellement, seules les étiquettes de topologie `region` et `zone` sont prises en charge.
+
+. Configurez les étiquettes de topologie sur les nœuds {harvester-product-name} dans la page *Hôtes* > *Modifier la configuration* > *Étiquettes*. Par exemple, ajoutez les étiquettes de topologie comme suit{nbsp}:
++
+[,yaml]
+----
+topology.kubernetes.io/region: us-east-1
+topology.kubernetes.io/zone: us-east-1a
+----
++
+image::rancher/node-add-affinity-labels.png[]
+
+. Créez un cluster RKE2 en aval en utilisant le pilote de nœud Harvester avec le fournisseur de cloud Harvester activé. Nous recommandons d'ajouter les xref:./rke2-cluster.adoc#_add_node_affinity[règles d'affinité de nœud], ce qui empêche les nœuds de dériver vers d'autres zones après la reconstruction de la VM.
++
+image::rancher/create-rke2-harvester-cluster-3.png[]
+
+. Une fois le cluster prêt, confirmez que ces étiquettes de topologie sont correctement synchronisées avec les nœuds du cluster Kubernetes invité.
+. Déployez maintenant des charges de travail sur votre cluster Kubernetes invité, et vous devriez être en mesure de les gérer en utilisant les https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[contraintes de répartition de topologie].
+
+[NOTE]
+====
+Pour le fournisseur de cloud Harvester >= v0.2.0, les étiquettes de topologie sur le nœud {harvester-product-name} seront automatiquement resynchronisées lorsqu'une VM (correspondant au nœud invité) subit une migration ou une mise à jour.
+
+Pour le fournisseur de cloud Harvester < v0.2.0, la synchronisation des étiquettes n'aura lieu que lors de l'initialisation des nœuds invités. Pour empêcher les nœuds de dériver vers différentes régions ou zones, nous recommandons d'ajouter des xref:./rke2-cluster.adoc#_add_node_affinity[règles d'affinité de nœud] lors de l'approvisionnement du cluster. Cela vous permettra de planifier des VMs dans la même zone même après la reconstruction.
+====

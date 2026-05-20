@@ -1,0 +1,143 @@
+= 仮想マシン自動バランス（実験的）
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*仮想マシン自動バランス*は*実験的*なアドオンです。実験的機能に関する詳細は、xref:introduction/document-conventions.adoc#_feature_labels[機能ラベル]を参照してください。
+====
+
+*仮想マシン自動バランス*アドオンは、{harvester-product-name}が https://github.com/kubernetes-sigs/descheduler[Kubernetes Descheduler]を使用して仮想マシンのワークロードを再バランスすることを可能にします。Kubernetes Deschedulerは、管理者が定義したポリシーに従って最適に配置されていないポッドを追い出すことによって、ワークロードのスケジューリングを最適化します。この重要な機能は、リソースの利用効率を向上させ、ノード間でワークロードをバランスさせ、全体的なクラスターのパフォーマンスを改善します。
+
+== アドオンを有効にする
+
+有効にすると、アドオンは`kube-system`ネームスペースにDeschedulerをデプロイし、`kube-system/descheduler`ConfigMapに関連する設定を行います。クラスターにノードが1つ以上ある場合にのみ、アドオンを有効にできます。
+
+. {harvester-product-name} UIで、*高度な->アドオン*に移動します。
+
+. *Descheduler（実験的）*を選択し、次に*⋮->有効にする*を選択します。
+
+== Deschedulerポリシー
+
+設定には以下のプラグインが含まれています：
+
+* `DefaultEvictor`:トップレベルで共通の追い出し設定を提供します。
+* `LowNodeUtilization`:ノードのリソース使用状況を監視し、定義された閾値に基づいて過剰利用されているノードから過少利用されているノードにポッドを追い出します。
+
+デフォルトの設定では、Deschedulerは仮想マシンポッドのみを追い出します。
+
+== Deschedulerポリシーのカスタマイズ
+
+*⋮-> YAMLを編集*を選択して、要件に応じてDeschedulerポリシーをカスタマイズします。設定はYAML形式で定義されています。
+
+[,yaml]
+----
+  - apiVersion: harvesterhci.io/v1beta1
+    kind: Addon
+    metadata:
+      name: descheduler
+      namespace: kube-system
+      labels:
+        addon.harvesterhci.io/displayName: "virtual-machine-auto-balance"
+        addon.harvesterhci.io/experimental: "true"
+    spec:
+      repo: http://harvester-cluster-repo.cattle-system.svc/charts
+      version: << .DESCHEDULER_CHART_VERSION >>
+      chart: descheduler
+      {{- if and .Addons .Addons.descheduler }}
+      enabled: {{ .Addons.descheduler.Enabled }}
+      {{- else }}
+      enabled: false
+      {{- end }}
+      valuesContent: |
+        kind: Deployment
+        image:
+          repository: registry.k8s.io/descheduler/descheduler
+          pullPolicy: IfNotPresent
+        deschedulingInterval: 5m
+        replicas: 1
+        cmdOptions:
+          v: 3
+          feature-gates: EvictionsInBackground=true
+        deschedulerPolicy:
+          maxNoOfPodsToEvictPerNode: 5
+          profiles:
+          - name: default
+            pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                ignorePvcPods: false
+                evictLocalStoragePods: true
+                labelSelector:
+                  matchExpressions:
+                    - key: "kubevirt.io"
+                      operator: "In"
+                      values:
+                        - "virt-launcher"
+            - name: LowNodeUtilization
+              args:
+                evictableNamespaces:
+                  exclude:
+                  - cattle-dashboards
+                  - cattle-fleet-clusters-system
+                  - cattle-fleet-local-system
+                  - cattle-fleet-system
+                  - cattle-logging-system
+                  - cattle-monitoring-system
+                  - cattle-provisioning-capi-system
+                  - cattle-system
+                  - fleet-local
+                  - harvester-system
+                  - kube-system
+                  - local
+                  - longhorn-system
+                thresholds:
+                  cpu: 30
+                  memory: 30
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+            plugins:
+              balance:
+                enabled:
+                - LowNodeUtilization
+----
+
+** `deschedulingInterval`:Deschedulerがどのくらいの頻度で実行されるか。デフォルト値は`5m`（5分）です。
+** `maxNoOfPodsToEvictPerNode`:単一のデスケジューリングサイクル中に追い出すことができるポッドの最大数。デフォルトの値は`5`です。
+** `evictableNamespaces.exclude`:追い出しから除外するネームスペース。デフォルトでは、システムのネームスペースは重要なシステムコンポーネントを保護するために除外されます。
+** `targetThresholds`:監視対象リソースの上限利用率。この閾値を超える使用量のノードは過剰利用としてマークされ、負荷を軽減するためにポッドが追い出されます。CPU（`50`）とメモリ（`50`）のデフォルト値は自動的に適用されますが、他の監視対象リソースの値を定義することもできます。
+** `thresholds`:監視対象リソースの下限利用率。過剰利用のノードから追い出されたポッドは、現在この閾値を下回っているノードにのみ再スケジュールされます。CPU（`30`）とメモリ（`30`）のデフォルト値は自動的に適用されますが、他の監視対象リソースの値を定義することもできます。
+
+== アドオンの無効化
+
+. {harvester-product-name} UIで、*高度な->アドオン*に移動します。
+
+. *Descheduler（実験的）*を選択し、次に*⋮->無効にする*を選択します。
+
+== ノードの使用状況
+
+ノードの使用状況に関する情報はデスケジューラーのログを確認してください。
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.067225       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-131-tink-system" usage={"cpu":"4583m","memory":"3075Mi","pods":"25"} usagePercentage={"cpu":20,"memory":2,"pods":13}
+I1209 02:06:21.067328       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-121-tink-system" usage={"cpu":"5198m","memory":"4023Mi","pods":"30"} usagePercentage={"cpu":23,"memory":3,"pods":15}
+I1209 02:06:21.067355       1 lownodeutilization.go:210] "Node has been classified" category="overutilized" node="hp-119-tink-system" usage={"cpu":"10490m","memory":"109333705514","pods":"81"} usagePercentage={"cpu":46,"memory":81,"pods":41}
+----
+
+== トラブルシューティング
+
+Deschedulerは仮想マシンではなくポッドに対して機能します。追い出されることを期待している仮想マシンが追い出されない場合は、Deschedulerのログを確認してください。
+
+例:
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.068059       1 defaultevictor.go:228] "pod does not fit on any other node because of nodeSelector(s), Taint(s), or nodes marked as unschedulable" pod="default/virt-launcher-vm-3-w866s"
+----
+
+この例では、仮想マシンが手動で移行されたため、関連するポッドの仕様には制限的なノードセレクターが含まれています。Deschedulerは、このポッドを追い出すことができません。なぜなら、ノードセレクターがクラスター内の他の利用可能なノードでポッドが正常に実行されるのを妨げるからです。

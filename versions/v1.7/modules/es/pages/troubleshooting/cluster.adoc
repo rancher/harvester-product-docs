@@ -1,0 +1,404 @@
+= Problemas de clúster
+:revdate: 20-06-2025
+:page-revdate: {revdate}
+
+== Fallo al desplegar un clúster multinodo debido a una configuración incorrecta del proxy HTTP
+
+=== Instalación de ISO sin un archivo de configuración
+
+==== Configurar el proxy HTTP durante la instalación
+
+En algunos entornos, se configura xref:/installation-setup/airgap.adoc#_configure_an_http_proxy_during_installation[http-proxy] del xref:/installation-setup/config/configuration-file.adoc#_os_environment[Entorno del SO] durante la instalación.
+
+==== Configurar el proxy HTTP después de que el primer nodo esté listo
+
+Después de que el primer nodo se instale correctamente, inicias sesión en la interfaz de usuario para configurar xref:/installation-setup/airgap.adoc#_configure_an_http_proxy[http-proxy] de xref:/installation-setup/config/configuration-file.adoc#_system_settings[Ajustes del sistema].
+
+Luego continúas añadiendo más nodos al clúster.
+
+==== Un nodo deja de estar disponible
+
+El problema que puedes encontrar:
+
+----
+The first node is installed successfully.
+
+The second node is installed successfully.
+
+The third node is installed successfully.
+
+Then the second node changes to Unavialable state and cannot recover automatically.
+----
+
+==== Solución
+
+Si los nodos en el clúster no utilizan el proxy HTTP para comunicarse entre sí después de que el primer nodo se instale correctamente, necesitas configurar xref:/installation-setup/airgap.adoc#_configure_an_http_proxy[http-proxy.noProxy] contra el CIDR utilizado por esos nodos.
+
+Por ejemplo, tu clúster asigna IPs del CIDR `172.26.50.128/27` a los nodos a través de DHCP/configuración estática, por favor añade este CIDR a `noProxy`.
+
+Después de configurar esto, puedes continuar añadiendo nuevos nodos al clúster.
+
+Para más detalles, consulta https://github.com/harvester/harvester/issues/3091[issue 3091].
+
+=== Instalación de ISO con un archivo de configuración
+
+Cuando se utiliza un archivo de configuración en la instalación de ISO, por favor configura el `http-proxy` adecuado en xref:/installation-setup/config/configuration-file.adoc#_system_settings[Ajustes del sistema].
+
+=== Instalación por arranque PXE
+
+Cuando se adopta xref:/installation-setup/methods/pxe-boot-install.adoc[Instalación por arranque PXE], por favor configura el `http-proxy` adecuado en xref:/installation-setup/config/configuration-file.adoc#_os_environment[Entorno del SO] y xref:/installation-setup/config/configuration-file.adoc#_system_settings[Ajustes del sistema].
+
+== Generar un paquete de soporte
+
+Los usuarios pueden generar un paquete de soporte en la interfaz de usuario con los siguientes pasos:
+
+* Haz clic en el enlace `Support` en la parte inferior izquierda de la interfaz de usuario.
+  image:troubleshooting/harvester-sb-support-link.png[]
+* Haz clic en el botón `Generate Support Bundle`.
+  image:troubleshooting/harvester-sb-support-button.png[]
+* Introduce una descripción útil para el paquete de soporte y haz clic en `Create` para generar y descargar un paquete de soporte.
+  image:troubleshooting/harvester-sb-support-modal.png[]
+
+[NOTE]
+====
+Siempre que encuentres un problema que pueda estar relacionado con cargas de trabajo desplegadas en espacios de nombres personalizados, configura la opción xref:/installation-setup/config/settings.adoc#_support_bundle_namespaces[support-bundle-namespaces] para incluir esos espacios de nombres como fuentes de datos. El paquete de soporte solo recopila datos de los espacios de nombres configurados.
+
+Para errores de tiempo de espera, puedes ajustar el valor de la opción xref:/installation-setup/config/settings.adoc#_support_bundle_timeout[support-bundle-timeout] y luego reiniciar el proceso de generación del paquete de soporte.
+
+Si tienes la intención de usar una imagen de contenedor no predeterminada, puedes configurar la opción xref:/installation-setup/config/settings.adoc#_support_bundle_image[support-bundle-image].
+====
+
+Para obtener información sobre la recopilación de registros y archivos de configuración del clúster invitado, consulta xref:./rancher.adoc#_guest_cluster_log_collection[Guest Cluster Log Collection].
+
+=== Descargar y conservar manualmente un archivo de paquete de soporte
+
+Por defecto, un archivo de paquete de soporte se genera, descarga y elimina automáticamente después de que haces clic en *Crear* en la interfaz de usuario. Sin embargo, es posible que desees conservar un archivo por diversas razones, incluidas las siguientes:
+
+* No puedes descargar el archivo debido a errores de conectividad de red y otros problemas.
+* Debes usar un archivo generado previamente para solucionar problemas (porque generar un archivo de paquete de soporte lleva tiempo).
+* Quieres ver información que solo existe en un archivo generado previamente.
+
+Incluso si el archivo permanece en el clúster, la interfaz de usuario no proporciona un enlace de descarga. Utiliza la siguiente solución alternativa para generar, descargar manualmente y conservar un archivo de paquete de soporte:
+
+==== Generar el archivo y evitar la descarga automática
+
+. En la interfaz de usuario, haz clic en *Generar paquete de soporte*.
+. Cuando el indicador de progreso alcance entre el 20% y el 80%, cierra la pestaña del navegador para evitar la descarga automática del archivo generado.
+. Recupera una lista de todos los paquetes de soporte en todos los espacios de nombres utilizando kubectl.
++
+Ejemplo:
++
+----
+ $ kubectl get supportbundle -A
+ NAMESPACE          NAME           ISSUE_URL   DESCRIPTION   AGE
+ harvester-system   bundle-htl5f               sp1           3h43m
+----
+
+. Recupera los detalles de todos los paquetes de soporte existentes utilizando el comando `kubectl get supportbundle -A -o yaml`.
++
+Ejemplo:
++
+----
+ $ kubectl get supportbundle -A -oyaml
+ apiVersion: v1
+ items:
+ - apiVersion: harvesterhci.io/v1beta1
+   kind: SupportBundle
+   metadata:
+     creationTimestamp: "2024-02-02T11:18:09Z"
+     generation: 5
+     name: bundle-htl5f  // resource name
+     namespace: harvester-system
+     resourceVersion: "1218311"
+     uid: a3776373-05fe-4584-8a9a-baac3fa91bbf
+   spec:
+     description: sp1
+     issueURL: ""
+   status:
+     conditions:
+     - lastUpdateTime: "2024-02-02T11:18:38Z"
+       status: "True"
+       type: Initialized
+     filename: supportbundle_db25ccb6-b52a-4f9d-97dd-db2df2b004d4_2024-02-02T11-18-10Z.zip  // support bundle file name
+     filesize: 8868712
+     progress: 100  // 100 means successfully generated
+     state: ready
+----
+
+El archivo está listo para descargar cuando el valor de `progress` es "100" y el valor de `state` es "listo".
+
+==== Descarga el archivo
+
+. Crea una URL de descarga que incluya la siguiente información:
+ ** xref:/installation-setup/management-address.adoc[VIP] o nombre DNS
+ ** Nombre del recurso del archivo
+ ** Parámetro `?retain=true`: Si no incluyes este parámetro, los recursos relacionados con el paquete de soporte se eliminan automáticamente después de que el archivo se descarga con éxito.
+
++
+Ejemplo:
++
+`https://{vip/dns-name}/v1/harvester/supportbundles/bundle-htl5f/download?retain=true`
+. Descarga el archivo utilizando herramientas shell (por ejemplo, curl y wget) o un navegador web.
++
+Ejemplo:
++
+`curl -k https://{vip/dns-name}/v1/harvester/supportbundles/bundle-htl5f/download?retain=true -o sb2.zip`
+
+. Verifica que los recursos relacionados con el paquete de soporte no se hayan eliminado.
++
+Ejemplo:
++
+----
+ $ kubectl get supportbundle -A
+ NAMESPACE          NAME           ISSUE_URL   DESCRIPTION   AGE
+ harvester-system   bundle-htl5f               sp1           3h43m
+----
+
+==== (Opcional) Elimina los recursos relacionados
+
+Los archivos de paquetes de soporte retenidos consumen memoria y recursos de almacenamiento. Cada archivo está respaldado por un pod `supportbundle-manager-bundle*` en el espacio de nombres `harvester-system`, y el archivo ZIP generado se almacena en la carpeta `/tmp` del sistema de archivos basado en memoria del pod.
+
+Ejemplo:
+
+ $ kubectl get pods -n harvester-system
+ NAME                                                    READY   STATUS    RESTARTS       AGE
+ supportbundle-manager-bundle-dtl2k-69dcc69b59-w64vl     1/1     Running   0              8m18s
+
+Puedes eliminar los recursos relacionados utilizando los siguientes métodos:
+
+* Manual: Ejecuta el comando `kubectl delete supportbundle -n {namespace} {resource-name}`. Eliminar un objeto de paquete de soporte elimina automáticamente el pod que lo respalda.
++
+Ejemplo:
++
+----
+  $ kubectl delete supportbundle -n harvester-system bundle-htl5f
+  supportbundle.harvesterhci.io "bundle-htl5f" deleted
+
+  $ kubectl get supportbundle -A
+  No resources found
+----
+
+* Automático: Los recursos relacionados se eliminan en función de cómo se configuran los siguientes ajustes:
+ ** xref:/installation-setup/config/settings.adoc#_support_bundle_expiration[support-bundle-expiration]: Define el tiempo permitido para retener un archivo de paquete de soporte
+ ** xref:/installation-setup/config/settings.adoc#_support_bundle_timeout[support-bundle-timeout]: Define el tiempo permitido para generar un archivo de paquete de soporte
+
+=== Copia manualmente el archivo de paquete de soporte
+
+Puedes ejecutar el comando `kubectl cp` para copiar el archivo generado desde el pod de respaldo.
+
+Ejemplo:
+
+----
+kubectl cp harvester-system/supportbundle-manager-bundle-dtl2k-69dcc69b59-w64vl:/tmp/support-bundle-kit/supportbundle_db25ccb6-b52a-4f9d-97dd-db2df2b004d4_2024-02-02T11-18-10Z.zip bundle.zip
+----
+
+=== Recoge manualmente datos para el paquete de soporte
+
+Harvester no puede recoger datos y generar un paquete de soporte cuando el nodo es inaccesible o no está listo. La solución alternativa es ejecutar un script y comprimir los archivos generados.
+
+. Prepara el entorno.
++
+[,sh]
+----
+    mkdir -p /tmp/support-bundle # ensure /tmp/support-bundle exists
+    echo 'JOURNALCTL="/usr/bin/journalctl -o short-precise"' > /tmp/common
+    export SUPPORT_BUNDLE_NODE_NAME=$(hostname)
+----
++
+. ejecute los comandos siguientes:
++
+* Descarga el script: `curl -o collector-harvester https://raw.githubusercontent.com/rancher/support-bundle-kit/refs/heads/master/hack/collector-harvester`
+* Añade permisos de ejecución: `chmod +x collector-harvester`
+* Ejecuta el script: `./collector-harvester / /tmp/support-bundle`
++
+. Comprime los archivos en `/tmp/support-bundle`, y luego adjunta el archivo comprimido al problema relacionado.
+
+=== Limitaciones conocidas
+
+* Reemplazar el pod de respaldo impide que se descargue el archivo de paquete de soporte.
++
+El archivo de paquete de soporte se almacena en la carpeta `/tmp` del sistema de archivos basado en memoria del pod, por lo que se elimina cuando el pod es reemplazado durante el reinicio del clúster y del nodo, la reprogramación del pod de Kubernetes y otros procesos. Después de iniciar, el nuevo pod regenera el archivo pero asigna un nombre que es diferente del nombre de archivo en el objeto de paquete de soporte.
++
+Ejemplo:
+
+ .. Se genera y retiene un archivo de paquete de soporte.
++
+----
+ $ kubectl get supportbundle -A -oyaml
+ apiVersion: v1
+ items:
+ - apiVersion: harvesterhci.io/v1beta1
+   kind: SupportBundle
+   metadata:
+     creationTimestamp: "2024-02-06T11:01:19Z"
+     generation: 5
+     name: bundle-yr2vq
+     namespace: harvester-system
+     resourceVersion: "1583252"
+     uid: eb8538cf-886b-4791-a7b0-dbc34dcee524
+   spec:
+     description: sp2
+     issueURL: ""
+   status:
+     conditions:
+     - lastUpdateTime: "2024-02-06T11:01:47Z"
+       status: "True"
+       type: Initialized
+     filename: supportbundle_db25ccb6-b52a-4f9d-97dd-db2df2b004d4_2024-02-06T11-01-20Z.zip // file is ready to download
+     filesize: 7832010
+     progress: 100
+     state: ready
+ kind: List
+ metadata:
+   resourceVersion: ""
+----
+
+ .. El pod de respaldo se reinicia.
++
+----
+ $ kubectl get pods -n harvester-system supportbundle-manager-bundle-yr2vq-c5484fbdf-9pz8d -oyaml
+ apiVersion: v1
+ kind: Pod
+ metadata:
+ ...
+   labels:
+     app: support-bundle-manager
+     pod-template-hash: c5484fbdf
+     rancher/supportbundle: bundle-yr2vq
+   name: supportbundle-manager-bundle-yr2vq-c5484fbdf-9pz8d
+   namespace: harvester-system
+
+   containerStatuses:
+   - containerID: containerd://ea82b63875c18a2b5b36afea6a47a99a5efd26464f94d401cde1727d175ef740
+     ...
+     name: manager
+     ready: true
+     restartCount: 1
+     started: true
+     state:
+       running:
+         startedAt: "2024-02-06T11:05:33Z" // pod's latest starting timestamp, newer than the timestamp in support bundle's file name
+----
+
+ .. El pod de respaldo regenera el archivo después de que se inicia.
++
+El nombre del archivo regenerado es diferente del nombre de archivo registrado en el objeto de paquete de soporte.
++
+----
+ $ kubectl exec -i -t -n harvester-system supportbundle-manager-bundle-yr2vq-c5484fbdf-9pz8d -- ls /tmp/support-bundle-kit -alth
+ total 2.2M
+ drwxr-xr-x 3 root root 4.0K Feb  6 11:05 .
+ -rw-r--r-- 1 root root 2.2M Feb  6 11:05 supportbundle_db25ccb6-b52a-4f9d-97dd-db2df2b004d4_2024-02-06T11-05-34Z.zip // different with above file name
+----
+
+ .. Los intentos de descargar el archivo regenerado fallan.
++
+La siguiente URL de descarga no se puede utilizar para acceder al archivo regenerado.
++
+`https://{vip/dns-name}/v1/harvester/supportbundles/bundle-yr2vq/download?retain=true`.
+
+* Los archivos de paquetes de soporte retenidos pueden afectar el reinicio del sistema y del nodo, el drenaje del nodo y las actualizaciones del sistema.
++
+Los archivos de paquetes de soporte retenidos están respaldados por pods en el espacio de nombres `harvester-system`. Estos pods se reemplazan durante el reinicio del sistema y del nodo, el drenaje del nodo y las actualizaciones del sistema, consumiendo recursos de CPU y memoria. Además, los archivos regenerados son muy similares en contenido a los archivos retenidos, lo que significa que los recursos de almacenamiento también se consumen innecesariamente.
+
+Para obtener más información, consulta https://github.com/harvester/harvester/issues/3383[Problema 3383].
+
+== Acceder a los paneles de control de Rancher y Longhorn integrados
+
+Ahora puedes acceder a los paneles de control integrados de Rancher y Longhorn directamente en la página `Support`, pero primero debes ir a la página `Preferences` y marcar la casilla `Enable Extension developer features` bajo `Advanced Features`.
+
+image::troubleshooting/support-access-embedded-ui.png[]
+
+[NOTE]
+====
+Solo admitimos el uso de los paneles de control integrados de Rancher y Longhorn para fines de depuración y validación.
+Para la integración de múltiples clústeres y múltiples inquilinos de Rancher, consulta la documentación xref:/integrations/rancher/rancher-integration.adoc[aquí].
+====
+
+
+== No puedo acceder a SUSE® Virtualization después de cambiar los protocolos y cifrados habilitados de SSL/TLS.
+
+Si cambiaste
+xref:/installation-setup/config/settings.adoc#_ssl_parameters[la configuración de protocolos y cifrados habilitados de SSL/TLS]
+y ya no tienes acceso a la interfaz de usuario y API,
+es muy posible que el controlador de ingreso de NGINX haya dejado de funcionar debido a los protocolos y cifrados SSL/TLS mal configurados.
+Sigue estos pasos para restablecer la configuración:
+
+. Siguiendo xref:./faq.adoc[FAQ] para acceder por SSH al nodo y cambiar al usuario `root`.
+
+ $ sudo -s
+
+. Editando la configuración `ssl-parameters` manualmente usando `kubectl`:
++
+----
+# kubectl edit settings ssl-parameters
+----
+
+. Eliminando la línea `value: ...` para que el controlador de ingreso de NGINX
+utilice los protocolos y cifrados predeterminados.
++
+----
+apiVersion: harvesterhci.io/v1beta1
+default: '{}'
+kind: Setting
+metadata:
+  name: ssl-parameters
+...
+value: '{"protocols":"TLS99","ciphers":"WRONG_CIPHER"}' # <- Delete this line
+----
+
+. Guarda el cambio y deberías ver la siguiente respuesta después de salir del editor:
++
+----
+setting.harvesterhci.io/ssl-parameters edited
+----
+
+Puedes comprobar los registros del Pod `rke2-ingress-nginx-controller` para ver si el controlador de ingreso de NGINX está funcionando correctamente.
+
+== Las interfaces de red no aparecen
+
+Es posible que necesites ayuda para encontrar la interfaz correcta con un enlace ascendente de 10G ya que la interfaz no está apareciendo. El enlace ascendente no aparece cuando el módulo ixgbe no se carga porque se detecta un tipo de módulo SFP+ no compatible.
+
+
+=== ¿Cómo identificar el problema con el SFP no compatible?
+
+Ejecuta el comando `lspci | grep -i net` para ver el número de puertos NIC conectados a la placa base. Al ejecutar el comando `ip a`, puedes recopilar información sobre las interfaces detectadas. Si el número de interfaces detectadas es menor que el número de puertos NIC identificados, es probable que el problema provenga del uso de un módulo SFP+ no compatible.
+
+
+==== Evaluación
+
+Puedes realizar una prueba sencilla para verificar si el SFP+ no compatible es la causa. Sigue estos pasos en un nodo en funcionamiento:
+
+. Crea el archivo `/etc/modprobe.d/ixgbe.conf` manualmente con el contenido:
++
+----
+options ixgbe allow_unsupported_sfp=1
+----
+
+. Luego ejecuta el siguiente comando:
++
+----
+rmmod ixgbe && modprobe ixgbe
+----
+
+Si los pasos anteriores son exitosos y la interfaz faltante aparece, podemos confirmar que el problema es un SFP+ no compatible. Sin embargo, la prueba anterior no es permanente y se vaciará una vez que se reinicie.
+
+=== Solución
+
+Debido a problemas de soporte, Intel restringe los tipos de SFP utilizados en sus NIC. Para hacer que los cambios anteriores sean persistentes, se recomienda añadir el siguiente contenido a un xref:/installation-setup/config/configuration-file.adoc[config.yaml] durante la instalación.
+
+[,YAML]
+----
+os:
+  write_files:
+  - content: |
+     options ixgbe allow_unsupported_sfp=1
+    path: /etc/modprobe.d/ixgbe.conf
+  - content: |
+      name: "reload ixgbe module"
+      stages:
+        boot:
+          - commands:
+            - rmmod ixgbe && modprobe ixgbe
+    path: /oem/99_ixgbe.yaml
+----

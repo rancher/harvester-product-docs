@@ -1,0 +1,143 @@
+= 网络深入探讨
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== 网络拓扑
+
+下面的网络拓扑揭示了我们如何实现Harvester网络。
+
+image::networking/topology.png[]
+
+该图包含xref:./cluster-network.adoc#_built_in_cluster_network[内置集群网络管理]和一个名为`oob`的xref:./cluster-network.adoc#_custom_cluster_network[自定义集群网络]。
+
+如上所示，Harvester网络主要关注OSI模型的第二层。我们利用Linux网络设备和协议构建VM与VM、VM与主机以及VM与外部网络设备之间的通信路径。
+
+Harvester网络由三层组成，包括：
+
+* KubeVirt网络层
+* Harvester网络层
+* 外部网络层
+
+== KubeVirt网络
+
+KubeVirt的总体目的是在Kubernetes pod内运行虚拟机。KubeVirt网络构建pod与虚拟机之间的网络路径。
+有关更多详细信息，请参阅 https://kubevirt.io/2018/KubeVirt-Network-Deep-Dive.html[KubeVirt官方文档]。
+
+== Harvester网络
+
+Harvester网络旨在构建pod与主机网络之间的网络路径。它实现了管理网络、VLAN网络和无标签网络。我们可以将最后两个网络称为*桥接网络*，因为桥接在它们的实现中起着至关重要的作用。
+
+=== 桥接网络
+
+我们利用 https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI]和 https://www.cni.dev/plugins/current/main/bridge/[bridge CNI]来实现桥接网络。
+
+* Multus CNI是一个Kubernetes的容器网络接口（CNI）插件，可以将多个网络接口附加到一个Pod上。它的能力允许虚拟机拥有一个用于管理网络的NIC，以及多个用于桥接网络的NIC。
+
+* 使用桥接CNI，虚拟机Pod将连接到网络附加定义配置中指定的L2桥接。
++
+[,json]
+----
+ # Example 1
+ {
+     "cniVersion": "0.3.1",
+     "name": "vlan100",
+     "type": "bridge",
+     "bridge": "mgmt-br",
+     "promiscMode": true,
+     "vlan": 100,
+ }
+----
++
+[,json]
+----
+ # Example 2
+ {
+     "cniVersion": "0.3.1",
+     "name": "untagged-network",
+     "type": "bridge",
+     "bridge": "oob-br",
+     "promiscMode": true,
+     "ipam": {}
+ }
+----
++
+示例1是一个典型的VLAN配置，VLAN ID为100，而示例2是一个没有VLAN ID的未标记网络配置。使用示例1配置的虚拟机Pod将连接到桥接`mgmt-br`，而使用示例2的虚拟机Pod将连接到桥接`oob-br`。
+
+* 为了实现高可用性和容错性，创建了一个绑定真实网卡的绑定设备，作为桥接的上行链路。默认情况下，该绑定设备将允许目标标记的流量/数据包通过。
++
+[,shell]
+----
+ harvester-0:/home/rancher # bridge -c vlan show dev oob-bo
+ port       vlan ids
+ oob-bo       1 PVID Egress Untagged
+            100
+            200
+----
++
+上面的示例显示，绑定`oob-bo`允许带有标签1、100或200的数据包。
+
+* 当您创建一个虚拟机并将其连接到虚拟机网络（VLAN）或存储网络时，{harvester-product-name}会自动在主机上创建虚拟以太网（veth）接口，直接连接到Pods。
++
+在早期版本中，这些veth接口与VLAN ID 1和分配给虚拟机网络的VLAN ID相关联。这使得{harvester-product-name}桥接能够正确转发来自外部交换机的未标记（VLAN 1）和标记流量到veth接口。
++
+[,shell]
+----
+vethaf720855      1 Egress Untagged
+                  66 PVID Egress Untagged
+----
++
+这种行为在{harvester-product-name} v1.6.1中发生了变化，该版本使用了CNI桥接插件的v1.8.0。默认的VLAN ID 1不再添加到veth接口。仅配置分配给虚拟机网络的VLAN ID。
++
+[,shell]
+----
+vethaf720855      66 PVID Egress Untagged
+----
++
+由于不再应用未标记VLAN处理，连接到{harvester-product-name}主机的物理交换机现在必须配置为干线端口。这些端口必须接受标记流量，并发送带有虚拟机网络使用的VLAN ID的流量。
++
+任何到达{harvester-product-name}网络桥的未标记流量，如果是针对VLAN标记的veth接口，将会被丢弃。这是因为桥接无法将流量转发到配置为仅接受虚拟机网络的VLAN ID的veth接口。
+
+=== 管理网络
+
+管理网络基于 https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal]。
+
+值得一提的是，Harvester 配置节点 IP 的 Canal 接口是桥 `mgmt-br` 或 `mgmt-br` 的 VLAN 子接口。该设计有两个好处：
+
+* 内置的 `mgmt` 集群网络支持管理网络和桥接网络。
+* 通过 VLAN 网络接口，我们可以为管理网络分配 VLAN ID。
+
+作为 mgmt 集群网络的组成部分，不允许删除或修改桥接 mgmt-br、绑定 mgmt-bo 和 VLAN 设备。
+
+== 外部网络
+
+外部网络设备通常指交换机和 DHCP 服务器。通过集群网络，我们可以将主机 NIC 分组并将其连接到不同的交换机以实现流量隔离。以下是一些使用说明。
+
+* 要允许标记的数据包通过，您需要将外部交换机或其他设备（如 DHCP 服务器）的端口类型设置为干线或混合模式，并允许指定的 VLAN 标签。
+* 您需要根据对等主机的绑定模式在交换机上配置链路聚合。链路聚合可以在手动模式或 LACP 模式下工作。以下列出了绑定模式与链路聚合模式之间的对应关系。
++
+|===
+| 绑定模式 | 链路聚合模式
+
+| 模式 0（平衡-轮询）
+| manual
+
+| 模式 1（主动-备份）
+| none
+
+| mdoe 2(balance-oxr)
+| manual
+
+| 模式 3（广播）
+| manual
+
+| 模式 4（802.3ad）
+| LACP
+
+| 模式 5（平衡-TLB）
+| none
+
+| 模式 6（自适应负载平衡）
+| none
+|===
+
+* 如果您希望 VLAN 中的虚拟机能够通过 DHCP 协议获取 IP 地址，请在 DHCP 服务器中为该 VLAN 配置一个 IP 池。

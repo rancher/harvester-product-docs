@@ -1,0 +1,108 @@
+= Longhorn V2 Data Engine
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+Die Longhorn V2 Data Engine nutzt die Leistungsfähigkeit des Storage Performance Development Kit (SPDK), um die I/O-Latenz erheblich zu reduzieren und gleichzeitig IOPS und Durchsatz zu steigern. Das Ergebnis ist eine leistungsstarke Speicherlösung, die in der Lage ist, unterschiedlichen Arbeitslastanforderungen gerecht zu werden.
+
+[IMPORTANT]
+====
+Die Longhorn V2 Data Engine ist eine *experimentelle* Funktion und sollte nicht in einer Produktionsumgebung verwendet werden.
+====
+
+== Voraussetzungen
+
+Jeder Knoten mit einer aktiven Longhorn V2 Data Engine benötigt die folgenden dedizierte Ressourcen:
+
+* 1 CPU-Kern für die Verwendung durch den Longhorn Instance-Manager-Pod
+* 2 GiB RAM (zugewiesen als 1024 × 2 GiB große Seiten)
+* Mindestens eine lokale NVMe-Festplatte zur Datenspeicherung
+
+== Nutzungsbeschränkungen
+
+Die Longhorn V2 Data Engine unterstützt derzeit die folgenden Operationen nicht:
+
+* Erstellung und Nutzung von Backing-Images
+* Volume-Verschlüsselung
+
+SSDs und andere nicht-NVMe-Festplatten werden mit dem SPDK AIO bdev-Treiber verwaltet, der die Unmap-Operation nicht unterstützt. Wenn Sie nicht-NVMe-Festplatten verwenden, vermeiden Sie das Trimmen des Dateisystems, da dies zu I/O-Fehlern und angehaltenen virtuellen Maschinen führt. Zum Beispiel, wenn Sie ein ext4-Dateisystem auf einer Linux-virtuellen Maschine erstellen, verwenden Sie `mkfs.ext4 -E nodiscard /dev/vdb` (vorausgesetzt, `/dev/vdb` ist Ihr Gerätepfad). Auf Windows-virtuellen Maschinen können Sie das Trimmen für NTFS deaktivieren, indem Sie den Befehl `fsutil behavior set disabledeletenotify NTFS 1` ausführen.
+
+== Verwendung
+
+Die Longhorn V2 Data Engine ist nur für neu erstellte Volumes und Images verfügbar. Bestehende Volumes, virtuelle Maschinen-Images und Root-Volumes von virtuellen Maschinen verwenden weiterhin die V1 Data Engine.
+
+. Gehen Sie in der {harvester-product-name} UI zu *Erweiterte -> Einstellungen*.
+
+. Setzen Sie `longhorn-v2-data-engine-enabled` auf `true`.
++
+{harvester-product-name} lädt automatisch die von der Longhorn V2 Data Engine benötigten Kernel-Module und versucht, 1024 × 2 MiB große Seiten (zum Beispiel 2 GiB RAM) auf allen Knoten zuzuweisen. 
++
+Ändern dieser Einstellung startet RKE2 auf allen Knoten automatisch neu, hat jedoch keine Auswirkungen auf laufende virtuelle Maschinen-Workloads.
++
+[TIP]
+====
+Wenn Sie Fehlermeldungen erhalten, die den Satz "nicht genügend Hugepages-2Mi-Kapazität" enthalten, lassen Sie etwas Zeit, damit der Fehler behoben werden kann. Wenn der Fehler weiterhin besteht, starten Sie die betroffenen Knoten neu.
+
+Um die Longhorn V2 Data Engine auf bestimmten Knoten (zum Beispiel Knoten mit weniger Verarbeitungs- und Speicherkapazitäten) zu deaktivieren, gehen Sie zum *Hosts*-Bildschirm und fügen Sie den folgenden Label zu den Zielknoten hinzu:
+
+* label: `node.longhorn.io/disable-v2-data-engine`
+* wert: `true`
+====
+
+. Gehen Sie zum *Hosts*-Bildschirm und fügen Sie dann zusätzliche Festplatten zu jedem Knoten hinzu, wie in xref:/hosts/hosts.adoc#_multi_disk_management[Multi-Disk-Management] beschrieben.
++
+Setzen Sie den `Provisioner` jeder zusätzlichen Festplatte auf `Longhorn V2 (CSI)`.
++
+[NOTE]
+====
+{harvester-product-name} setzt den https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn-Disk-Treiber] auf `auto`, sodass NVMe-Festplatten den SPDK NVMe bdev-Treiber verwenden, der die beste Leistung bietet und auch erweiterte Operationen wie trim (auch bekannt als discard) unterstützt.
+
+SSDs und andere Nicht-NVMe-Festplatten werden mit dem SPDK AIO bdev-Treiber verwaltet, der eine Festplattengröße erfordert, die ein _gerades Vielfaches von 4096 Bytes_ ist. Nicht-NVMe-Festplatten, die diese Größenanforderung nicht erfüllen, können nicht hinzugefügt werden. Darüber hinaus unterstützt der SPDK AIO bdev-Treiber die Unmap-Operation nicht. Wenn Sie Nicht-NVMe-Festplatten verwenden, vermeiden Sie das Trimmen des Dateisystems, da dies zu I/O-Fehlern und angehaltenen virtuellen Maschinen führt.
+====
+
+. Gehen Sie zu *Erweiterte -> Speicherklassen* und fügen Sie dann eine neue StorageClass hinzu, wie in xref:./storageclass.adoc#_creating_a_storageclass[Erstellen einer StorageClass] beschrieben. 
++
+Setzen Sie den `Provisioner` auf `Longhorn V2 (CSI)`.
+
+. Verwenden Sie die neue StorageClass beim Erstellen der folgenden:
++
+* Volumes (entweder auf dem *Volumes*-Bildschirm oder während der Erstellung virtueller Maschinen)
+* Images (auf dem *Images*-Bildschirm)
++
+Volumes und Images, die mit der neuen StorageClass erstellt wurden, werden von der Longhorn V2 Data Engine unterstützt.
+
+== Upgrade von {harvester-product-name} v1.4.x
+
+{harvester-product-name} v1.4.x, das {longhorn-product-name} v1.7.x verwendet, kann virtuelle Maschinen mit angehängten V2-Volumes nicht live migrieren. Darüber hinaus kann die V2 Data Engine nicht für virtuelle Maschinenbilder und Bootvolumes verwendet werden. Diese Einschränkungen existieren nicht in {harvester-product-name} v1.5.0 und späteren Versionen, die {longhorn-product-name} v1.8.1 und späteren Versionen verwenden. Dies gilt jedoch nur für Volumes und Bilder, die _nach_ {harvester-product-name} aktualisiert werden.
+
+In V2 StorageClasses, die mit {harvester-product-name} v1.4.x erstellt wurden, ist die `migratable` Option auf `false` gesetzt. Wie alle anderen Eigenschaften der StorageClass kann dies, sobald es festgelegt ist, nicht mehr geändert werden. Ähnlich bleiben V2-Volumes, die mit {harvester-product-name} v1.4.x erstellt wurden, nach dem Upgrade nicht migrierbar. Wenn Sie die V2 Data Engine in {harvester-product-name} v1.4.x verwendet haben und später auf {harvester-product-name} v1.5 aktualisieren, müssen Sie eine neue V2 StorageClass erstellen. Die `migratable` Option ist standardmäßig auf `true` gesetzt, sodass Volumes und Bilder, die mit dieser neuen V2 StorageClass erstellt wurden, live migriert werden können.
+
+[IMPORTANT]
+====
+* Wenn Sie den SPDK AIO bdev-Treiber verwenden (insbesondere, wenn Festplatten mit `/dev/sd*` Gerätepfaden hinzugefügt wurden), _werden V2-Volumes, die vor dem Upgrade erstellt wurden, unbrauchbar und können nach dem Upgrade nicht wiederhergestellt werden_. Für weitere Informationen siehe https://github.com/longhorn/longhorn/issues/10461[Issue #10461].
+
+* Wenn Sie den SPDK NVMe bdev-Treiber verwenden (insbesondere, wenn Festplatten mit `/dev/nvme*` Pfaden hinzugefügt wurden), funktionieren V2-Volumes, die vor dem Upgrade erstellt wurden, weiterhin. Diese Volumes werden jedoch weiterhin die {longhorn-product-name} v1.7.x Engine verwenden und bleiben nicht migrierbar. Sie können die Daten exportieren und bei Bedarf neue migrierbare Volumes erstellen.
+
+* Alle virtuellen Maschinen mit angehängten V2-Volumes müssen gestoppt werden, bevor Sie das Upgrade starten. Aktive V2-Volumes werden den Upgrade-Prozess während der Phase "Systemdienste aktualisieren" zum Stillstand bringen. Die `apply-manifests` Pod-Protokolle zeigen wiederholte Nachrichten ähnlich den folgenden an:
++
+[,shell]
+----
+instance-manager (aio)(v2) (image=longhornio/longhorn-instance-manager:v1.8.1) state is not running on node harvester-node-0, will retry...
+----
++
+Das Stoppen aller virtuellen Maschinen, die V2-Volumes verwenden, ermöglicht es, das Upgrade fortzusetzen.
+====
+
+Wenn Sie den SPDK NVMe bdev-Treiber verwenden (insbesondere, wenn Festplatten mit `/dev/nvme*` Gerätepfaden hinzugefügt wurden) und nicht migrierbare V2-Volumes an bestehenden virtuellen Maschinen angehängt sind, können Sie durch die folgenden Schritte zu live-migrierbaren Volumes wechseln:
+
+. Stoppen Sie die virtuellen Maschinen.
+
+. Exportieren Sie jedes angehängte V2-Volume in ein Bild, das die neue V2 StorageClass verwendet (wobei die `migratable` Option auf `true` gesetzt ist).
+
+. Sobald die Volumes in Images exportiert sind, bearbeiten Sie die virtuelle Maschine und führen Sie die folgenden Aktionen im *Volumes* Tab aus:
++
+* Entfernen Sie die vorhandenen V2-Volumes.
+* Fügen Sie die Images hinzu, die aus den exportierten Volumes erstellt wurden.
+
+. Starten Sie die virtuellen Maschinen.
++
+Dieser Schritt kann je nach Menge der zu kopierenden Daten eine Weile dauern.

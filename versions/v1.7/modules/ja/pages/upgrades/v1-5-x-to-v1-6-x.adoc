@@ -1,0 +1,285 @@
+= v1.5.xからv1.6.xへのアップグレード
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+== 一般情報
+
+新しい{harvester-product-name}バージョンが利用可能になると、*ダッシュボード*画面に*アップグレード*ボタンが表示されます。詳細については、xref:./upgrades.adoc#_start_an_upgrade[アップグレードを開始する]を参照してください。
+
+v1.5.xを実行しているクラスターは、{harvester-product-name}が基盤コンポーネントのマイナーバージョンアップグレードを最大1回許可するため、v1.6.xに直接アップグレードできます。v1.5.0、v1.5.1、およびv1.5.2は{rke2-short-name}の同じマイナーバージョン(v1.32)を使用しており、v1.6.0およびv1.6.1は次のマイナーバージョン(v1.33)を使用しています。詳細については、xref:upgrades/upgrades.adoc#_upgrade_paths)[アップグレードパス]を参照してください。
+
+[NOTE]
+====
+バグ修正セクションに記載されている問題の影響を受ける顧客のみが、v1.5.2をインストールする必要があります。
+====
+
+エアギャップ環境での{harvester-product-name}のアップグレードに関する情報は、xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[エアギャップアップグレードの準備]を参照してください。
+
+=== {rancher-product-name} v2.12でHarvester UI拡張機能を更新します。
+
+{rancher-short-name} v2.12で{harvester-product-name} v1.6.xクラスターをインポートするには、Harvester UI拡張機能の互換性のあるバージョン(v1.6.x)を使用する必要があります。
+
+. {rancher-short-name} UIで、*ローカル -> アプリ -> リポジトリ*に移動します。
+
+. *harvester*という名前のリポジトリを見つけて、*⋮ -> 更新*を選択します。
+
+. *拡張機能*画面に移動します。
+
+. *Harvester*という名前の拡張機能を見つけて、*更新*をクリックします。
+
+. 互換性のあるバージョンを選択し、*更新*をクリックします。
+
+. 拡張機能が更新されるまでしばらくお待ちいただき、画面を更新してください。
+
+== 当バージョンの注意事項
+
+=== アップグレードが「プレドレイン」状態でスタックしています
+
+特定の状況では、インスタンスマネージャーがエンジンインスタンスのクリーンアップに失敗することがあります。エンジンCRの状態が「停止」に変更された後でもです。インスタンスマネージャーポッドが対応するPodDisruptionBudget (PDB)が存在する間は削除できないため、アップグレードプロセスが「プレドレイン」状態でスタックします。
+
+回避策は、すべてのボリュームが正常であることを確認した後にインスタンスマネージャーPDBを削除することです。
+
+関連する問題: https://github.com/harvester/harvester/issues/8977[#8977]および https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== ゲストクラスターが「更新中」状態でスタックしています
+
+{rke2-short-name}ゲストクラスターが「更新中」状態でスタックすることがあります。これは、{harvester-product-name}がアップグレードされた後に発生します。{harvester-product-name} UIに次のエラーメッセージが表示されます:
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+この問題は、ゲストノードのIPアドレスがアップグレード後に変更されると発生し、etcdが正常に機能しなくなります。基盤となる仮想マシンが何度も再起動され、DHCPサーバーから新しいIPアドレスを受け取った可能性があります。
+
+この問題に対処するには、次の手順を実行してください。
+
+. {rancher-short-name} UIで、エラーを引き起こしているノードをゲストクラスターから削除します。
+. {harvester-product-name} UIで、基盤となる仮想マシンの状態を確認します。
+. 必要に応じて、仮想マシンを再起動します。
+
+仮想マシンが削除され、ゲストクラスターは新しいノードを作成しようとします。ノードが作成されると、ゲストクラスターの状態が「アクティブ」に変更されます。
+
+関連する問題: https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== 停止した仮想マシンが「起動中」状態でスタックしています。
+
+{longhorn-product-name}ボリュームは、ライブマイグレーション後に「デタッチ中」と「デタッチ済み」状態の間でフラップすることがあります。ボリュームが準備できていないため、関連する仮想マシンは完全に起動できません。
+
+回避策は、次のコマンドを使用してボリュームの`status.currentMigrationNodeID`をクリアすることです。
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+関連する問題: https://github.com/harvester/harvester/issues/8949[#8949]および https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+=== ネットワークセットアップエラーのため、「再起動待ち」状態にスタックしているノード
+
+以下の条件が満たされると、ノードはアップグレード中に`Waiting Reboot`状態にスタックする可能性があります:
+
+* {harvester-product-name} v1.2.1またはそれ以前のバージョンが最初にインストールされ、ノードが段階的にアップグレードされた。
+* `vlan_id`設定の`install.management_interface`フィールドが`1`に設定されているか、空である。
+
+この問題は、ノードログのメッセージ`yaml: line did not find expected key`が示すように、ネットワークセットアップエラーが原因で発生します。
+
+アップグレード中に、`/oem/90_custom.yaml`ファイルがv1.5.xの動作の変更を反映するように更新され、`mgmt-br`および`mgmt-bo`にVLAN 2–4094が追加されます。そのファイル内の2つのスクリプト（`/etc/wicked/scripts/setup_bond.sh`と`/etc/wicked/scripts/setup_bridge.sh`）は、`gopkg.in/yaml.v2`によって生成された形式を使用している場合、`sed`操作によって切り捨てられる可能性があります。この形式は、1.2.2より前の{harvester-product-name}バージョンのインストーラーで使用されていました。`sed`操作は、行`bridge vlan add vid 2-4094 dev $INTERFACE`を削除します。この切り捨ての問題は、`gopkg.in/yaml.v3`によって生成された形式を使用しているスクリプトには影響しません。
+
+以下は、`/oem/90_custom.yaml`ファイル内の`/etc/wicked/scripts/setup_bond.sh`スクリプトの内容です：
+
+* `gopkg.in/yaml.v2`から生成されました：
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpost-up)\n\t\t#
+inherit MAC address\n\t\tip link set dev mgmt-br address $(ip -json link show
+dev $INTERFACE | jq -j '.[0][\"address\"]')\n\n\t\t# accept all vlan, PVID=1
+by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE\n\t\t;;\n\nesac\n"
+```
+----
+
+* `gopkg.in/yaml.v3`から生成されました：
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        post-up)
+                # inherit MAC address
+                ip link set dev mgmt-br address $(ip -json link show dev $INTERFACE | jq -j '.[0]["address"]')
+                #accept all vlan,PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE
+                ;;
+esac
+----
+
+以下は、`/oem/90_custom.yaml`ファイル内の`/etc/wicked/scripts/setup_bridge.sh`スクリプトの内容です：
+
+* `gopkg.in/yaml.v2`から生成されました：
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpre-up)\n\t\t#
+enable vlan-aware\n\t\tip link set dev $INTERFACE type bridge vlan_filtering 1\n\t\t\t;;\n\n\tpost-up)\n\t\t#
+accept all vlan, PVID=1 by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE
+self\n\t\tbridge vlan add vid 2-4094 dev mgmt-bo\n\t\t;;\n\nesac\n"
+----
+
+* `gopkg.in/yaml.v3`から生成されました：
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        pre-up)
+               #enable vlan-aware
+               ip link set $INTERFACE type bridge vlan_filtering 1
+               ;;
+        post-up)
+                #accept all vlan, PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE self
+                bridge vlan add vid 2-4094 dev mgmt-bo
+                ;;
+esac
+----
+
+回避策は、古いスクリプトの内容を置き換えることです。`gopkg.in/yaml.v3`から生成された`/oem/90_custom.yaml`ファイル内のスクリプトを使用してください。スクリプトが更新されると、アップグレードが再開されます。
+
+関連する問題: https://github.com/harvester/harvester/issues/9033[#9033]
+
+=== `mgmt`クラスタネットワークの二次VLANインターフェースでネットワーク接続が失われました。
+
+{harvester-product-name} v1.6.0は、不必要なVLANプロビジョニングを削減する変更を導入しました。以前は、すべての二次VLANインターフェースが`mgmt-br`ブリッジおよび`mgmt-bo`インターフェースに接続されていました。現在、必要なVLANインターフェースのみが接続されています。その結果、クラスターがv1.6.xにアップグレードされると、以前は`mgmt-br`および`mgmt-bo`に接続されていたすべての二次VLANインターフェースが管理ホストから削除されます。
+
+[WARNING]
+====
+これらのインターフェースに依存するワークロードは、ネットワーク接続を失います。
+
+詳細については、 https://github.com/harvester/harvester/issues/7650[問題 #7650]を参照してください。
+====
+
+v1.6.xにアップグレード後、以下の手順を実行してください：
+
+. 管理ホストで次のコマンドを実行して、`mgmt-br`および`mgmt-bo`に接続されているVLANを確認してください：
++
+[,shell]
+----
+bridge vlan show
+----
++
+このコマンドは、`mgmt-br`および`mgmt-bo`のプライマリVLANのみを出力します。
+
+. 必要な二次VLANを`mgmt-br`ブリッジと`mgmt-bo`インターフェースに手動で追加するには、次のコマンドを`/oem/90_custom.yaml`ファイルに追加します:
++
+** `/etc/wicked/scripts/setup_bond.sh`セクション
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE
+----
++
+** `/etc/wicked/scripts/setup_bridge.sh`セクション
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE self
+bridge vlan add vid <vlan-id> dev mgmt-bo
+----
++
+[IMPORTANT]
+====
+各異なるVLAN IDについて、別々のコマンドを含める必要があります。`vlan-id`プレースホルダーは実際のIDに置き換える必要があります。
+====
+
+. `/oem/90_custom.yaml`ファイルが更新されたら、管理ホストを再起動します。
+
+. 次のコマンドをホストで実行して、必要なすべてのVLANが追加されたことを確認します:
++
+[,shell]
+----
+bridge vlan show
+----
+
+==== アップグレードシナリオの例
+
+次の例では、v1.5.xクラスターが最初にxref:installation-setup/config/configuration-file.adoc#_install_management_interface[プライマリVLANインターフェース]（VLAN ID: `2021`）でインストールされました。セカンダリVLANインターフェース（VLAN ID: `2113`）を追加するために、管理ホスト上に次の内容の`/oem/99_vlan-ifcfg.yaml`ファイルが作成されました:
+
+[,yaml]
+----
+stages:
+  initramfs:
+    - name: "Host VLAN interface mgmt-br.353"
+      files:
+        - path: /etc/sysconfig/network/ifcfg-mgmt-br.2113
+          owner: 0
+          group: 0
+          permissions: 384
+          content: |
+            STARTMODE='onboot'
+            BOOTPROTO='static'
+            IPADDR='10.255.113.150/24'
+            VLAN_ID='2113'
+            ETHERDEVICE='mgmt-br'
+            VLAN='yes'
+            DEFROUTE='no'
+----
+
+一般的な期待は、`mgmt`インターフェース（`mgmt-br.2113`）上に追加のVLANサブインターフェースが作成され、IPv4アドレスが割り当てられることです。さらに、このサブインターフェースとプライマリインターフェース（`mgmt-br.2021`）の両方が、クラスターがv1.6.xにアップグレードされた後にL3接続に使用されることが期待されています。
+
+実際には、v1.6.0へのアップグレード後、VLANサブインターフェースは作成されますが、セカンダリVLAN（VLAN ID: `2113`）は`mgmt-br`ブリッジと`mgmt-bo`インターフェースから削除されます。再起動後、プライマリVLAN IDのみが`mgmt-br`ブリッジと`mgmt-bo`インターフェースに割り当てられます（`/oem/90_custom.yaml`ファイルを使用）。
+
+この変更の影響を軽減するために、<<Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network,前のセクション>>で説明されている回避策を実行する必要があります。これには、セカンダリVLANインターフェースを特定し、必要なものを`mgmt-br`ブリッジと`mgmt-bo`インターフェースに追加することが含まれます。
+
+=== 実行中の仮想マシンは`Restart action is required`メッセージを表示します
+
+{harvester-product-name} UIは、次の状況でいくつかの実行中の仮想マシンに対してメッセージ`Restart action is required for the virtual machine configuration change to take effect`を表示する場合があります:
+
+* {harvester-product-name}がv1.5.xからv1.6.xにアップグレードされます。
+* Harvester UI拡張機能がv1.6.xに更新されます。
+* {harvester-product-name}クラスターが{rancher-short-name} v2.12.xにインポートされます。
+
+仮想マシンを再起動して、設定変更を適用し、メッセージをクリアする必要があります。
+
+メッセージは、{harvester-product-name} v1.6.0以降のバージョンのUIで、`RestartRequired`条件が表示されるようになったために発生します。この条件は、以前は仮想マシンのYAML設定でのみ確認できました。この可視性は、仮想マシンが再起動された後にのみ有効になる設定変更を伴うCPUおよびメモリのホットプラグなどの機能にとって重要です。
+
+`RestartRequired`条件は、従来のMACアドレス同期方法によって引き起こされた状態の不一致を処理するために導入されました。v1.6.0以前のバージョンでは、KubeVirtコントローラーは、作成プロセス中に仮想マシンインスタンスのMACアドレスを自動的に仕様にパッチしました。これにより、MACアドレスは再起動間で一貫性が保たれました。しかし、仮想マシンがアクティブな状態で仕様が変更されたため、コントローラーは状態を同期するために手動で再起動が必要であることを示す`RestartRequired`条件を追加しました。
+
+=== 仮想マシンはターゲットノードにライブマイグレーションできません。
+
+v1.6.xへのアップグレード後、一部の仮想マシンは_pending restart_状態のままになることがあります。これらの仮想マシンは再起動されるまで、指定されたターゲットノードにライブマイグレーションできません。
+
+回避策は、仮想マシンを再起動することです。再起動後、ノード固有のライブマイグレーションが機能します。
+
+関連する問題: https://github.com/harvester/harvester/issues/9739[#9739]
+
+=== `cpu-feature.node.kubevirt.io/ipred-ctrl=true`機能はアップグレード中に表示されます。
+
+Harvesterは、ノードのアップグレード中にゼロダウンタイムを確保するために仮想マシンをライブマイグレーションします。クラスターが以下のCPUモデルのいずれかを使用している場合、アップグレードが進行中の間に一時的な機能フラグ（`cpu-feature.node.kubevirt.io/ipred-ctrl=true`）が表示されることがあります。
+
+* Intel(R) Xeon(R) Gold 5418Y
+* Intel(R) Xeon(R) Silver 4509Y
+
+この機能フラグはアップグレード後にノードから自動的に削除されますが、対応するノードセレクターは仮想マシンの設定に保持されます。仮想マシンの要件とノードのラベルとの間のこの不一致により、以降のライブマイグレーションが失敗します。
+
+この問題を解決するには、次のいずれかのアクションを実行してください _アップグレードを開始する前に_:
+
+* *オプション 1:* https://harvesterhci.io/kb/setup_common_cpu_model_for_vm_live_migration[仮想マシンのために共通のCPUモデルを構成する]。
+
+* *オプション2:*KubeVirt ラベラーを停止するには、 https://kubevirt.io/user-guide/compute/virtual_hardware/#labeling-nodes-with-cpu-models-cpu-features-and-machine-types[ノードに`node-labeller.kubevirt.io/skip-node`アノテーションを追加する]し、アップグレード後にアノテーションを削除します。より複雑ですが、仮想マシンを再起動できない場合に便利なオプションです。詳細については、 https://harvesterhci.io/kb/troubleshooting_vm_scheduling_issues_nodeselector[ノードセレクタによって引き起こされる VM ライブマイグレーションの問題のトラブルシューティング] を参照してください。
+
+=== セカンダリポッドインターフェースのデフォルト VLAN 動作の変更
+
+v1.6.0 およびそれ以前のバージョンでは、セカンダリネットワークインターフェース (VMネットワークやストレージネットワークなど) を持つポッドは、自動的にVLAN ID 1およびVLANネットワークで構成されたVLAN IDに割り当てられていました。このデュアルVLAN ID構成により、{harvester-product-name}ネットワークブリッジは、これらのポッドのvethインターフェースに未タグ付けのトラフィックを転送できました。
+
+この動作は、CNIブリッジプラグインのv1.8.0を使用するv1.6.1で変更されました。セカンダリポッドインターフェースは、VM ネットワークに割り当てられた VLAN ID のみと関連付けられています。VLAN ID 1 がもはや追加されないため、ブリッジはこれらのインターフェースに未タグ付けのトラフィックを転送できません。
+
+この変更は、外部スイッチポートが未タグ付けのフレームを送信するアクセスポートとして構成されている場合、v1.5.x から v1.6.1 にアップグレードされたクラスターに影響します。外部スイッチの設定をトランクポートを使用するように更新すると、問題が解決します。未タグ付けのネットワークに接続されているセカンダリインターフェースを持つポッドや、VLAN ID 1 に関連付けられているポッドは影響を受けません。
+
+関連する問題: https://github.com/harvester/harvester/issues/8816[#8816]

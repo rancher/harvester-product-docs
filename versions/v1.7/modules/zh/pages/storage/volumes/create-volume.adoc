@@ -1,0 +1,177 @@
+= 创建卷
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== 创建空卷
+
+[tabs]
+======
+UI::
++
+--
+*标题部分*
+
+. 设置卷 `Name`。
+. （可选）为卷提供一个 `Description`。
+
+*基础选项卡*
+
+. 在 `New` 中选择 `Source`。
+. 选择现有的 `StorageClass`。
+. 配置卷的 `Size`。
++
+image::volume/create-empty-volume.png[创建空卷]
+
+[CAUTION]
+====
+* 如果所选 StorageClass 的副本数量为 `1` 且卷已附加到虚拟机，则该虚拟机被视为 xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[不可迁移]。
+
+* 创建卷时，它会将所选 `StorageClass` 的相关参数复制到自身。如果您稍后更改 `StorageClass` 的参数，则不会写回到卷。
+====
+
+*超大卷*
+
+在 {harvester-product-name} v1.5.0 中，使用 {longhorn-product-name} v1.8.1，超大卷（例如，999999 Gi 大小）被标记为 **未准备好**，并且无法删除。
+
+要解决此问题，请执行以下步骤：
+
+. 暂时去除 PVC webhook 规则。
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. 等待相关 PVC 被删除。
+
+. 恢复 PVC webhook 规则以重新启用验证。
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+该问题将在 {longhorn-product-name} v1.8.2 中解决，可能会包含在 {harvester-product-name} v1.5.1 中。
+
+相关问题： https://github.com/harvester/harvester/issues/8096[#8096] 和 https://github.com/longhorn/longhorn/issues/10741[#10741]
+--
+
+API::
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: my-vol
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  volumeMode: Block
+  volumeName: pvc-my-vol
+----
+
+[CAUTION]
+====
+创建新卷时，请勿使用 `vmstate-persistence` 和 `longhorn-static` StorageClasses。 `vmstate-persistence` 用于 TPM 和 UEFI 持久性，而 `longhorn-static` 用于管理现有 {longhorn-product-name} 卷。
+====
+
+Terraform::
++
+要在 {harvester-product-name} 上使用 Terraform 创建一个空卷，使用 https://registry.terraform.io/providers/harvester/harvester/latest[Harvester Terraform Provider]，请定义一个 `harvester_volume` 资源块：
++
+[,json]
+----
+resource "harvester_volume" "empty-volume" {
+  name      = "empty-volume"
+  namespace = "default"
+
+  size = "10Gi"
+}
+----
+======
+
+== 创建映像卷
+
+[tabs]
+======
+UI::
++
+--
+*标题部分*
+
+. 设置卷 `Name`。
+. （可选）为卷提供一个 `Description`。
+
+**基础选项卡**
+
+. 在 `VM Image` 中选择 `Source`。
+. 选择现有的 `Image`。
+. 配置卷的 `Size`。
++
+[CAUTION]
+====
+从虚拟机映像创建卷时，请确保卷的大小大于或等于映像的大小。如果配置的卷大小小于底层映像的大小，卷可能会损坏。这对于 qcow2 映像尤其重要，因为虚拟大小通常大于物理大小。默认情况下，{harvester-product-name} 将卷大小设置为映像的虚拟大小。
+====
++
+image::volume/create-image-volume.png[创建映像卷]
+--
+
+API::
++
+创建一个卷，使用来自名称空间 `default` 的映像 `image-8rb2z` 的内容进行初始化：
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    harvesterhci.io/imageId: default/image-8rb2z
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: foobar
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn-image-8rb2z
+  volumeMode: Block
+  volumeName: pvc-foobar
+----
+
+Terraform::
++
+要在 {harvester-product-name} 上使用 Terraform 创建一个卷并用映像的内容进行初始化，请定义一个 `harvester_volume` 资源块并设置 `image` 属性：
++
+[,json]
+----
+resource "harvester_volume" "opensuse154-image-disk" {
+  name      = "opensuse154-image-disk"
+  namespace = "default"
+
+  size  = "10Gi"
+  image = harvester_image.opensuse154.id
+}
+----
+======

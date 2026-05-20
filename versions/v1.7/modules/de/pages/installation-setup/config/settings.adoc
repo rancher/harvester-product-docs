@@ -1,0 +1,935 @@
+= Einstellungen
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+Die folgende Liste enthält erweiterte Einstellungen, die Sie verwenden können. Sie können die `settings.harvesterhci.io` benutzerdefinierte Ressource sowohl über die Benutzeroberfläche als auch über den `kubectl` Befehl ändern.
+
+== Allgemeine Einstellungen
+
+=== `additional-ca`
+
+*Definition*: Zusätzliche vertrauenswürdige CA-Zertifikate, die es {harvester-product-name} ermöglichen, auf externe Dienste zuzugreifen.
+
+[CAUTION]
+====
+Die Änderung dieser Einstellung kann dazu führen, dass Cluster mit einem einzelnen Knoten vorübergehend nicht verfügbar oder nicht zugänglich werden.
+====
+
+*Standardwert*: Keine
+
+*Beispiel*:
+
+----
+-----BEGIN CERTIFICATE-----
+SOME-CA-CERTIFICATES
+-----END CERTIFICATE-----
+----
+
+=== `auto-disk-provision-paths` [Experimentell]
+
+*Definition*: Einstellung, die es {harvester-product-name} ermöglicht, automatisch Festplatten hinzuzufügen, die dem angegebenen Glob-Muster als VM-Speicher entsprechen.
+
+Diese Einstellung fügt nur formatierte Festplatten hinzu, die im System eingebunden sind. Bei der Angabe mehrerer Muster trennen Sie die Werte mit Kommas.
+
+[CAUTION]
+==== 
+Diese Einstellung wird auf *alle Knoten* im Cluster angewendet. Alle Daten in den Speichergeräten *werden zerstört*.
+====
+
+*Standardwert*: Keine
+
+*Beispiel*:
+
+Das folgende Beispiel fügt Festplatten hinzu, die dem Glob-Muster `/dev/sd*` oder `/dev/hd*` entsprechen:
+
+----
+/dev/sd*,/dev/hd*
+----
+
+=== `auto-rotate-rke2-certs`
+
+*Definition*: Einstellung, die es Ihnen ermöglicht, Zertifikate für {rke2-product-name} Dienste automatisch zu rotieren. Diese Einstellung ist standardmäßig deaktiviert.
+
+Verwenden Sie das Feld `expiringInHours`, um den Gültigkeitszeitraum jedes Zertifikats (`1` bis `8759` Stunden) anzugeben. Wenn das Zertifikat innerhalb des angegebenen Zeitraums abläuft, ersetzt {harvester-product-name} das Zertifikat automatisch.
+
+Für weitere Informationen siehe den Abschnitt *Zertifikatsrotation* der https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/cluster-admin/manage-clusters/rotate-certificates.html[{rancher-product-name}] und https://documentation.suse.com/cloudnative/rke2/latest/en/advanced.html#_certificate_rotation[{rke2-product-name}] Dokumentation.
+
+Wenn Ihre Zertifikate abgelaufen sind, können Sie xref:hosts/hosts.adoc#_rotating_expired_certificates[sie manuell rotieren].
+
+*Standardwert*: `{"enable":false,"expiringInHours":240}`
+
+*Beispiel*:
+
+----
+{"enable":true,"expiringInHours":48}
+----
+
+=== `backup-target`
+
+*Definition*: Benutzerdefiniertes Sicherungsziel zum Speichern von VM-Sicherungen.
+
+Weitere Informationen finden Sie in der https://documentation.suse.com/cloudnative/storage/1.8/en/snapshots-backups/volume-snapshots-backups/configure-backup-target.html#_set_up_aws_s3_backupstore[{longhorn-product-name} Dokumentation].
+
+*Standardwert*: Keine
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "type": "s3",
+  "endpoint": "https://s3.endpoint.svc",
+  "accessKeyId": "test-access-key-id",
+  "secretAccessKey": "test-access-key",
+  "bucketName": "test-bup",
+  "bucketRegion": "us‑east‑2",
+  "cert": "",
+  "virtualHostedStyle": false
+}
+----
+
+=== `cluster-registration-url`
+
+*Definition*: URL, die verwendet wird, um den {harvester-product-name} Cluster in {rancher-product-name} für das Multi-Cluster-Management zu importieren.
+
+Wenn Sie diese Einstellung konfigurieren, wird ein neuer Pod mit dem Namen `cattle-cluster-agent-*` im Namespace `cattle-system` zu Registrierungszwecken erstellt. Dieser Pod verwendet das Container-Image `rancher/rancher-agent:related-version`, das nicht in die {harvester-product-name} ISO gepackt ist und stattdessen von {rancher-product-name} bestimmt wird. Die `related-version` ist normalerweise die gleiche wie die {rancher-product-name} Version. Wenn Sie beispielsweise {harvester-product-name} zu {rancher-product-name} v2.7.9 registrieren, ist das Image `rancher/rancher-agent:v2.7.9`. Für weitere Informationen siehe https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/other-installation-methods/air-gapped/publish-images.html#_1_find_the_required_assets_for_your_rancher_version[Finden Sie die erforderlichen Assets für Ihre Rancher-Version].
+
+Je nach Ihren Einstellungen wird das Image von einem der folgenden Standorte heruntergeladen:
+
+* {harvester-product-name} containerd-Registry: Sie können eine <<_containerd_registry, private Registry für den Cluster>> konfigurieren.
+* Docker Hub (docker.io): Dies ist die Standardoption, wenn Sie keine private Registry in {rancher-product-name} konfigurieren.
+
+Alternativ können Sie eine Kopie des Images erhalten und es manuell auf alle Knoten hochladen.
+
+*Standardwert*: Keine
+
+*Beispiel*:
+
+----
+https://172.16.0.1/v3/import/w6tp7dgwjj549l88pr7xmxb4x6m54v5kcplvhbp9vv2wzqrrjhrc7c_c-m-zxbbbck9.yaml
+----
+
+=== `containerd-registry`
+
+*Definition*: Konfiguration einer privaten Registry, die für den {harvester-product-name} Cluster erstellt wurde.
+
+Der Wert wird in der `registries.yaml` Datei jedes Knotens gespeichert (Pfad: `/etc/rancher/rke2/registries.yaml`). Für weitere Informationen siehe https://documentation.suse.com/cloudnative/rke2/latest/en/install/containerd_registry_configuration.html[Containerd-Registry-Konfiguration] in der {rke2-product-name} Dokumentation.
+
+Aus Sicherheitsgründen entfernt {harvester-product-name} automatisch den Benutzernamen und das Passwort, die für die private Registry konfiguriert sind, nachdem diese Anmeldeinformationen in der `registries.yaml` Datei gespeichert wurden.
+
+*Beispiel*:
+
+image::advanced/containerd-registry.png[containerd-Registry]
+
+[,json]
+----
+{
+  "Mirrors": {
+    "docker.io": {
+      "Endpoints": ["https://myregistry.local:5000"],
+      "Rewrites": null
+    }
+  },
+  "Configs": {
+    "myregistry.local:5000": {
+      "Auth": {
+        "Username": "testuser",
+        "Password": "testpassword"
+      },
+      "TLS": {
+        "InsecureSkipVerify": false
+      }
+    }
+  }
+}
+----
+
+=== `csi-driver-config`
+
+*Definition*: Konfiguration, die erforderlich ist, um Drittanbieter-CSI-Treiber zu verwenden, die im Cluster installiert sind.
+
+Sie müssen die folgenden Informationen konfigurieren, bevor Sie Funktionen im Zusammenhang mit Sicherungen und Snapshots verwenden:
+
+* Provisioner für den installierten Drittanbieter-CSI-Treiber
+* `volumeSnapshotClassName`: Name des `VolumeSnapshotClass`, der zur Erstellung von Volume-Snapshots oder VM-Snapshots verwendet wird.
+* `backupVolumeSnapshotClassName`: Name des `VolumeSnapshotClass`, der zur Erstellung von VM-Sicherungen verwendet wird.
+
+*Standardwert*:
+
+----
+{
+  "driver.longhorn.io": {
+    "volumeSnapshotClassName": "longhorn-snapshot",
+    "backupVolumeSnapshotClassName": "longhorn"
+  }
+}
+----
+
+=== `csi-online-expand-validation`
+
+*Definition*: Einstellung, die es Ihnen ermöglicht, Speicheranbieter mit bestätigter Unterstützung für die Online-Volume-Erweiterung als validiert zu kennzeichnen.
+
+Je nach zugrunde liegendem Speicheranbieter müssen Sie möglicherweise zusätzliche Schritte unternehmen, um die Funktion zur Online-Volume-Erweiterung zu nutzen.
+
+* *{longhorn-product-name}*: {harvester-product-name} betrachtet {longhorn-product-name} als unterstützend für die Online-Volume-Erweiterung, auch wenn Unterschiede zwischen den Versionen der Longhorn-Daten-Engine bestehen. Derzeit unterstützt die V1-Daten-Engine die Online-Volume-Erweiterung vollständig, während die V2-Daten-Engine die Volume-Erweiterung überhaupt nicht unterstützt (unabhängig vom Anhangszustand des Volumes). Der {harvester-product-name}-Webhook verwaltet die Unterschiede zwischen diesen Versionen.
+
+* *Third-Party-Speicher*: {harvester-product-name} lehnt standardmäßig Anfragen zur Online-Volume-Erweiterung für Drittanbieter-Speicher ab. Wenn Sie bestätigt haben, dass Ihr Speicheranbieter die Online-Volume-Erweiterung unterstützt, können Sie diese Einstellung verwenden, um diesen Speicheranbieter als validiert zu kennzeichnen und {harvester-product-name} zu zwingen, die zugehörigen Anfragen zur Online-Erweiterung zuzulassen.
+
+*Standardwert*: `{"driver.longhorn.io":true}`
+
+=== `default-vm-termination-grace-period-seconds`
+
+*Definition*: Anzahl der Sekunden, die {harvester-product-name} wartet, bevor eine VM, die über die Benutzeroberfläche gestoppt wurde, zwangsweise heruntergefahren wird.
+
+{harvester-product-name} sendet ein Signal zum sanften Herunterfahren an jede VM, die über die Benutzeroberfläche gestoppt wurde. Wenn der Prozess des sanften Herunterfahrens innerhalb der angegebenen Anzahl von Sekunden nicht abgeschlossen ist, fährt {harvester-product-name} die VM zwangsweise herunter.
+
+*Standardwert*: `120`
+
+=== `http-proxy`
+
+*Definition*: HTTP-Proxy, der zum Zugriff auf externe Dienste verwendet wird, einschließlich des Herunterladens von Images und der Sicherung auf S3-Diensten.
+
+[CAUTION]
+====
+Die Änderung dieser Einstellung kann dazu führen, dass Cluster mit einem einzelnen Knoten vorübergehend nicht verfügbar oder nicht zugänglich werden.
+====
+
+*Standardwert*: `{}`
+
+*Unterstützte Optionen und Werte*:
+
+* Proxy-URL für HTTP-Anfragen: `"httpProxy": "http://<username>:<pswd>@<ip>:<port>"`
+* Proxy-URL für HTTPS-Anfragen: `"httpsProxy": "https://<username>:<pswd>@<ip>:<port>"`
+* Durch Kommas getrennte Liste von Hostnamen und/oder CIDRs: `"noProxy": "<hostname | CIDR>"`
+
+Sie müssen wichtige Informationen im Feld `noProxy` angeben, wenn Sie die folgenden Optionen oder Einstellungen konfiguriert haben:
+
+|===
+| Konfigurierte Option/Einstellung | Erforderlicher Wert in `noProxy` | Ursache
+
+| `httpProxy` und `httpsProxy`
+| CIDR des Knotens
+| Das Nicht-Spezifizieren des CIDR des Knotens kann den Cluster beeinträchtigen.
+
+| `cluster-registration-url`
+| Host von `cluster-registration-url`
+| Die Hostinformationen ermöglichen den Zugriff auf den Cluster von {rancher-product-name}.
+|===
+
+{harvester-product-name} fügt notwendige Adressen zu benutzerdefinierten `noProxy` Werten hinzu (zum Beispiel,`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`). Dies stellt sicher, dass der interne Datenverkehr wie erwartet fließt.
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "httpProxy": "http://my.proxy",
+  "httpsProxy": "https://my.proxy",
+  "noProxy": "some.internal.svc,172.16.0.0/16"
+}
+----
+
+=== `log-level`
+
+*Definition*: Protokollebene für den Host.
+
+*Standardwert*: `info`
+
+*Unterstützte Optionen und Werte*:
+
+* `panic`: Wenig ausführliche Protokollebene
+* `fatal`
+* `error`
+* `warn`, `warning`
+* `info`
+* `debug`
+* `trace`: Sehr ausführliche Protokollebene
+
+*Beispiel*:
+
+----
+debug
+----
+
+=== `longhorn-v2-data-engine-enabled` [Experimentell]
+
+*Definition*: Einstellung, die den Longhorn V2 Data Engine aktiviert und deaktiviert.
+
+Wenn auf `true` gesetzt, lädt {harvester-product-name} automatisch die für den Longhorn V2 Data Engine erforderlichen Kernel-Module und versucht, 1024 × 2 MiB große Seiten (zum Beispiel 2 GiB RAM) auf allen Knoten zuzuweisen. 
+
+Ändern dieser Einstellung startet {rke2-product-name} automatisch auf allen Knoten neu, hat jedoch keine Auswirkungen auf laufende virtuelle Maschinen.
+
+[TIP]
+====
+Wenn Sie Fehlermeldungen erhalten, die den Satz "nicht genügend hugepages-2Mi-Kapazität" enthalten, lassen Sie etwas Zeit, um den Fehler zu beheben. Wenn der Fehler weiterhin besteht, starten Sie die betroffenen Knoten neu.
+
+Um den Longhorn V2 Data Engine auf bestimmten Knoten (zum Beispiel Knoten mit weniger Verarbeitungs- und Arbeitsspeicherressourcen) zu deaktivieren, gehen Sie zum *Hosts*-Bildschirm und fügen Sie an den Zielknoten das folgende Label hinzu:
+
+* label: `node.longhorn.io/disable-v2-data-engine`
+* value: `true`
+====
+
+*Standardwert*: `false`
+
+*Beispiel*:
+
+```
+true
+```
+
+=== `max-hotplug-ratio`
+
+*Definition*: Einstellung, die die standardmäßige maximale Menge an CPU- und RAM-Ressourcen bestimmt, die einer laufenden virtuellen Maschine zur Verfügung stehen. Dieses Verhältnis wird mit der Menge an CPU- und RAM-Ressourcen multipliziert, die Sie bei der Erstellung der virtuellen Maschine zugewiesen haben.
+
+[sidebar]
+Maximal verfügbare Ressource zur Laufzeit = (Ressource, die während der Erstellung der virtuellen Maschine zugewiesen wurde) x (`max-hotplug-ratio` Wert)
+
+*Standardwert*: `4`
+
+*Unterstützte Werte*: `1` bis `20`
+
+*Beispiel*:
+
+Die `max-hotplug-ratio` ist auf `4` gesetzt.
+
+|===
+| Ressource | Zugewiesene Menge | Maximal verfügbare Menge
+
+| CPU-Kerne
+| `1`
+| `4`
+
+| RAM (Gi)
+| `2`
+| `8`
+|===
+
+=== `ntp-servers`
+
+*Definition*: NTP-Server zur Zeitsynchronisation auf Knoten.
+
+Sie können NTP-Server während der xref:installation-setup/config/configuration-file.adoc#_os_ntp_servers[Installation] definieren und die Adressen nach der Installation aktualisieren.
+
+[CAUTION]
+====
+Änderungen an der Serveradressliste werden auf alle Knoten angewendet.
+====
+
+*Standardwert*: ""
+
+*Beispiel*:
+
+----
+{
+  "ntpServers": [
+    "0.suse.pool.ntp.org",
+    "1.suse.pool.ntp.org"
+  ]
+}
+----
+
+=== `overcommit-config`
+
+*Definition*: Prozentsatz der physischen Rechen-, RAM- und Speicherressourcen, die für die VM-Nutzung zugewiesen werden können.
+
+Überbuchung wird verwendet, um die Zuweisung physischer Ressourcen zu optimieren, insbesondere wenn nicht erwartet wird, dass VMs die zugewiesenen Ressourcen die meiste Zeit vollständig nutzen. Das Setzen von Werten über 100 % ermöglicht die Planung mehrerer VMs, selbst wenn die physischen Ressourcen theoretisch vollständig zugewiesen sind.
+
+*Standardwerte*: `{ "cpu":1600, "memory":150, "storage":200 }`
+
+Mit den Standardwerten wäre es möglich, Folgendes zu planen:
+
+* 16x die Anzahl der physischen CPUs auf einem Host
+* 1,5x die Menge an physischem RAM auf einem Host
+* 2x die Menge an physischem Speicher in {longhorn-product-name}
+
+Eine VM, die so konfiguriert ist, dass sie 2 CPUs (entspricht 2.000 milliCPU) verwendet, kann die volle Zuteilung verbrauchen, solange die Ressourcen verfügbar sind. Wenn der Host jedoch schwere Arbeitslasten ausführt und ein Überbelegungswert festgelegt ist (zum Beispiel 1600 %), fordert {harvester-product-name} nur 125 milliCPU vom Kubernetes-Scheduler an (2000/16 = 125 milliCPU).
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "cpu": 1000,
+  "memory": 200,
+  "storage": 300
+}
+----
+
+=== `release-download-url`
+
+*Definition*: URL zum Herunterladen der für Upgrades erforderlichen Software.
+
+{harvester-product-name} ruft die ISO-URL und die Prüfsumme aus der `${URL}/${VERSION}/version.yaml`-Datei ab, die über die konfigurierte URL zugänglich ist.
+
+*Standardwert*: `https://releases.rancher.com/harvester`
+
+*Beispiel (version.yaml)*:
+
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Version
+metadata:
+  name: ${VERSION}
+  namespace: harvester-system
+spec:
+  isoChecksum: ${ISO_CHECKSUM}
+  isoURL: ${ISO_URL}
+----
+
+=== `server-version`
+
+*Definition*: Version von {harvester-product-name}, die auf den Knoten installiert ist.
+
+*Beispiel*:
+
+----
+v1.0.0-abcdef-head
+----
+
+=== `ssl-certificates`
+
+*Definition*: SSL-Zertifikate für die UI und API.
+
+[CAUTION]
+====
+Die Änderung dieser Einstellung kann dazu führen, dass Cluster mit einem einzelnen Knoten vorübergehend nicht verfügbar oder nicht zugänglich werden.
+====
+
+*Standardwert*: `{}`
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "ca": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "publicCertificate": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nSOME-PRIVATE-KEY-ENCODED-IN-PEM-FORMAT\n-----END RSA PRIVATE KEY-----"
+}
+----
+
+=== `ssl-parameters`
+
+*Definition*: Aktivierte SSL/TLS-Protokolle und -Cipher der UI und API.
+
+[IMPORTANT]
+.wichtig
+====
+Wenn Sie diese Einstellung falsch konfigurieren und nicht auf die UI und API zugreifen können, siehe xref:troubleshooting/cluster.adoc#_i_cant_access_suse_virtualization_after_i_changed_ssltls_enabled_protocols_and_ciphers[Fehlerbehebung].
+====
+
+*Standardwert*: Keine
+
+*Unterstützte Optionen und Werte*:
+
+* `protocols`: Aktivierte Protokolle.
+* `ciphers`: Aktivierte Cipher.
+
+Für weitere Informationen zu den unterstützten Optionen siehe https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-protocols[`ssl-protocols`] und https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-ciphers[`ssl-ciphers`] in der Dokumentation des Ingress-Nginx Controllers.
+
+Wenn Sie keine Werte angeben, verwendet {harvester-product-name} `TLSv1.2` und `ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305`.
+
+*Beispiel*:
+
+----
+{
+  "protocols": "TLSv1.2 TLSv1.3",
+  "ciphers": "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305"
+}
+----
+
+=== `storage-network`
+
+*Definition*: Getrenntes Speichernetzwerk für {longhorn-product-name}-Verkehr.
+
+Standardmäßig verwendet {longhorn-product-name} das Verwaltungsnetzwerk, das auf eine einzelne Schnittstelle beschränkt ist und mit clusterweiten Arbeitslasten geteilt wird. Wenn Ihre Implementierung eine Netzwerksegmentierung erfordert, können Sie ein xref:networking/storage-network.adoc[Speichernetzwerk] verwenden, um {longhorn-product-name} den Datenverkehr innerhalb des Clusters zu isolieren.
+
+[IMPORTANT]
+.wichtig
+====
+Fahren Sie alle VMs herunter, bevor Sie diese Einstellung konfigurieren.
+
+Geben Sie einen IP-Bereich im IPv4 CIDR-Format an. Die Anzahl der IPs muss viermal so hoch sein wie die Anzahl Ihrer Clusterknoten.
+====
+
+*Standardwert*: ""
+
+*Beispiel*:
+
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "storage",
+  "range": "192.168.0.0/24"
+}
+----
+
+=== `support-bundle-image`
+
+*Definition*: Support-Bundle-Image, mit verschiedenen Versionen verfügbar in https://hub.docker.com/r/rancher/support-bundle-kit/tags[`rancher/support-bundle-kit`].
+
+*Standardwert*: `support-bundle-kit` Image, das in das {harvester-product-name} ISO gepackt ist und spezifisch für jede {harvester-product-name} Version ist.
+
+*Unterstützte Optionen und Werte*:
+
+Der Wert ist ein JSON-Objektliteral, das die folgenden Schlüssel-Wert-Paare enthält:
+
+* `repository`: Name des Repositories, das das Support-Bundle-Image speichert.
++
+* `tag`:  Tag, der dem Support-Bundle-Image zugewiesen ist.
++
+* `imagePullPolicy`: Pull-Policy des Support-Bundle-Images. Die unterstützten Werte sind `IfNotPresent`, `Always` und `Never`. Für weitere Informationen siehe https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy[Image-Pull-Policy] in der Kubernetes-Dokumentation.
+
+*Beispiel*:
+
+----
+{
+  "repository": "rancher/support-bundle-kit",
+  "tag": "v0.0.25",
+  "imagePullPolicy": "IfNotPresent"
+}
+----
+
+In diesem Beispiel ist der Standard-Image-Tag des Clusters `v0.0.25`.
+
+Die CLI zeigt das folgende `support-bundle-image` Einstellungsobjekt an:
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'  // default value, automatically set
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+Nach einiger Zeit wird ein neuerer Image-Tag (`v0.0.36`) im `value` Feld über die UI angegeben.
+
+image::advanced/support-bundle-image-set-customized-value.png[]
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value
+```
+
+Schließlich wird dieses Cluster aktualisiert und das Objekt ändert sich erneut.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default value, automatically updated after upgrade
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value is kept unchanged
+```
+
+Der Wert von `tag` im `value` Feld ist `v0.0.36`, während der Wert von `tag` im `default` Feld `v0.0.38` ist.
+
+Um die veraltete Einstellung zu löschen und den Standard-Image-Tag zu verwenden, führen Sie den folgenden Befehl aus, entfernen Sie das `value` Feld und speichern Sie die Änderungen.
+
+```
+$ kubectl edit settings.harvesterhci.io support-bundle-image
+```
+
+Das Objekt erscheint wie folgt, nachdem das `value` Feld entfernt wurde.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+Der *Standardwert verwenden* Button in der UI kann verwendet werden, um den Inhalt des `default` Feldes in das `value` Feld zu kopieren.
+
+image::advanced/support-bundle-image-set-use-default-value.png[]
+
+Das Objekt erscheint wie folgt, nachdem die Änderungen gespeichert wurden.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // copied from default
+```
+
+Wenn das Cluster in Zukunft aktualisiert wird, können die Inhalte des `value` Feldes erneut veraltet sein, da der Standard-Image-Tag wahrscheinlich geändert wird.
+
+[NOTE]
+====
+* Der Wert von `tag` im `default` Feld basiert immer auf dem Image, das in das {harvester-product-name} ISO gepackt ist. Dieses Feld wird automatisch aktualisiert, wann immer das Cluster aktualisiert wird.
++
+* Das `default` Feld wird verwendet, wenn das `value` Feld nicht gesetzt oder leer gelassen wird. {harvester-product-name} überprüft, ob das Standard-Image im Cluster gespeichert und aktuell ist.
++
+* Die Konfiguration dieser Einstellung ist nicht erforderlich. Wenn Sie sich entscheiden, ein anderes Image-Tag im `value` Feld anzugeben, denken Sie daran, dass dieses Tag veraltet sein kann, wenn das Cluster aktualisiert wird.
++
+* Verwenden Sie den Befehl `$ kubectl edit settings.harvesterhci.io support-bundle-image`, um das `value` Feld zu leeren.
++
+* Der *Standardwert verwenden*-Button in der UI kopiert nur den Inhalt des `default` Feldes in das `value` Feld. Sie können dies verwenden, um ein veraltetes Image-Tag zu ersetzen, aber das kopierte Tag wird ebenfalls irgendwann veraltet sein (wenn das Cluster aktualisiert wird und das `default` Feld aktualisiert wird).
++
+* Wenn Ihr Cluster in einer Air-Gapped-Umgebung ist und Sie ein nicht-standardmäßiges Image-Tag im `value`-Feld angegeben haben, stellen Sie sicher, dass das Image in der lokalen containerd-Registry verfügbar ist. {harvester-product-name} wird kein xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[Support-Bundle generieren], wenn das Image nicht verfügbar ist.
+====
+
+=== `support-bundle-namespaces`
+
+*Definition*: Zusätzliche Namespaces, die Sie verwenden können, wenn Sie xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[ein Support-Bundle generieren].
+
+Standardmäßig sammelt das Support-Bundle nur Ressourcen aus den folgenden vordefinierten Namespaces:
+
+* cattle-dashboards
+* cattle-fleet-local-system
+* cattle-fleet-system
+* cattle-fleet-clusters-system
+* cattle-monitoring-system
+* fleet-local
+* harvester-system
+* lokal
+* longhorn-system
+* cattle-logging-system
+
+Die ausgewählten Namespaces werden der Liste der vordefinierten Namespaces hinzugefügt.
+
+*Standardwert*: Keine
+
+=== `support-bundle-timeout`
+
+*Definition*: Anzahl der Minuten, die {harvester-product-name} für den Abschluss des Prozesses zur Erstellung des Support-Bundles zulässt.
+
+Der Prozess gilt als fehlgeschlagen, wenn die Datensammlung und die Datei-Paketierungsaufgaben nicht innerhalb der konfigurierten Anzahl von Minuten abgeschlossen sind. {harvester-product-name} setzt die Generierung von Support-Bundles, die abgelaufen sind, nicht fort oder versucht sie nicht erneut. Wenn der Wert `0` ist, ist die Timeout-Funktion deaktiviert.
+
+*Standardwert*: `10`
+
+=== `support-bundle-expiration`
+
+*Definition*: Anzahl der Minuten, die {harvester-product-name} wartet, bevor ein Support-Bundle gelöscht wird, das verpackt, aber nicht heruntergeladen (entweder absichtlich oder erfolglos) oder aufbewahrt wurde.
+
+Sie können einen Wert größer oder gleich 0 angeben. Wenn der Wert 0 ist, verwendet {harvester-product-name} den Standardwert.
+
+*Standardwert*: `30`
+
+=== `support-bundle-node-collection-timeout`
+
+*Definition*: Anzahl der Minuten, die {harvester-product-name} für die Sammlung von Protokollen und Konfiguration auf den Knoten für das Support-Bundle zulässt.
+
+Wenn der Sammelprozess nicht innerhalb der vorgegebenen Zeit abgeschlossen ist, erlaubt {harvester-product-name} Ihnen dennoch, das Support-Bundle herunterzuladen (ohne die nicht gesammelten Daten). Sie können einen Wert größer oder gleich 0 angeben. Wenn der Wert 0 ist, verwendet {harvester-product-name} den Standardwert.
+
+*Standardwert*: `30`
+
+=== `upgrade-checker-enabled`
+
+*Definition*: Einstellung, die automatisch nach verfügbaren Upgrades sucht.
+
+*Standardwert*: `true`
+
+*Beispiel*:
+
+----
+false
+----
+
+=== `upgrade-checker-url`
+
+*Definition*: URL, die verwendet wird, um nach verfügbaren Upgrades zu suchen.
+
+Diese Einstellung kann nur verwendet werden, wenn die Einstellung `upgrade-checker-enabled` auf `true` gesetzt ist.
+
+*Standardwert*: `https://harvester-upgrade-responder.rancher.io/v1/checkupgrade`
+
+*Beispiel*:
+
+----
+https://your.upgrade.checker-url/v99/checkupgrade
+----
+
+=== `upgrade-config`
+
+*Definition*: Upgrade-bezogene Konfiguration.
+
+*Standardwert*:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "sequential"
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "auto"
+    }
+  },
+  "restoreVM": false,
+  "logReadyTimeout": "5"
+}
+----
+
+*Unterstützte Optionen und Felder*:
+
+* `imagePreloadOption`: Optionen für die Phase des Bildvorladens.
++
+Die vollständige ISO enthält die Kernkomponenten des Betriebssystems und alle erforderlichen Container-Images. {harvester-product-name} kann diese Container-Images während der Installation und Upgrades auf jeden Knoten vorladen. Wenn Arbeitslasten auf Verwaltungs- und Arbeitsknoten geplant sind, sind die Container-Images einsatzbereit.
++
+** `strategy`: Strategie für das Bildvorladen.
++
+*** `type`: Art der Strategie für das Bildvorladen.
++
+**** `sequential`: Die Container-Images aus der Ziel-ISO werden auf jeden Knoten vorgeladen. Dies ist die Standardoption.
++
+**** `skip`: Die Container-Images werden nicht auf jeden Knoten vorgeladen. *Verwenden Sie diese Option nicht in Produktionsumgebungen.*
++
+[IMPORTANT]
+====
+Wenn Sie sich entscheiden, `skip` zu verwenden, stellen Sie sicher, dass die folgenden Anforderungen erfüllt sind:
+
+* Sie haben eine private Container-Registry, die alle erforderlichen Images enthält.
+* Ihr Cluster hat Zugang zum Hochgeschwindigkeitsinternet und kann bei Bedarf alle Images von Docker Hub abrufen.
+
+Beachten Sie mögliche Unterbrechungen des Internetdienstes und wie nah Sie an Ihrem https://www.docker.com/increase-rate-limits/[Docker Hub-Rate-Limit] sind. Das Fehlschlagen beim Herunterladen eines der erforderlichen Images kann dazu führen, dass das Upgrade fehlschlägt und der Cluster in einem Zwischenzustand bleibt.
+====
++
+**** `parallel` (*experimentell*): Knoten laden Images in Chargen vor. Sie können dies mit der `concurrency`-Option anpassen.
++
+*** `concurrency`: Anzahl der Knoten, die gleichzeitig Images vorladen können. Diese Option tritt nur in Kraft, wenn `type` auf `parallel` gesetzt ist.
++
+Der Standardwert ist `0`, was einer Anpassung an die Knotenanzahl des Clusters entspricht. Die Verwendung von `0` ermöglicht es dem System, dynamisch der Skalierung des Clusters zu folgen. Werte, die höher sind als die Knotenanzahl des Clusters, werden als `0` behandelt, während niedrigere Werte als ungültig betrachtet und abgelehnt werden.
++
+[NOTE]
+====
+{harvester-product-name} stellt einen Upgrade-Repo-Dienst im Cluster bereit, der als HTTP-Server für Knoten dient, die die Container-Images vorladen müssen. Wenn ein `concurrency`-Wert gesetzt ist, lädt jede Charge von Knoten die Container-Images parallel von diesem Upgrade-Repo herunter. Deshalb müssen Sie die Geschwindigkeit des {harvester-product-name}-Managementnetzwerks und die Lesegeschwindigkeit der Standardfestplatte für {longhorn-product-name} berücksichtigen.
+====
+
+* `nodeUpgradeOption`: Definition, wie {harvester-product-name} Knoten-Upgrades durchführen muss.
++
+Das Knoten-Upgrade ist eine atomare Operation, die das Upgrade der RKE2-Komponenten und des Betriebssystems des Knotens umfasst. Das Upgrade wird entweder vollständig abgeschlossen oder schlägt fehl, ohne einen halb-fertigen Zustand.
++
+Um einen Zielknoten für das Upgrade vorzubereiten, versucht {harvester-product-name} zunächst, alle laufenden virtuellen Maschinen auf andere Knoten live zu migrieren. Virtuelle Maschinen, die nicht live migriert werden können, werden automatisch heruntergefahren, um potenzielle Störungen und Probleme während der nachfolgenden Upgrade-Schritte zu vermeiden.
++
+** `strategy`: Upgrade-Strategie für Knoten.
++
+*** `mode`: Modus der Upgrade-Strategie für Knoten.
++
+**** `auto`: Knoten-Upgrades beginnen automatisch. Dies ist der Standardwert.
+**** `manual`: Knoten-Upgrades werden pausiert, bis Sie spezifische Maßnahmen ergreifen, um den Prozess fortzusetzen.
++
+*** `pauseNodes`: Liste der Knoten, die von automatischen Upgrades ausgeschlossen werden müssen.
++
+Wenn das Feld `mode` auf `manual` gesetzt ist und Sie keine Knotennamen in diesem Feld angeben, werden die Upgrades für alle Knoten pausiert. Wenn das Feld `mode` auf `auto` gesetzt ist, werden die in diesem Feld angegebenen Knotennamen ignoriert und die Knoten-Upgrades beginnen automatisch.
++
+[IMPORTANT]
+====
+Das Upgrade der in diesem Feld aufgeführten Knoten ist _dauerhaft pausiert_, bis Sie spezifische Maßnahmen ergreifen, um xref:upgrades/upgrades.adoc#_resuming_a_paused_node_upgrade[den Prozess wieder aufzunehmen]. Da {harvester-product-name} die Knoten nacheinander upgradet, bedeutet dies, dass der gesamte Upgrade-Fortschritt ebenfalls pausiert wird. 
+====
++
+Beispiel:
++
+[,json]
+----
+"pauseNodes": ["node-0", "node-2"]
+----
+
+* `restoreVM`: Option, die es {harvester-product-name} ermöglicht, zuvor laufende xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[nicht-migrierbare virtuelle Maschinen] nach dem Upgrade automatisch wiederherzustellen, nachdem das Upgrade *erfolgreich* abgeschlossen wurde. Sie können einen der folgenden Werte angeben:
++
+** `true`: {harvester-product-name} fährt *laufende* und *pausierte* nicht-migrierbare virtuelle Maschinen auf jedem Knoten gewaltsam herunter. Nach Abschluss des Upgrades werden die zuvor laufenden virtuellen Maschinen automatisch neu gestartet, während die pausierten virtuellen Maschinen weiterhin heruntergefahren bleiben.
+** `false`: Dies ist der Standardwert. In Multi-Knoten-Umgebungen müssen Sie alle nicht-migrierbaren virtuellen Maschinen beenden, um das Upgrade fortzusetzen. {harvester-product-name} startet diese virtuellen Maschinen nach Abschluss des Upgrades nicht neu.
++
+[NOTE]
+====
+Alle virtuellen Maschinen werden in Single-Knoten-Umgebungen als nicht-migrierbar betrachtet. {harvester-product-name} fährt alle virtuellen Maschinen gewaltsam herunter, bevor der Upgrade-Prozess gestartet wird.
+====
+
+* `logReadyTimeout`: Anzahl der Minuten, die {harvester-product-name} für die Erstellung der Upgrade-Protokollierungsinfrastruktur zulässt.
++
+** Standardwert: `"5"`
+** Gültige Werte: `""`, `"1"` bis `"20"` (in doppelte Anführungszeichen eingeschlossen)
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "parallel",
+      "concurrency": 2
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "manual",
+      "pauseNodes": [
+        "node-3"
+      ]
+    }
+  }
+  "restoreVM": true,
+  "logReadyTimeout": "5"
+}
+----
+
+=== `vip-pools`
+
+*Versionen*: Ab v1.2.0 veraltet (Verwenden Sie xref:networking/ip-pool.adoc[IP-Pools] stattdessen.)
+
+*Definition*: Globale oder Namespace-spezifische IP-Adresspools des VIP nach CIDR oder IP-Bereich.
+
+*Standardwert*: `{}`
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "default": "172.16.0.0/24,172.16.1.0/24",
+  "demo": "172.16.2.50-172.16.2.100,172.16.2.150-172.16.3.200"
+}
+----
+
+=== `vm-force-reset-policy`
+
+*Definition*: Einstellung, die es Ihnen ermöglicht, die Neuplanung einer virtuellen Maschine zu erzwingen, wenn der Knoten, auf dem sie läuft, nicht mehr verfügbar ist.
+
+Wenn der Zustand des Knotens auf `Not Ready` wechselt, wird die virtuelle Maschine zwangsweise gelöscht und nach der konfigurierten Anzahl von Sekunden auf einen verfügbaren Knoten neu geplant.
+
+Wenn der Knoten nicht mehr verfügbar ist oder ausgeschaltet wird, startet die virtuelle Maschine nur neu und migriert nicht.
+
+*Unterstützte Optionen*:
+
+* `period`: Anzahl der Sekunden, die {harvester-product-name} wartet, bevor der `kubevirt.io/drain` Taint zu den fehlgeschlagenen Knoten hinzugefügt wird. Diese Option löst die Migration der virtuellen Maschine aus.
+* `vmMigrationTimeout`: Anzahl der Sekunden, die {harvester-product-name} wartet, bevor der `node.kubernetes.io/out-of-service` Taint zu den fehlgeschlagenen Knoten hinzugefügt wird. Diese Option erzwingt die Bereinigung der verwaisten Ressourcen.
+
+*Standardwert*: `{"enable":true, "period":15, "vmMigrationTimeout": 180}`
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "enable": "true",
+  "period": 15,
+  "vmMigrationTimeout": 180
+}
+----
+
+=== `vm-migration-network`
+
+*Definition*: Getrenntes Netzwerk für den Migrationstraffic der virtuellen Maschinen.
+
+Standardmäßig verwendet {harvester-product-name} das integrierte Clusternetzwerk `mgmt` für die Migration von virtuellen Maschinen. `mgmt` ist auf eine einzige Schnittstelle beschränkt und wird mit clusterweiten Arbeitslasten geteilt. Wenn Ihre Implementierung eine Netzwerksegmentierung erfordert, können Sie ein xref:networking/vm-migration-network.adoc[VM-Migrationsnetzwerk] verwenden, um den Migrationstraffic zu isolieren.
+
+[IMPORTANT]
+====
+Geben Sie einen IP-Bereich im IPv4 CIDR-Format an. Die Anzahl der IP-Adressen muss größer oder gleich der Anzahl Ihrer Clusterknoten sein.
+====
+
+*Standardwert*: ""
+
+*Beispiel*:
+
+[,json]
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "vm-migration",
+  "range": "192.168.1.0/24"
+}
+----
+
+=== `volume-snapshot-class`
+
+*Definition*: VolumeSnapshotClassName für den VolumeSnapshot und VolumeSnapshotContent, wenn eine VM in einen Namespace wiederhergestellt wird, der die Quell-VM nicht enthält.
+
+*Standardwert*: `longhorn`
+
+*Beispiel*:
+
+`longhorn`
+
+== UI-Einstellungen
+
+=== `branding`
+
+*Definition*: Einstellung, die es Ihnen ermöglicht, die Benutzeroberfläche global neu zu gestalten, indem Sie den Produktnamen, Logos und das Farbschema anpassen.
+
+*Standardwert*: *Harvester*
+
+[CAUTION]
+====
+Da diese Einstellung Teil der `settings.management.cattle.io` benutzerdefinierten Ressource ist, können Sie keine der unterstützten Optionen (zum Beispiel `Logo` und `Primary Color`) mit einer xref:installation-setup/config/configuration-file.adoc#_system_settings[Konfigurationsdatei] konfigurieren.
+====
+
+image::advanced/branding.png[containerd-Registry]
+
+*Unterstützte Optionen und Werte*:
+
+* *Private Label*: Produktname oder anderer Text, der "Harvester" an den meisten Stellen in der Benutzeroberfläche ersetzt.
+* *Logo*: Logo-Bild in der obersten Navigationsleiste. Sie müssen Logos für sowohl den hellen als auch den dunklen Modus hochladen.
+* *Favicon*: Kleines Bild, das neben dem Seitentitel im Browser-Tab angezeigt wird.
+* *Primärfarbe*: Hauptfarbe, die in der gesamten Benutzeroberfläche verwendet wird.
+* *Linkfarbe*: Farbe, die für den Linktext in der gesamten Benutzeroberfläche verwendet wird.
+
+=== `ui-index`
+
+*Definition*: HTML-Indexstandort für die Benutzeroberfläche.
+
+*Standardwert*: `https://releases.rancher.com/harvester-ui/dashboard/latest/index.html`
+
+*Beispiel*:
+
+----
+https://your.static.dashboard-ui/index.html
+----
+
+=== `ui-path`
+
+*Definition*: Pfad, der den Standort von `index.html` beschreibt, der verwendet wird, um auf die Benutzeroberfläche zuzugreifen.
+
+`ui-path` dient als Einstiegspunkt zur Benutzeroberfläche und ist nur in den folgenden Situationen aktiv:
+
+* Der Wert von `ui-source` ist `bundled`.
+* Der Wert von `ui-source` ist `auto`, aber `ui-index` kann die HTML-Datei nicht abrufen.
+
+*Standardwert*: `/usr/share/harvester/harvester`
+
+*Beispiele*:
+
+`index.html` wird in einem Container in `/home/samplefolder` gespeichert. Der Wert von `ui-source` ist `bundled`.
+
+Szenario 1: Der Wert von `ui-path` ist `/home/samplefolder`. Wann immer Sie auf die Benutzeroberfläche zugreifen, wird der Inhalt von `/home/samplefolder/index.html` angezeigt.
+
+Szenario 2: Der Wert von `ui-index` verweist auf eine Seite, die nicht verfügbar oder nicht existent ist (zum Beispiel `notexist-example.com/index.html`). Wenn Sie zum ersten Mal auf die Benutzeroberfläche zugreifen, wird der Inhalt von `/home/samplefolder/index.html` angezeigt. Wenn Sie jedoch die `ui-index`-Einstellung ändern, um den Standardwert zu verwenden, und die Benutzeroberfläche erneut aufrufen, wird der Inhalt von `/home/samplefolder/index.html` weiterhin angezeigt (auch wenn der neue `ui-index`-Wert auf eine verfügbare Seite verweist). Für weitere Informationen siehe https://github.com/harvester/harvester/issues/6066[Issue #6066].
+
+=== `ui-source`
+
+*Definition*: Einstellung, die es Ihnen ermöglicht, zu konfigurieren, wie die Benutzeroberfläche geladen wird.
+
+*Standardwert*: `auto`
+
+*Unterstützte Werte*:
+
+* `auto`: Erkennt automatisch, ob die gebündelte Benutzeroberfläche verwendet werden soll oder nicht.
+* `external`: Verwendet die externe Benutzeroberfläche aus der ui-index-URL.
+* `bundled`: Verwendet die gebündelte Benutzeroberfläche vom lokalen {harvester-product-name}-Server.
+
+*Beispiel*:
+
+----
+external
+----

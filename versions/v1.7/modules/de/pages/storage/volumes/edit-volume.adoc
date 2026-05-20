@@ -1,0 +1,39 @@
+= Ein Volume bearbeiten
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+Nachdem Sie ein Volume erstellt haben, können Sie Ihr Volume bearbeiten, indem Sie auf die `⋮`-Schaltfläche klicken und die `Edit Config`-Option auswählen.
+
+== Ein Volume erweitern
+
+Sie können ein Volume erweitern, indem Sie den Wert des `Size`-Parameters direkt erhöhen. Um die Erweiterung vor Störungen durch unerwartete Daten R/W zu schützen, unterstützt {harvester-product-name} nur `offline` Erweiterungen. Sie müssen die VM herunterfahren oder das Volume zuerst abtrennen, wenn es an eine VM angeschlossen ist, und das abgetrennte Volume wird automatisch an einen zufälligen Knoten mit https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[Wartungsmodus] angeschlossen, um automatisch zu erweitern.
+
+image::volume/expand-volume.png[expand-volume]
+
+=== Online-Volume-Erweiterung
+
+Um die Ausfallzeit zu minimieren, ermöglicht {harvester-product-name} die Erweiterung von Volumes, die an einer laufenden virtuellen Maschine angeschlossen sind oder ein PVC haben, das an einem laufenden Pod im Gast-Cluster angeschlossen ist. Je nach dem zugrunde liegenden Speicheranbieter müssen Sie möglicherweise zusätzliche Schritte unternehmen, um diese Funktion zu nutzen.
+
+* *{longhorn-product-name}*: {harvester-product-name} betrachtet {longhorn-product-name} als unterstützend für die Online-Volume-Erweiterung, auch wenn Unterschiede zwischen den Versionen des Longhorn Data Engine bestehen. Derzeit unterstützt die V1 Data Engine die Online-Volume-Erweiterung vollständig, während die V2 Data Engine die Volume-Erweiterung überhaupt nicht unterstützt (unabhängig vom Anschlusszustand des Volumes).
+
+* *Drittanbieter-Speicher*: {harvester-product-name} lehnt standardmäßig Anfragen zur Online-Volume-Erweiterung für Drittanbieter-Speicher ab. Wenn Sie bestätigt haben, dass Ihr Speicheranbieter die Online-Volume-Erweiterung unterstützt, können Sie die xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`]-Einstellung verwenden, um diesen Speicheranbieter als validiert zu kennzeichnen.
+
+[IMPORTANT]
+====
+Die Online-Größenänderung von Dateisystem-Volumes, die über Hot-Plugging angeschlossen wurden, wird nicht unterstützt. Wenn ein Dateisystem-Volume im `virt-launcher`-Pod als Bind-Mount eingebunden ist, löst das Hot-Plugging eines neuen Dateisystem-Volumes `NodeUnPublish` und `NodeUnstage`-Operationen am vorherigen Volume aus, was eine weitere Größenänderung verhindert.
+
+Zusätzlich können Sie die Funktion xref:virtual-machines/edit-vm.adoc[Edit Config] im UI-Bildschirm {harvester-product-name}*Virtuelle Maschinen* nicht verwenden, um die Größe eines Volumes zu ändern, während die virtuelle Maschine läuft. Bestimmte Einschränkungen verhindern, dass die aktuelle UI die Ergebnisse von Volume-Erweiterungsoperationen genau anzeigt. Für weitere Informationen siehe https://github.com/harvester/harvester/issues/8669[Issue #8669].
+====
+
+== Eine fehlgeschlagene Volumenerweiterung abbrechen
+
+Wenn Sie während der Erweiterung eine Größe angeben, die größer ist als die Kapazität von {longhorn-product-name}, bleibt der Status der Volumenerweiterung in `Resizing` hängen. Sie können die fehlgeschlagene Volumenerweiterung abbrechen, indem Sie auf die Schaltfläche `⋮` klicken und die Option `Cancel Expand` auswählen.
+
+image::volume/cancel-failed-volume-expansion.png[cancel-failed-volume-expansion]
+
+== Ändern der StorageClass eines bestehenden Volumens
+
+Die StorageClass eines bestehenden Volumens kann nicht geändert werden. Sie können jedoch die StorageClass ändern, während Sie ein neues Volumen aus dem Snapshot wiederherstellen, indem Sie die folgenden Schritte ausführen:
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[Ein Volume-Snapshot erstellen].
+. Wählen Sie die StorageClass aus, wenn Sie xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[das Volume mit dem Snapshot wiederherstellen].

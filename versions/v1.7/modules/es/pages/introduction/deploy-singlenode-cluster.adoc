@@ -1,0 +1,108 @@
+= Desplegar un clúster de un solo nodo
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Se requiere un clúster de {harvester-product-name} con tres o más nodos para realizar completamente las características de múltiples nodos, como la alta disponibilidad. Las versiones más recientes permiten crear clústeres con dos nodos de gestión y un xref:../hosts/witness-node.adoc[nodo testigo] (y opcionalmente, uno o más nodos de trabajo). También puedes crear xref:../installation-setup/single-node-clusters.adoc[clústeres de un solo nodo] que soportan la mayoría de las características (excluyendo la alta disponibilidad, soporte multi-replica y migración en vivo).
+
+Esta guía te lleva a través de los pasos necesarios para desplegar un *clúster de un solo nodo* y máquinas virtuales (VMs) que pueden alojar clústeres invitados y ejecutar cargas de trabajo personalizadas.
+
+== 1. Verifica que se cumplan los requisitos mínimos de hardware y red.
+
+{harvester-product-name} está construido para equipos sin sistema operativo utilizando componentes de software de código abierto de nivel empresarial. El instalador verifica automáticamente el hardware y muestra mensajes de advertencia si no se cumplen los xref:../installation-setup/requirements.adoc[requisitos] mínimos.
+
+== 2. Prepara los archivos de instalación según el método de instalación que deseas utilizar.
+
+Puedes descargar los archivos de instalación desde la página de https://github.com/harvester/harvester/releases[Versiones]. La sección *Descargas* de las notas de la versión contiene enlaces a los archivos ISO y artefactos relacionados. Están disponibles los siguientes tipos de archivos ISO:
+
+* *ISO completa*: Contiene los componentes del núcleo de Linux y todas las imágenes de contenedor requeridas, que se precargan durante la instalación. Debes usar una ISO completa al instalar {harvester-product-name} detrás de un firewall o proxy, y en entornos sin conectividad a internet.
+* xref:../installation-setup/media/net-install.adoc[*ISO de instalación de red*]: Contiene solo los componentes del núcleo de Linux. Una vez completada la instalación, el sistema operativo descarga todas las imágenes de contenedor requeridas de internet (principalmente de Docker Hub).
+
+|===
+| Método | Archivos de instalación requeridos | Otros requisitos
+
+| xref:../installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| N/D
+
+| xref:../installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| Unidad flash USB; utilidad como https://etcher.balena.io/[balenaEtcher] o el comando de Linux https://man7.org/linux/man-pages/man1/dd.1.html[dd]
+
+| xref:../installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO, imagen del kernel de Linux (vmlinuz), initrd, imagen de SquashFS
+| Directorio en el servidor HTTP (para servir archivos de arranque); scripts de arranque iPXE (para instalación automática); configuración del servidor DHCP
+|===
+
+== 3. Prepara los requisitos de configuración del clúster.
+
+* Token del clúster: Cadena ASCII que los nodos utilizan al unirse al clúster
+* Dirección IP fija para cada nodo: Puede ser asignada de forma estática o utilizando DHCP (reserva de host)
+* Dirección IP virtual fija (VIP) que se utilizará como dirección de gestión del clúster: VIP a la que te conectas al realizar tareas de administración después de que el clúster esté desplegado
+* Direcciones de los servidores DNS, servidores NTP y el servidor proxy (si es necesario)
+
+== 4. Despliega el nodo del clúster.
+
+La ampliación implica instalar el sistema operativo y otros componentes en el host, y luego reiniciar una vez que la instalación se haya completado. La ampliación del nodo crea el clúster, y al nodo se le asigna el rol de gestión por defecto.
+
+Durante la instalación, debes configurar los ajustes del nodo, definir la dirección de gestión del clúster (VIP) y el token del clúster, y especificar otra información. Si es necesario, puedes configurar más ajustes utilizando un xref:../installation-setup/config/configuration-file.adoc[archivo de configuración].
+
+Una vez que la instalación se haya completado, el nodo se reinicia y luego aparece la consola. La consola muestra información sobre el clúster (URL de gestión y estado) y el nodo (nombre de host, dirección IP y estado). Después de que el clúster se inicializa y todos los servicios comienzan a funcionar, el estado del clúster cambia a *Listo*.
+
+== 5. Configura una contraseña fuerte para el usuario predeterminado `admin`.
+
+Una vez que el estado del clúster cambie a *Listo*, puedes acceder a la xref:../installation-setup/authentication.adoc[UI] utilizando la URL de gestión mostrada en la consola.
+
+== 6. Configura el StorageClass predeterminado.
+
+{harvester-product-name} utiliza StorageClasses para describir cómo Longhorn debe aprovisionar volúmenes. Cada StorageClass tiene un parámetro que define el número de réplicas que se deben crear para cada volumen.
+
+El StorageClass predeterminado `harvester-longhorn` tiene un valor de recuento de réplicas de *3* para alta disponibilidad. Si utilizas `harvester-longhorn` en tu clúster de un solo nodo, Longhorn no puede crear el número por defecto de réplicas, y los volúmenes se marcan como _Degradados_ en la UI.
+
+Para evitar este problema, puedes realizar cualquiera de las siguientes acciones:
+
+* Cambia el xref:../installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[recuento de réplicas] de `harvester-longhorn` a *1* utilizando un xref:../installation-setup/config/configuration-file.adoc[archivo de configuración].
+* xref:../storage/storageclass.adoc#_creating_a_storageclass[Crea un nuevo StorageClass] con el parámetro *Número de Réplicas* establecido en *1*. Una vez creado, localiza el nuevo StorageClass en la lista y luego selecciona *⋮* > *Establecer como Predeterminado*.
+
+== 7. Crea una red de clúster personalizada y una red de VM. (Opcional)
+
+La red implica tres conceptos principales:
+
+* xref:../networking/cluster-network.adoc#_cluster_network[*Red de clúster*]: Ruta de reenvío aislada por tráfico para la transmisión de tráfico de red en el clúster {harvester-product-name}.
++
+Durante el despliegue, se crea una red de clúster llamada xref:../networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] para comunicaciones intra-clúster. `mgmt` permite que las VMs sean accesibles desde la red de infraestructura (externa al clúster) a la que cada nodo se conecta con NICs de gestión para fines de gestión del clúster. {harvester-product-name} también te permite crear xref:../networking/cluster-network.adoc#_custom_cluster_network[redes de clúster personalizadas] que pueden estar dedicadas al tráfico de VM.
+
+* xref:../networking/cluster-network.adoc#_network_configuration[*Configuración de red*]: Definición de cómo los nodos del clúster se conectan a una red de clúster específica.
++
+Cada configuración de red corresponde a un conjunto de nodos con especificaciones de red uniformes. Solo los nodos que están cubiertos por la configuración de red pueden acceder a la red de clúster asociada. Este arreglo te ofrece flexibilidad al configurar un clúster heterogéneo, particularmente cuando los nombres de las interfaces de red son diferentes para cada nodo.
+
+* xref:../networking/cluster-network.adoc#_vm_network[*Red de VM*]: Red virtual que las VMs utilizan para comunicarse con otras VMs y redes externas.
++
+Cada red de VM está vinculada a una red de clúster específica, que se utiliza para la transmisión del tráfico de VM. Puedes crear una xref:../networking/vm-network.adoc#_vlan_network[red VLAN] o una xref:../networking/vm-network.adoc#_untagged_network[red sin etiquetar] según tus requisitos, como aislamiento de tráfico, segmentación de red, facilidad de gestión o alineación con el entorno de red externo.
+
+Puedes crear una red de VM que utilice `mgmt` al probar {harvester-product-name} con un clúster de un solo nodo.
+
+== 8. Importar imágenes de VM.
+
+En la UI, puedes importar ISO, qcow2 y raw xref:../virtual-machines/vm-images/upload-image.adoc[imágenes] subiendo una imagen desde el sistema de archivos local, o especificando la URL de una imagen a la que se pueda acceder desde el clúster.
+
+== 9. Importar claves SSH. (Recomendado)
+
+Puedes almacenar claves públicas SSH en {harvester-product-name}. Cuando se lanza una VM, una clave almacenada puede ser xref:../virtual-machines/access-vm.adoc#_ssh_access[inyectada] en la VM para permitir el acceso seguro a través de SSH. Las claves validadas se muestran en la pantalla de *Claves SSH* en la UI.
+
+== 10. Crear VMs.
+
+Puedes crear xref:../virtual-machines/create-vm.adoc[VMs de Linux] utilizando uno de los siguientes métodos:
+
+* UI: En la pantalla de *Máquinas Virtuales*, haz clic en *Crear* y configura los ajustes en cada pestaña.
+* Kubernetes API: Crea un objeto `VirtualMachine`.
+* xref:../integrations/terraform/terraform-provider.adoc[Proveedor de Terraform]: Define un bloque de recursos `harvester_virtualmachine`.
+
+Crear xref:../virtual-machines/create-windows-vm.adoc[VMs de Windows] en la UI implica pasos ligeramente diferentes. {harvester-product-name} proporciona una plantilla de VM llamada `windows-iso-image-base-template` que añade un volumen con los controladores Virtio para Windows, lo que agiliza el proceso de configuración de la VM. Si necesitas dispositivos Virtio pero decides no usar la plantilla, debes añadir tus propios controladores Virtio para Windows para habilitar la detección correcta del hardware.
+
+== ¿Qué hacer a continuación?
+
+Las siguientes secciones proporcionan guías que te guían a través de cómo hacer copias de seguridad y restaurar VMs, gestionar hosts y usar {rancher-product-name} con {harvester-product-name}.
+
+* xref:../virtual-machines/backup-restore.adoc[Copias de seguridad de VM, Instantáneas y Restauración]
+* xref:../hosts/hosts.adoc[Gestión de hosts]
+* xref:../integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integración]

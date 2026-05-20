@@ -1,0 +1,92 @@
+= 处理器绑定
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} 支持虚拟机处理器绑定。要使用此功能，您必须首先在节点上启用 CPU 管理器，然后在创建虚拟机时启用处理器绑定。
+
+== Kubernetes CPU 管理器
+
+https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[CPU 管理器] 功能改善了 Kubernetes 集群中的 CPU 资源分配，确保具有严格性能需求的工作负载获得稳定和可预测的 CPU 资源。这对于高性能和对延迟敏感的应用程序尤其重要。
+
+{harvester-product-name} 在启用 CPU 管理器时使用 `static` CPU 管理器策略。该策略管理一个共享的 CPU 池，最初包括具有以下配置的节点上的所有 CPU：
+
+* 在 https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`] 服务质量 (QoS) 类中的 Pods 请求整个 CPU 核心（例如，CPU："2"）被分配专用 CPU。这些 CPU 被绑定到 Pod，并从共享 CPU 池中去除。
++
+* 在 https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`] 和 https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] QoS 类中的 Pods 共享共享池中的剩余 CPU。
+
+=== 共享 CPU 池的计算
+
+{harvester-product-name} 根据 https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[GKE 公式] 为系统级操作保留 CPU 资源， https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`] 和 https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`] 的值按 2:3 比例分配。
+
+示例（具有 16 个 CPU 核心的节点）：
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+在此示例中，约有 15 个核心（14980 毫核）可用于工作负载。
+
+当保证 QoS 类中的虚拟机（Pod）请求 4 个 CPU 时，4 个核心被专门分配给该虚拟机。其他 QoS 类中的 Pods 共享共享池中的剩余 11 个核心。
+
+== 启用和禁用 CPU 管理器
+
+当您启用 CPU 管理器时，{harvester-product-name} 将 CPU 管理器策略设置为 `static`。当您禁用该功能时，{harvester-product-name} 将 CPU 管理器策略切换回 `none`。
+
+您必须单独在每个节点上启用或禁用 CPU 管理器。
+
+. 在 {harvester-product-name} 用户界面上，转到 *主机*。
++
+. 在列表中找到节点，然后选择 *⋮ -> 启用 CPU 管理器* 或 *禁用 CPU 管理器*。
++
+请稍等，等待 {harvester-product-name} 应用相应的 CPU 管理器策略。
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== 局限性
+
+* 在见证节点上无法启用 CPU 管理器。
++
+* CPU 管理器必须在每个管理节点上单独启用或禁用。您必须等待操作完成后才能开始另一个操作。
++
+* 启用处理器绑定的虚拟机必须在相应节点上禁用处理器管理器之前停止。
+
+== 在新虚拟机上启用处理器绑定
+
+. 验证处理器管理器是否在一个或多个节点上启用。
++
+[IMPORTANT]
+====
+如果处理器管理器在至少一个节点上未启用，则虚拟机在启动后会卡在 `Unschedulable` 状态。有关更多信息，请参见 xref:virtual-machines/create-vm.adoc#_related_cpu_pinning_concepts[相关处理器绑定概念]。
+====
++
+. 转到 *虚拟机*。
++
+. 单击*创建*。
++
+image::vm/cpu-pinning-create-vm.png[create-vm]
++
+. 在 *高级选项* 选项卡上，选择 *启用处理器绑定*。
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-advanced-options]
++
+. 单击 *保存*。
+
+启用处理器绑定会将 `dedicatedCpuPlacement: true` 添加到虚拟机配置 (YAML) 的 `.spec.template.spec.domain.cpu` 中。当 `dedicatedCpuPlacement` 设置为 `true` 时，处理器和内存资源请求会自动设置为匹配限制，以确保满足保证服务质量的标准。
+
+由于请求和限制是相同的，处理器和内存xref:./resource-overcommit.adoc[资源超额分配]设置不适用于启用处理器绑定的虚拟机。
+
+[NOTE]
+====
+要在现有虚拟机上使用处理器绑定，您必须在启用该功能并保存更改后重启虚拟机。
+====
+
+== 虚拟机实时迁移
+
+启用处理器绑定的虚拟机只能在目标节点上启用处理器管理器的情况下进行迁移。
+
+== 升级
+
+在升级节点时，{harvester-product-name}会清空所有 Pod 并将虚拟机实时迁移到另一个节点。为避免对升级过程的中断，请确保在其他节点上启用处理器管理器，并在使用启用处理器绑定的虚拟机时提供足够的资源。

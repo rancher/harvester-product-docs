@@ -1,0 +1,143 @@
+= Netzwerk-Deep-Dive
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Netzwerktopologie
+
+Die folgende Netzwerktopologie zeigt, wie wir das Harvester-Netzwerk implementieren.
+
+image::networking/topology.png[]
+
+Das Diagramm enthält xref:./cluster-network.adoc#_built_in_cluster_network[das integrierte Cluster-Netzwerkmanagement] und ein xref:./cluster-network.adoc#_custom_cluster_network[benutzerdefiniertes Cluster-Netzwerk] namens `oob`.
+
+Wie oben gezeigt, konzentriert sich das Harvester-Netzwerk hauptsächlich auf die OSI-Modell-Schicht 2. Wir nutzen Linux-Netzwerkgeräte und -protokolle, um Verkehrswege für die Kommunikation zwischen VM zu VM, VM zu Host und VM zu externen Netzwerkgeräten zu erstellen.
+
+Das Harvester-Netzwerk besteht aus drei Schichten, einschließlich:
+
+* KubeVirt-Netzwerkschicht
+* Harvester-Netzwerkschicht
+* Externe Netzwerkschicht
+
+== KubeVirt-Netzwerk
+
+Der allgemeine Zweck von KubeVirt besteht darin, VMs innerhalb des Kubernetes-Pods auszuführen. Das KubeVirt-Netzwerk erstellt den Netzwerkpfad zwischen dem Pod und der VM.
+Bitte beziehen Sie sich auf das https://kubevirt.io/2018/KubeVirt-Network-Deep-Dive.html[offizielle KubeVirt-Dokument] für weitere Details.
+
+== Harvester-Netzwerk
+
+Das Harvester-Netzwerk ist darauf ausgelegt, den Netzwerkpfad zwischen Pods und dem Host-Netzwerk zu erstellen. Es implementiert ein Verwaltungsnetzwerk, VLAN-Netzwerke und ungetaggte Netzwerke. Wir können die letzten beiden Netzwerke als *Bridge-Netzwerke* bezeichnen, da die Bridge eine entscheidende Rolle bei ihrer Implementierung spielt.
+
+=== Bridge-Netzwerk
+
+Wir nutzen https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI] und https://www.cni.dev/plugins/current/main/bridge/[bridge CNI], um das Bridge-Netzwerk zu implementieren.
+
+* Multus CNI ist ein Container Network Interface (CNI) Plugin für Kubernetes, das mehrere Netzwerkschnittstellen an einen Pod anhängen kann. Seine Fähigkeit ermöglicht es einer VM, eine NIC für das Verwaltungsnetzwerk und mehrere NICs für das Bridge-Netzwerk zu haben.
+
+* Durch die Verwendung des Bridge CNI wird der VM-Pod in die L2-Brücke eingesteckt, die in der Konfiguration der Netzwerkanhängedefinition angegeben ist.
++
+[,json]
+----
+ # Example 1
+ {
+     "cniVersion": "0.3.1",
+     "name": "vlan100",
+     "type": "bridge",
+     "bridge": "mgmt-br",
+     "promiscMode": true,
+     "vlan": 100,
+ }
+----
++
+[,json]
+----
+ # Example 2
+ {
+     "cniVersion": "0.3.1",
+     "name": "untagged-network",
+     "type": "bridge",
+     "bridge": "oob-br",
+     "promiscMode": true,
+     "ipam": {}
+ }
+----
++
+Beispiel 1 ist eine typische VLAN-Konfiguration mit VLAN-ID 100, während Beispiel 2 eine ungetaggte Netzwerkkonfiguration ohne VLAN-ID ist. Der mit Beispiel 1 konfigurierte VM-Pod wird in die Brücke `mgmt-br` eingesteckt, während der VM-Pod, der Beispiel 2 verwendet, in die Brücke `oob-br` eingesteckt wird.
+
+* Um hohe Verfügbarkeit und Fehlertoleranz zu erreichen, wird ein Bond-Gerät erstellt, bei dem die echten NICs gebunden sind, um als Uplink der Brücke zu dienen. Standardmäßig lässt dieses Bond-Gerät den getaggten Zielverkehr bzw. die getaggten Pakete passieren.
++
+[,shell]
+----
+ harvester-0:/home/rancher # bridge -c vlan show dev oob-bo
+ port       vlan ids
+ oob-bo       1 PVID Egress Untagged
+            100
+            200
+----
++
+Das obige Beispiel zeigt, dass das Bond `oob-bo` Pakete mit Tag 1, 100 oder 200 erlaubt.
+
+* Wenn Sie eine virtuelle Maschine erstellen und sie mit einem VM-Netzwerk (VLAN) oder einem Speichernetzwerk verbinden, erstellt {harvester-product-name} automatisch virtuelle Ethernet (veth) Schnittstellen auf dem Host, die direkt mit den Pods verbunden sind.
++
+In früheren Versionen waren diese veth-Schnittstellen sowohl mit VLAN-ID 1 als auch mit der VLAN-ID verbunden, die dem VM-Netzwerk zugewiesen war. Dies ermöglichte es der {harvester-product-name} Brücke, ungetaggten (VLAN 1) und getaggten Verkehr von externen Switches korrekt an die veth-Schnittstelle weiterzuleiten.
++
+[,shell]
+----
+vethaf720855      1 Egress Untagged
+                  66 PVID Egress Untagged
+----
++
+Dieses Verhalten änderte sich in {harvester-product-name} v1.6.1, das v1.8.0 des CNI-Bridge-Plugins verwendet. Die Standard-VLAN-ID 1 wird nicht mehr zu veth-Schnittstellen hinzugefügt. Nur die VLAN-ID, die dem VM-Netzwerk zugewiesen ist, wird konfiguriert.
++
+[,shell]
+----
+vethaf720855      66 PVID Egress Untagged
+----
++
+Da die Behandlung ungetaggter VLANs nicht mehr angewendet wird, müssen physische Switches, die mit {harvester-product-name} Hosts verbunden sind, jetzt als Trunk-Ports konfiguriert werden. Diese Ports müssen getaggten Verkehr akzeptieren und Verkehr senden, der mit der VLAN-ID getaggt ist, die vom VM-Netzwerk verwendet wird.
++
+Jeder ungetaggte Verkehr, der an {harvester-product-name} Netzwerkbrücken für eine VLAN-getaggte veth-Schnittstelle ankommt, wird verworfen. Dies geschieht, weil die Brücke den Verkehr nicht an die veth-Schnittstelle weiterleiten kann, die so konfiguriert ist, dass sie nur die VLAN-ID vom VM-Netzwerk akzeptiert.
+
+=== Management-Netzwerk
+
+Das Management-Netzwerk basiert auf https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal].
+
+Es ist erwähnenswert, dass die Canal-Schnittstelle, über die der Harvester die Knoten-IP konfiguriert, die Brücke `mgmt-br` oder eine VLAN-Subschnittstelle von `mgmt-br` ist. Dieses Design hat zwei Vorteile:
+
+* Das integrierte `mgmt` Cluster-Netzwerk unterstützt sowohl das Management-Netzwerk als auch das Bridge-Netzwerk.
+* Mit der VLAN-Netzwerkschnittstelle können wir dem Management-Netzwerk eine VLAN-ID zuweisen.
+
+Als Komponenten des mgmt-Cluster-Netzwerks ist es nicht erlaubt, die Brücke mgmt-br, das Bond mgmt-bo und das VLAN-Gerät zu löschen oder zu ändern.
+
+== Externes Netzwerk
+
+Externe Netzwerkgeräte beziehen sich typischerweise auf Switches und DHCP-Server. Mit einem Cluster-Netzwerk können wir Host-NICs gruppieren und sie mit verschiedenen Switches für die Verkehrsisolierung verbinden. Im Folgenden finden Sie einige Gebrauchsanweisungen.
+
+* Um getaggte Pakete passieren zu lassen, müssen Sie den Porttyp des externen Switches oder anderer Geräte (wie z.B. eines DHCP-Servers) auf Trunk- oder Hybridmodus einstellen und das angegebene VLAN-Tag zulassen.
+* Sie müssen die Link-Aggregation am Switch basierend auf dem Bond-Modus des Peer-Hosts konfigurieren. Link-Aggregation kann im manuellen Modus oder im LACP-Modus funktionieren. Die folgende Liste zeigt die Entsprechung zwischen Bond-Modus und Link-Aggregationsmodus.
++
+|===
+| Bond-Modus | Link-Aggregationsmodus
+
+| Modus 0 (balance-rr)
+| Manuell
+
+| Modus 1 (active-backup)
+| keine
+
+| Modus 2 (balance-oxr)
+| Manuell
+
+| Modus 3 (broadcast)
+| Manuell
+
+| Modus 4 (802.3ad)
+| LACP
+
+| Modus 5 (balance-tlb)
+| keine
+
+| Modus 6 (balance-alb)
+| keine
+|===
+
+* Wenn Sie möchten, dass VMs in einem VLAN IP-Adressen über das DHCP-Protokoll erhalten, konfigurieren Sie einen IP-Pool für dieses VLAN im DHCP-Server.

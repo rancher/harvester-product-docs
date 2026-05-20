@@ -1,0 +1,101 @@
+= Quotas de ressources
+:revdate: 2025-06-18
+:page-revdate: {revdate}
+
+https://kubernetes.io/docs/concepts/policy/resource-quotas/[Quota de ressources] est utilisé pour limiter l'utilisation des ressources au sein d'un espace de noms. Cela aide les administrateurs à contrôler et à restreindre l'allocation des ressources du cluster pour garantir l'équité et une distribution contrôlée des ressources entre les espaces de noms.
+
+Dans {harvester-product-name}, le quota de ressources peut définir des limites d'utilisation pour les ressources suivantes :
+
+* *UC*{nbsp}: Limite l'utilisation des ressources de calcul, y compris les noyaux d’UC et le temps d’UC.
+* *Mémoire*{nbsp}: Limite l'utilisation des ressources mémoire en octets ou dans d'autres unités de mémoire reconnaissables.
+* *Stockage*{nbsp}: Limite l'utilisation des ressources de stockage.
+
+== Définir le quota de ressources via Rancher
+
+Les administrateurs peuvent configurer des quotas de ressources pour les espaces de noms en effectuant les étapes suivantes{nbsp}:
+
+. Dans l'interface {rancher-short-name}, allez à *≡ -> Gestion de la virtualisation*.
+
+. Sélectionnez un cluster, allez à *Projets/Espaces de noms*, puis cliquez sur *Créer un projet*.
+
+. Dans la section des informations générales, spécifiez un nom et une description pour le projet.
+
+. Dans l'onglet *Quotas de ressources*, cliquez sur *Ajouter une ressource*, sélectionnez un type de ressource et spécifiez les valeurs limites correspondantes.
++
+image::rancher/create-project.png[]
+
+. Cliquez sur *Create*.
+
+[NOTE]
+====
+L'onglet *Limite de ressources par défaut de la VM* contient des paramètres de réservation et de limite de ressources qui ne s'appliquent qu'aux charges de travail de pod s'exécutant dans l'espace de noms. Les valeurs configurées dans cet onglet correspondent aux valeurs `defaultRequest` et `default` de la politique https://kubernetes.io/docs/concepts/policy/limit-range/[`LimitRange`] de l'espace de noms. Ces paramètres peuvent être supprimés dans une future version.
+====
+
+Vous pouvez configurer les limites de *l'espace de noms* comme suit{nbsp}:
+
+. Trouvez le projet nouvellement créé et sélectionnez *Créer un espace de noms*.
+. Spécifiez l’espace de noms souhaité *Nom* et ajustez les limites.
+. Complétez le processus en sélectionnant *Créer*.
++
+image::rancher/create-namespace.png[]
+
+[NOTE]
+====
+Les tentatives de provisionnement de machines virtuelles pour les clusters invités sont bloquées lorsque les quotas de ressources sont atteints. {rancher-short-name} répond en créant une nouvelle machine virtuelle dans une boucle, où chaque tentative de création échouée est immédiatement suivie d'une autre tentative. Cela entraîne un état d'erreur transitoire dans le cluster qui n'est pas enregistré car la machine virtuelle est recréée.
+====
+
+== Mémoire de surcharge de la machine virtuelle
+
+Lors de la création d'une machine virtuelle (VM), le contrôleur de VM intègre de manière transparente les ressources de surcharge dans la configuration de la VM. Ces ressources supplémentaires visent à garantir le fonctionnement cohérent et ininterrompu de la VM. Il est important de noter que la configuration des limites de mémoire nécessite une réservation de mémoire plus élevée en raison de l'inclusion de ces ressources de surcharge.
+
+Par exemple, considérons la création d'une nouvelle VM avec la configuration suivante{nbsp}:
+
+* CPU : 8 noyaux
+* Mémoire : 16Gi
+
+[NOTE]
+====
+Le système d'exploitation, qu'il s'agisse de Linux ou de Windows, n'affecte pas les calculs de surcharge.
+====
+
+La surcharge de mémoire est calculée dans les sections suivantes{nbsp}:
+
+* *Surcharge des tables de pages de mémoire :* Cela représente un bit pour chaque taille de RAM de 512b. Par exemple, une mémoire de 16Gi nécessite une surcharge de 32Mi.
+* *Surcharge fixe de la VM :* Cela se compose de plusieurs composants{nbsp}:
+ ** `VirtLauncherMonitorOverhead` : 25Mi  (le `ps` RSS pour virt-launcher-monitor)
+ ** `VirtLauncherOverhead` : 75Mi  (le `ps` RSS pour le processus virt-launcher)
+ ** `VirtlogdOverhead` : 17Mi  (le `ps` RSS pour virtlogd)
+ ** `LibvirtdOverhead` : 33Mi (le `ps` RSS pour libvirtd)
+ ** `QemuOverhead`{nbsp}: 30Mi (le `ps` RSS pour qemu, moins la RAM de son invité (stressé), moins la table de pages virtuelle)
+* *8Mi par UC (vCPU) de surcharge :* De plus, 8Mi de surcharge par vCPU est ajouté, ainsi qu'une surcharge fixe de 8Mi pour IOThread.
+* *Surcharge supplémentaire ajoutée :* Cela englobe divers facteurs tels que la surcharge de la mémoire vidéo et la surcharge d'architecture. Référez-vous à https://github.com/kubevirt/kubevirt/blob/2bb88c3d35d33177ea16c0f1e9fffdef1fd350c6/pkg/virt-controller/services/template.go#L1853-L1890[Surcharge supplémentaire] pour plus de détails.
+
+Ce calcul démontre que l'instance de VM nécessite une surcharge de mémoire supplémentaire d'environ 276Mi.
+
+Pour plus d'informations, voir https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#memory-overhead[Surcharge de mémoire].
+
+Pour plus d'informations sur la façon dont la surcharge de mémoire est calculée dans Kubevirt, référez-vous à https://github.com/kubevirt/kubevirt/blob/v0.54.0/pkg/virt-controller/services/template.go#L1804[kubevirt/pkg/virt-controller/services/template.go].
+
+== Ajustement automatique du quota de ressources lors de la migration
+
+Lorsque le quota de ressources alloué contrôlé par l'objet `ResourceQuota` atteint sa limite, la migration d'une VM devient impraticable. Le processus de migration crée automatiquement un nouveau pod reflétant les exigences en ressources de la VM source. Si ces prérequis de création de pod dépassent le quota défini, l'opération de migration ne peut pas se poursuivre.
+
+Dans {harvester-product-name}, les valeurs `ResourceQuota` se développeront dynamiquement avant la migration pour répondre aux besoins en ressources de la machine virtuelle cible. Après la migration, les quotas de ressources seront rétablis à leurs configurations antérieures.
+
+Veuillez prendre en compte les contraintes suivantes de redimensionnement automatique de `ResourceQuota`{nbsp}:
+
+* `ResourceQuota` ne peut pas être modifié pendant la migration de la VM.
+* Lors de l'augmentation de la valeur de `ResourceQuota`, si vous créez, démarrez ou restaurez d'autres VMs, {harvester-product-name} vérifiera si les ressources sont suffisantes en fonction du `ResourceQuota` d'origine. Si les conditions ne sont pas remplies, le système alertera que le processus de migration n'est pas réalisable.
+* Après l'extension de `ResourceQuota`, une contention potentielle des ressources peut se produire entre les pods non-VM et les pods VM, entraînant des échecs de migration. Par conséquent, il n'est pas recommandé de déployer des charges de travail de conteneurs personnalisés et des VMs dans le même espace de noms.
+* En raison de la limitation concurrente du validateur de webhook, le contrôleur de VM exécutera une validation secondaire pour confirmer la suffisance des ressources. Si la ressource est insuffisante, elle configurera automatiquement le `RunStrategy` de la VM à `Halted`, et une nouvelle annotation `harvesterhci.io/insufficient-resource-quota` sera ajoutée à l'objet VM, vous informant que la VM a été arrêtée en raison de ressources insuffisantes.
++
+image::rancher/vm-annotation-insufficient-resource-quota.png[]
+
+=== Désactiver l'ajustement automatique du quota de ressources pendant la migration
+
+Lorsqu'un objet `ResourceQuota` a l'annotation `harvesterhci.io/skipResourceQuotaAutoScaling: "true"`, {harvester-product-name} n'ajuste pas automatiquement les valeurs de cet objet. Cette fonctionnalité est utile pour le débogage, le dépannage et d'autres tâches.
+
+[IMPORTANT]
+====
+Vous devez définir l'annotation avant le début de la migration. Si l'annotation est définie alors que les valeurs sont déjà en cours d'ajustement, {harvester-product-name} ne peut pas restaurer automatiquement la configuration précédente.
+====

@@ -1,0 +1,59 @@
+= 资源超额分配
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name} 支持对 处理器、内存和存储的资源超载百分比进行全局配置。通过设置 xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]，即使在物理资源完全利用的情况下，也可以调度额外的虚拟机。
+
+{harvester-product-name} 允许您在计算节点上超额分配 处理器 和 RAM。这使您能够在降低实例性能的情况下，增加在云上运行的实例数量。计算服务默认使用以下比例：
+
+* 处理器 分配比例：1600%
+* RAM 分配比例：150%
+* 存储分配比例：200%
+
+[NOTE]
+====
+经典的内存超额分配或内存气球化尚不支持此功能。换句话说，虚拟机实例的内存一经分配，将无法回收。
+====
+
+== 配置全局设置 xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]
+
+用户可以按照以下步骤修改全局 `overcommit-config`，更改后将应用于每个新创建的虚拟机。
+
+. 前往 *高级 -> 设置*。
++
+image::vm/overcommit-page.png[超额分配页面]
++
+. 找到 `overcommit-config` 设置。
+. 配置所需的 处理器、内存和存储比例。
++
+image::vm/overcommit-panel.png[超额分配面板]
+
+== 为单个虚拟机配置超额分配
+
+在需要为单个虚拟机配置特定设置而不影响全局设置的情况下，您可以通过直接修改相应虚拟机规格上的 `spec.template.spec.domain.resources.limits.<memory|cpu>` 值轻松实现。
+
+image::vm/vm-overcommit-config.png[虚拟机超额分配配置]
+
+== 为系统开销保留更多内存
+
+默认情况下，{harvester-product-name} 从分配给虚拟机的内存中保留一定量的系统管理开销内存。在大多数情况下，这不会导致任何问题。然而，一些操作系统，例如 Windows 2022，会请求比保留的内存更多的内存。
+
+为了解决这个问题，{harvester-product-name} 在虚拟机自定义资源上提供了一个注释 `harvesterhci.io/reservedMemory`，让您指定要保留的内存量。例如，如果您决定为虚拟机的系统开销保留 200 MiB，请添加 `harvesterhci.io/reservedMemory: 200Mi`。
+
+[,diff]
+----
+ apiVersion: kubevirt.io/v1
+ kind: VirtualMachine
+ metadata:
+   annotations:
++    harvesterhci.io/reservedMemory: 200Mi
+     kubevirt.io/latest-observed-api-version: v1
+     kubevirt.io/storage-observed-api-version: v1alpha3
+     network.harvesterhci.io/ips: '[]'
+   ...
+   ...
+----
+
+== 为什么我的虚拟机调度不均匀？
+
+虚拟机的调度取决于 kube-scheduler 的底层行为。我们有一篇专门的文章解释详细信息。如果您想了解更多，请查看： https://harvesterhci.io/kb/vm-scheduling/[虚拟机调度].

@@ -1,0 +1,143 @@
+= Profundización en redes
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Topología de la red
+
+La topología de la red a continuación revela cómo implementamos la red Harvester.
+
+image::networking/topology.png[]
+
+El diagrama contiene xref:./cluster-network.adoc#_built_in_cluster_network[la gestión de red del clúster integrado] y una xref:./cluster-network.adoc#_custom_cluster_network[red de clúster personalizada] llamada `oob`.
+
+Como se muestra arriba, la red Harvester se centra principalmente en la capa 2 del modelo OSI. Aprovechamos dispositivos y protocolos de red de Linux para construir rutas de tráfico para la comunicación entre VM a VM, VM a host y VM a dispositivos de red externos.
+
+La red Harvester se compone de tres capas, incluyendo:
+
+* Capa de red de KubeVirt
+* Capa de red de Harvester
+* Capa de red externa
+
+== Red de KubeVirt
+
+El propósito general de KubeVirt es ejecutar VM dentro del pod de Kubernetes. La red de KubeVirt construye la ruta de red entre el pod y la VM.
+Por favor, consulta el https://kubevirt.io/2018/KubeVirt-Network-Deep-Dive.html[documento oficial de KubeVirt] para más detalles.
+
+== Red de Harvester
+
+La red de Harvester está diseñada para construir la ruta de red entre los pods y la red del host. Implementa una red de gestión, redes VLAN y redes sin etiquetar. Podemos referirnos a las dos últimas redes como *redes de puente*, porque el puente juega un papel vital en su implementación.
+
+=== Red de puente
+
+Aprovechamos https://github.com/k8snetworkplumbingwg/multus-cni[multus CNI] y https://www.cni.dev/plugins/current/main/bridge/[bridge CNI] para implementar la red de puente.
+
+* Multus CNI es un complemento de Interfaz de Red de Contenedores (CNI) para Kubernetes que puede adjuntar múltiples interfaces de red a un pod. Su capacidad permite que una máquina virtual tenga una NIC para la red de gestión y múltiples NICs para la red de puente.
+
+* Utilizando el CNI de puente, el pod de la máquina virtual se conectará al puente L2 especificado en la configuración de la Definición de Adjunto de Red.
++
+[,json]
+----
+ # Example 1
+ {
+     "cniVersion": "0.3.1",
+     "name": "vlan100",
+     "type": "bridge",
+     "bridge": "mgmt-br",
+     "promiscMode": true,
+     "vlan": 100,
+ }
+----
++
+[,json]
+----
+ # Example 2
+ {
+     "cniVersion": "0.3.1",
+     "name": "untagged-network",
+     "type": "bridge",
+     "bridge": "oob-br",
+     "promiscMode": true,
+     "ipam": {}
+ }
+----
++
+El Ejemplo 1 es una configuración típica de VLAN con ID de VLAN 100, mientras que el Ejemplo 2 es una configuración de red sin etiquetar y sin ID de VLAN. El pod de la máquina virtual configurado usando el Ejemplo 1 se conectará al puente `mgmt-br`, mientras que el pod de la máquina virtual usando el Ejemplo 2 se conectará al puente `oob-br`.
+
+* Para lograr alta disponibilidad y tolerancia a fallos, se crea un dispositivo de enlace donde las NICs reales están vinculadas para servir como el enlace ascendente del puente. Por defecto, este dispositivo de enlace permitirá que el tráfico o los paquetes etiquetados destinados pasen a través.
++
+[,shell]
+----
+ harvester-0:/home/rancher # bridge -c vlan show dev oob-bo
+ port       vlan ids
+ oob-bo       1 PVID Egress Untagged
+            100
+            200
+----
++
+El ejemplo anterior muestra que el dispositivo de enlace `oob-bo` permite paquetes con etiqueta 1, 100 o 200.
+
+* Cuando creas una máquina virtual y la conectas a una red de VM (VLAN) o a una red de almacenamiento, {harvester-product-name} crea automáticamente interfaces Ethernet virtuales (veth) en el host que se conectan directamente a los pods.
++
+En versiones anteriores, estas interfaces veth estaban asociadas tanto con el ID de VLAN 1 como con el ID de VLAN asignado a la red de VM. Esto permitía que el puente {harvester-product-name} reenviara correctamente el tráfico sin etiquetar (VLAN 1) y el tráfico etiquetado desde los switches externos a la interfaz veth.
++
+[,shell]
+----
+vethaf720855      1 Egress Untagged
+                  66 PVID Egress Untagged
+----
++
+Este comportamiento cambió en {harvester-product-name} v1.6.1, que utiliza v1.8.0 del complemento de puente CNI. El ID de VLAN por defecto 1 ya no se añade a las interfaces veth. Solo se configura el ID de VLAN asignado a la red de VM.
++
+[,shell]
+----
+vethaf720855      66 PVID Egress Untagged
+----
++
+Debido a que ya no se aplica el manejo de VLAN sin etiquetar, los switches físicos conectados a los hosts {harvester-product-name} deben configurarse ahora como puertos troncales. Estos puertos deben aceptar tráfico etiquetado y enviar tráfico etiquetado con el ID de VLAN utilizado por la red de VM.
++
+Cualquier tráfico sin etiquetar que llegue a los puentes de red {harvester-product-name} para una interfaz veth etiquetada con VLAN es descartado. Esto ocurre porque el puente no puede reenviar el tráfico a la interfaz veth, que está configurada para aceptar solo el ID de VLAN de la red de VM.
+
+=== Red de gestión
+
+La red de gestión se basa en https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal].
+
+Cabe mencionar que la interfaz de Canal donde Harvester configura la IP del nodo es el puente `mgmt-br` o una subinterfaz VLAN de `mgmt-br`. Este diseño tiene dos beneficios:
+
+* La red de clúster `mgmt` integrada soporta tanto la red de gestión como la red de puente.
+* Con la interfaz de red VLAN, podemos asignar un ID de VLAN a la red de gestión.
+
+Como componentes de la red de clúster de gestión, no se permite eliminar ni modificar el puente mgmt-br, el bond mgmt-bo ni el dispositivo VLAN.
+
+== Redes Externas
+
+Los dispositivos de red externos suelen referirse a conmutadores y servidores DHCP. Con una red de clúster, podemos agrupar las NICs de los hosts y conectarlas a diferentes conmutadores para el aislamiento del tráfico. A continuación se presentan algunas instrucciones de uso.
+
+* Para permitir que los paquetes etiquetados pasen, necesitas configurar el tipo de puerto del conmutador externo u otros dispositivos (como un servidor DHCP) en modo trunk o híbrido y permitir la etiqueta VLAN especificada.
+* Necesitas configurar la agregación de enlaces en el conmutador según el modo bond del host par. La agregación de enlaces puede funcionar en modo manual o en modo LACP. A continuación se enumera la correspondencia entre el modo bond y el modo de agregación de enlaces.
++
+|===
+| Modo Bond | Modo de Agregación de Enlaces
+
+| modo 0(balance-rr)
+| manual
+
+| modo 1(active-backup)
+| ninguno
+
+| modo 2(balance-oxr)
+| manual
+
+| modo 3(broadcast)
+| manual
+
+| modo 4(802.3ad)
+| LACP
+
+| modo 5(balance-tlb)
+| ninguno
+
+| modo 6(balance-alb)
+| ninguno
+|===
+
+* Si quieres que las VMs en una VLAN puedan obtener direcciones IP a través del protocolo DHCP, configura un pool de direcciones IP para esa VLAN en el servidor DHCP.

@@ -1,0 +1,102 @@
+= Upgrade von v1.2.1 auf v1.2.2
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== Allgemeine Informationen
+
+Ein *Upgrade*-Button erscheint auf dem *Dashboard*-Bildschirm, wann immer eine neue {harvester-product-name} Version verfügbar ist, auf die Sie upgraden können. Für weitere Informationen siehe xref:./upgrades.adoc#_start_an_upgrade[Starten eines Upgrades].
+
+Für Air-Gapped-Umgebungen, siehe xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Vorbereiten eines Air-Gapped-Upgrades].
+
+== Bekannte Probleme
+
+=== 1. Upgrade im `Upgrading System Service` Zustand festgefahren
+
+Abgelaufene Zertifikate bestimmter Systemdienste können dazu führen, dass ein Upgrade für längere Zeit im `Upgrading System Service` Zustand feststeckt. Gehen Sie wie folgt vor, um dieses Problem zu beheben:
+
+. Bestimmen Sie den Namen des Apply-Manifest-Jobs.
++
+[,sh]
+----
+kubectl get jobs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+----
++
+Beispiel für die Ausgabe:
++
+[,console]
+----
+NAME                                 COMPLETIONS   DURATION   AGE
+hvst-upgrade-9gmg2-apply-manifests   0/1           46s        46s
+----
++
+. Überprüfen Sie die Protokolle des Apply-Manifest-Jobs.
++
+[,sh]
+----
+ kubectl logs jobs/hvst-upgrade-9gmg2-apply-manifests -n harvester-system
+----
++
+Wenn die folgenden Nachrichten im Protokoll erscheinen, fahren Sie mit dem nächsten Schritt fort.
++
+[,console]
+----
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+Waiting for CAPI cluster fleet-local/local to be provisioned (current phase: Provisioning, current generation: 30259)...
+----
++
+. Überprüfen Sie den Zustand des Cluster-API (CAPI) Clusters.
++
+[,sh]
+----
+kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+Wenn die Ausgabe ähnlich dem folgenden Beispiel ist, besteht das Problem wahrscheinlich im Cluster.
++
+[,console]
+----
+    - lastUpdateTime: "2023-01-17T16:26:48Z"
+      message: 'configuring bootstrap node(s) custom-24cb32ce8387: waiting for probes:
+        kube-controller-manager, kube-scheduler'
+      reason: Waiting
+      status: Unknown
+      type: Updated
+----
++
+. Bestimmen Sie den Hostnamen des betroffenen Knotens und implementieren Sie die https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[Behelfslösung], um zu sehen, ob die Dienstzertifikate ablaufen.
++
+[,sh]
+----
+kubectl get machines.cluster.x-k8s.io -n fleet-local <machine_name> -o yaml | yq .status.nodeRef.name
+----
++
+Ersetzen Sie `<machine_name>` durch den Namen des betroffenen Knotens (wie in der Ausgabe des vorherigen Schrittes angegeben).
++
+[NOTE]
+====
+Wenn mehrere Knoten zur gleichen Zeit dem Cluster beigetreten sind, müssen Sie die https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[Behelfslösung] auf allen diesen Knoten implementieren.
+====
+
+Verwandtes Problem: https://github.com/harvester/harvester/issues/3863[#3863] (Siehe https://github.com/harvester/harvester/issues/3863#issuecomment-1539681311[Behelfslösung])
+
+'''
+
+=== 2. Das *harvester-seeder* Add-on wird nicht aktualisiert
+
+Beim Upgrade von Harvester-Clustern von v1.2.1 auf v1.2.2 wird das *harvester-seeder* Add-on nicht vollständig aktualisiert, da die Helm-Chart-Versionen nicht übereinstimmen. Das mit Harvester v1.2.2 gebündelte `harvester-seeder` Chart ist v0.1.1, während das `harvester-seeder` Add-on das Chart v0.1.0 verwendet.
+
+[,console]
+----
+Error: chart "harvester-seeder" matching 0.1.0 not found in harvester-seeder index. (try 'helm repo update'): no chart version found for harvester-seeder-0.1.0
+----
+
+Wenn Sie das Add-on nach dem Upgrade auf Harvester v1.2.2 aktivieren, wird die Installation des Charts aufgrund der genannten Unstimmigkeit ebenfalls nicht möglich sein.
+
+Die Behelfslösung besteht darin, das Manifest des *harvester-seeder* Add-on manuell mit dem folgenden Befehl zu aktualisieren. Sie müssen das Add-on vor dem Patchen deaktivieren.
+
+[,sh]
+----
+kubectl -n harvester-system patch addons.harvesterhci harvester-seeder --type=json -p '[{"op": "replace", "path": "/spec/version", "value": "0.1.1"}]'
+----

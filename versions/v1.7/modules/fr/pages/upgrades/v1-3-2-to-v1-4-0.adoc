@@ -1,0 +1,375 @@
+= Mise à niveau de v1.3.2 à v1.4.0
+:revdate: 2025-07-07
+:page-revdate: {revdate}
+
+== informations générales
+
+Un bouton *Mettre à niveau* apparaît sur l'écran *Dashboard* chaque fois qu'une nouvelle {harvester-product-name} version à laquelle vous pouvez mettre à niveau devient disponible. Pour plus d'informations, voir xref:./upgrades.adoc#_start_an_upgrade[Démarrer une mise à niveau].
+
+Pour les environnements isolés physiquement, voir xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Préparer une mise à niveau isolée physiquement].
+
+=== Prévenir la corruption des images de machines virtuelles lors des mises à niveau
+
+[CAUTION]
+====
+Avant de commencer la mise à niveau, assurez-vous que le `BackingImage` CRD est mis à jour vers https://github.com/longhorn/longhorn/blob/v1.7.2/deploy/longhorn.yaml#L486-L690[{longhorn-product-name} *v1.7.2*].
+
+Ignorer la mise à jour du CRD peut entraîner une corruption de l'image de sauvegarde, comme décrit dans https://github.com/longhorn/longhorn/issues/10644[issue #10644].
+====
+
+Effectuez les étapes suivantes avant de commencer la mise à niveau.
+
+. Appliquez le correctif à l'objet *{harvester-product-name} ManagedChart* pour éviter les erreurs et avertissements connexes.
++
+[,shell]
+----
+kubectl patch managedchart harvester \
+-n fleet-local \
+--type='json' \
+-p='[
+  {
+    "op":"add",
+    "path":"/spec/diff/comparePatches/-",
+    "value": {
+      "apiVersion":"apiextensions.k8s.io/v1",
+      "jsonPointers":["/spec","/metadata/annotations", "/metadata/labels", "/status"],
+      "kind":"CustomResourceDefinition",
+      "name":"backingimages.longhorn.io"
+    }
+  }
+]'
+----
+
+. Appliquez le *{longhorn-product-name} v1.7.2* https://github.com/longhorn/longhorn/blob/v1.7.2/deploy/longhorn.yaml#L486-L690[`BackingImage` CRD].
++
+[,yaml]
+----
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  annotations:
+    controller-gen.kubebuilder.io/version: v0.15.0
+  labels:
+    app.kubernetes.io/name: longhorn
+    app.kubernetes.io/instance: longhorn
+    app.kubernetes.io/version: v1.7.2
+    longhorn-manager: ""
+  name: backingimages.longhorn.io
+spec:
+  conversion:
+    strategy: Webhook
+    webhook:
+      clientConfig:
+        service:
+          name: longhorn-conversion-webhook
+          namespace: longhorn-system
+          path: /v1/webhook/conversion
+          port: 9501
+      conversionReviewVersions:
+      - v1beta2
+      - v1beta1
+  group: longhorn.io
+  names:
+    kind: BackingImage
+    listKind: BackingImageList
+    plural: backingimages
+    shortNames:
+    - lhbi
+    singular: backingimage
+  scope: Namespaced
+  versions:
+  - additionalPrinterColumns:
+    - description: The backing image name
+      jsonPath: .spec.image
+      name: Image
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta1
+    schema:
+      openAPIV3Schema:
+        description: BackingImage is where Longhorn stores backing image object.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            x-kubernetes-preserve-unknown-fields: true
+          status:
+            x-kubernetes-preserve-unknown-fields: true
+        type: object
+    served: true
+    storage: false
+    subresources:
+      status: {}
+  - additionalPrinterColumns:
+    - description: The system generated UUID
+      jsonPath: .status.uuid
+      name: UUID
+      type: string
+    - description: The source of the backing image file data
+      jsonPath: .spec.sourceType
+      name: SourceType
+      type: string
+    - description: The backing image file size in each disk
+      jsonPath: .status.size
+      name: Size
+      type: string
+    - description: The virtual size of the image (may be larger than file size)
+      jsonPath: .status.virtualSize
+      name: VirtualSize
+      type: string
+    - jsonPath: .metadata.creationTimestamp
+      name: Age
+      type: date
+    name: v1beta2
+    schema:
+      openAPIV3Schema:
+        description: BackingImage is where Longhorn stores backing image object.
+        properties:
+          apiVersion:
+            description: |-
+              APIVersion defines the versioned schema of this representation of an object.
+              Servers should convert recognized schemas to the latest internal value, and
+              may reject unrecognized values.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#resources
+            type: string
+          kind:
+            description: |-
+              Kind is a string value representing the REST resource this object represents.
+              Servers may infer this from the endpoint the client submits requests to.
+              Cannot be updated.
+              In CamelCase.
+              More info: https://git.k8s.io/community/contributors/devel/sig-architecture/api-conventions.md#types-kinds
+            type: string
+          metadata:
+            type: object
+          spec:
+            description: BackingImageSpec defines the desired state of the Longhorn
+              backing image
+            properties:
+              checksum:
+                type: string
+              diskFileSpecMap:
+                additionalProperties:
+                  properties:
+                    evictionRequested:
+                      type: boolean
+                  type: object
+                type: object
+              diskSelector:
+                items:
+                  type: string
+                type: array
+              disks:
+                additionalProperties:
+                  type: string
+                description: Deprecated. We are now using DiskFileSpecMap to assign
+                  different spec to the file on different disks.
+                type: object
+              minNumberOfCopies:
+                type: integer
+              nodeSelector:
+                items:
+                  type: string
+                type: array
+              secret:
+                type: string
+              secretNamespace:
+                type: string
+              sourceParameters:
+                additionalProperties:
+                  type: string
+                type: object
+              sourceType:
+                enum:
+                - download
+                - upload
+                - export-from-volume
+                - restore
+                - clone
+                type: string
+            type: object
+          status:
+            description: BackingImageStatus defines the observed state of the Longhorn
+              backing image status
+            properties:
+              checksum:
+                type: string
+              diskFileStatusMap:
+                additionalProperties:
+                  properties:
+                    lastStateTransitionTime:
+                      type: string
+                    message:
+                      type: string
+                    progress:
+                      type: integer
+                    state:
+                      type: string
+                  type: object
+                nullable: true
+                type: object
+              diskLastRefAtMap:
+                additionalProperties:
+                  type: string
+                nullable: true
+                type: object
+              ownerID:
+                type: string
+              size:
+                format: int64
+                type: integer
+              uuid:
+                type: string
+              virtualSize:
+                description: Virtual size of image, which may be larger than physical
+                  size. Will be zero until known (e.g. while a backing image is uploading)
+                format: int64
+                type: integer
+            type: object
+        type: object
+    served: true
+    storage: true
+    subresources:
+      status: {}
+----
+
+== Problèmes connus
+
+=== 1. Mise à niveau bloquée dans l'état "Pré-drainage"
+
+Une machine virtuelle avec un disque de conteneur ne peut pas être migrée en raison d'une limitation de la fonctionnalité de migration en direct. Cela entraîne le blocage du processus de mise à niveau dans l'état "Pré-drainage".
+
+[TIP]
+====
+Arrêtez manuellement les machines virtuelles pour continuer le processus de mise à niveau.
+====
+
+Issue connexe{nbsp}: https://github.com/harvester/harvester/issues/7005[#7005]
+
+=== 2. Mise à niveau bloquée en attente de bundle
+
+Ce problème est causé par une condition de concurrence lors du redéploiement de l'agent {fleet-product-name} (`fleet-agent`). Les messages d'erreur suivants indiquent que le problème existe.
+
+[,shell]
+----
+> kubectl get bundles -n fleet-local
+NAME                                          BUNDLEDEPLOYMENTS-READY   STATUS
+mcc-harvester                                 0/1                       ErrApplied(1) [Cluster fleet-local/local: encountered 2 deletion errors. First is: admission webhook "validator.harvesterhci.io" denied the request: Internal error occurred: no route match found for DELETE /v1, Kind=Secret harvester-system/sh.helm.release.v1.harvester.v2]
+mcc-harvester-crd                             0/1                       ErrApplied(1) [Cluster fleet-local/local: admission webhook "validator.harvesterhci.io" denied the request: Internal error occurred: no route match found for DELETE /v1, Kind=Secret harvester-system/sh.helm.release.v1.harvester-crd.v1]
+----
+
+Vous pouvez exécuter le script suivant pour résoudre le problème.
+
+[,shell]
+----
+#!/bin/bash
+
+patch_fleet_bundle() {
+  local bundleName=$1
+  local generation=$(kubectl get -n fleet-local bundle ${bundleName} -o jsonpath='{.spec.forceSyncGeneration}')
+  local new_generation=$((generation+1))
+  patch_manifest="$(mktemp)"
+  cat > "$patch_manifest" <<EOF
+{
+  "spec": {
+    "forceSyncGeneration": $new_generation
+  }
+}
+EOF
+  echo "patch bundle to new generation: $new_generation"
+  kubectl patch -n fleet-local bundle ${bundleName}  --type=merge --patch-file $patch_manifest
+  rm -f $patch_manifest
+}
+
+echo "removing harvester validating webhook"
+kubectl delete validatingwebhookconfiguration harvester-validator
+
+for bundle in mcc-harvester-crd mcc-harvester
+do
+  patch_fleet_bundle ${bundle}
+done
+
+echo "removing longhorn services"
+kubectl delete svc longhorn-engine-manager -n longhorn-system --ignore-not-found=true
+kubectl delete svc longhorn-replica-manager -n longhorn-system --ignore-not-found=true
+----
+
+=== 3. Mise à niveau bloquée en attente de {fleet-product-name}
+
+Lors de la mise à niveau de v1.3.2 à v1.4.0, le processus de mise à niveau peut être bloqué en attendant que {fleet-product-name} soit prêt. Ce problème est causé par une condition de concurrence lors du redéploiement de {rancher-product-name}.
+
+Vérifiez les journaux {harvester-product-name} et l'historique {fleet-product-name} pour les indicateurs suivants{nbsp}:
+
+* Le pod manifeste est bloqué dans l'état `deployed`.
+* La mise à niveau est en attente avec une version de chart qui a été déployée.
+
+Exemple :
+
+[,shell]
+----
+> kubectl logs -n harvester-system -l harvesterhci.io/upgradeComponent=manifest
+wait helm release cattle-fleet-system fleet fleet-104.0.2+up0.10.2 0.10.2 deployed
+
+> helm history -n cattle-fleet-system fleet
+REVISION    UPDATED                     STATUS             CHART                    APP VERSION    DESCRIPTION
+26          Tue Dec 10 03:09:13 2024    superseded         fleet-103.1.5+up0.9.5    0.9.5          Upgrade complete
+27          Sun Dec 15 09:26:54 2024    superseded         fleet-103.1.5+up0.9.5    0.9.5          Upgrade complete
+28          Sun Dec 15 09:27:03 2024    superseded         fleet-103.1.5+up0.9.5    0.9.5          Upgrade complete
+29          Mon Dec 16 05:57:03 2024    deployed           fleet-103.1.5+up0.9.5    0.9.5          Upgrade complete
+30          Mon Dec 16 05:57:13 2024    pending-upgrade    fleet-103.1.5+up0.9.5    0.9.5          Preparing upgrade
+----
+
+Vous pouvez exécuter la commande suivante pour résoudre le problème.
+
+[,shell]
+----
+helm rollback fleet -n cattle-fleet-system <last-deployed-revision>
+----
+
+=== 4. La mise à niveau redémarre de manière inattendue après que le bouton "Ignorer" a été cliqué.
+
+Lorsque vous utilisez {rancher-short-name} pour mettre à niveau {harvester-product-name}, l'interface utilisateur {rancher-short-name} affiche une boîte de dialogue avec un bouton étiqueté "Ignorer". Cliquer sur ce bouton peut entraîner les problèmes suivants{nbsp}:
+
+* La section `status` du CR `harvesterhci.io/v1beta1/upgrade` est effacée, entraînant la perte de toutes les informations importantes concernant la mise à niveau.
+* Le processus de mise à niveau redémarre de manière inattendue.
+
+Ce problème affecte {rancher-short-name} v2.10.x, qui utilise v1.0.2, v1.0.3 et v1.0.4 de xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[l'extension d'interface utilisateur Harvester]. Toutes les versions de l'interface utilisateur {harvester-product-name} ne sont pas affectées. Le problème est corrigé dans l'extension d'interface utilisateur Harvester v1.0.5 et v1.5.0.
+
+Pour éviter ce problème, effectuez l'une des actions suivantes{nbsp}:
+
+* Utilisez l'interface utilisateur {harvester-product-name} pour les mises à niveau. Cliquer sur le bouton "Ignorer" sur l'interface utilisateur {harvester-product-name} ne provoque pas de comportement inattendu.
+* Au lieu de cliquer sur le bouton de l'interface utilisateur {rancher-short-name}, exécutez la commande suivante contre le cluster{nbsp}:
++
+[,shell]
+----
+kubectl -n harvester-system label upgrades -l harvesterhci.io/latestUpgrade=true harvesterhci.io/read-message=true
+----
+
+Issue connexe{nbsp}: https://github.com/harvester/harvester/issues/7791[#7791]
+
+=== 5. Les machines virtuelles utilisant des volumes RWX migrables redémarrent de manière inattendue
+
+Les machines virtuelles utilisant des xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[volumes RWX] migrables redémarrent de manière inattendue lorsque les pods du plugin CSI sont redémarrés. Ce problème affecte {harvester-product-name} v1.4.x, v1.5.0 et v1.5.1.
+
+La solution de contournement consiste à désactiver le paramètre https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[Supprimer automatiquement le pod de charge de travail lorsque le volume est détaché de manière inattendue] dans l'interface {longhorn-product-name} avant de commencer la mise à niveau. Vous devez réactiver le paramètre une fois la mise à niveau terminée.
+
+Le problème sera corrigé dans {longhorn-product-name} v1.8.3, v1.9.1 et les versions ultérieures. {harvester-product-name} v1.6.0 inclura {longhorn-product-name} v1.9.1. 
+
+Problèmes connexes{nbsp}: https://github.com/harvester/harvester/issues/8534[#8534] et https://github.com/longhorn/longhorn/issues/11158[#11158]

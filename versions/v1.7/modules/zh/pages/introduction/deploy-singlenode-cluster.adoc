@@ -1,0 +1,108 @@
+= 部署单节点集群
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+需要一个包含三个或更多节点的{harvester-product-name}集群，以充分实现高可用性等多节点功能。最新版本允许您创建一个包含两个管理节点和一个xref:../hosts/witness-node.adoc[witness node]（可选地，一个或多个工作节点）的集群。您还可以创建支持大多数功能的xref:../installation-setup/single-node-clusters.adoc[单节点集群]（不包括高可用性、多副本支持和实时迁移）。
+
+本指南将引导您完成部署*单节点集群*及能够托管来宾集群并运行自定义工作负载的虚拟机的步骤。
+
+== 1.验证是否满足最低硬件和网络要求。
+
+{harvester-product-name}是为使用企业级开源软件组件的裸机服务器构建的。安装程序会自动检查硬件，并在未满足最低xref:../installation-setup/requirements.adoc[要求]时显示警告信息。
+
+== 2.根据您想要使用的安装方法准备安装文件。
+
+您可以从 https://github.com/harvester/harvester/releases[发布]页面下载安装文件。发布说明的*下载*部分包含ISO文件和相关工件的链接。提供以下类型的ISO文件：
+
+* *完整ISO*：包含核心操作系统组件和所有必需的容器镜像，这些镜像在安装过程中预加载。在防火墙或代理后安装{harvester-product-name}时，以及在没有互联网连接的环境中，必须使用完整的ISO。
+* xref:../installation-setup/media/net-install.adoc[*网络安装ISO*]：仅包含核心操作系统组件。安装完成后，操作系统会从互联网（主要是Docker Hub）拉取所有必需的容器镜像。
+
+|===
+| 方法 | 所需安装文件 | 其他要求
+
+| xref:../installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| 不适用
+
+| xref:../installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| U 盘；实用程序，如 https://etcher.balena.io/[balenaEtcher]或 Linux 的 https://man7.org/linux/man-pages/man1/dd.1.html[dd 命令]
+
+| xref:../installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO，Linux 内核镜像（vmlinuz），initrd，SquashFS 镜像
+| HTTP服务器上的目录（用于提供启动文件）；iPXE启动脚本（用于自动安装）；DHCP服务器配置
+|===
+
+== 3.准备集群配置要求。
+
+* 集群词元：节点在加入集群时使用的ASCII字符串
+* 每个节点的固定IP地址：可以静态分配或使用DHCP（主机保留）
+* 用于作为集群管理地址的固定虚拟IP地址（VIP）：在集群部署后执行管理任务时连接的VIP
+* DNS服务器、NTP服务器和代理服务器的地址（如有必要）
+
+== 4.部署集群节点。
+
+部署涉及在主机上安装操作系统和其他组件，然后在安装完成后重启。部署节点会创建集群，节点默认被分配管理角色。
+
+在安装过程中，您必须配置节点设置，定义集群管理地址（VIP）和集群词元，并指定其他信息。如有必要，您可以使用xref:../installation-setup/config/configuration-file.adoc[配置文件]配置更多设置。
+
+安装完成后，节点重启，然后控制台出现。控制台显示有关集群（管理URL和状态）和节点（主机名、IP地址和状态）的信息。在集群初始化并且所有服务开始运行后，集群状态会更改为*就绪*。
+
+== 5.为默认`admin`用户配置一个强密码。
+
+一旦集群状态更改为*就绪*，您可以使用控制台上显示的管理URL访问xref:../installation-setup/authentication.adoc[UI]。
+
+== 6.配置默认的 StorageClass。
+
+{harvester-product-name} 使用 StorageClasses 来描述 Longhorn 如何配置卷。每个 StorageClass 都有一个参数，定义为每个卷创建的副本数量。
+
+默认的 StorageClass `harvester-longhorn` 的副本数量值为 *3*，以确保高可用性。如果在单节点集群中使用 `harvester-longhorn`，Longhorn 将无法创建默认数量的副本，卷在 UI 上标记为 _降级_。
+
+为避免此问题，您可以执行以下任一操作：
+
+* 使用 xref:../installation-setup/config/configuration-file.adoc[配置文件] 将 `harvester-longhorn` 的 xref:../installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[副本数量] 更改为 *1*。
+* xref:../storage/storageclass.adoc#_creating_a_storageclass[创建一个新的 StorageClass]，并将 *副本数量* 参数设置为 *1*。创建后，在列表中找到新的 StorageClass，然后选择 *⋮* > *设为默认*。
+
+== 7.创建一个自定义集群网络和一个虚拟机网络。(可选)
+
+网络涉及三个主要概念：
+
+* xref:../networking/cluster-network.adoc#_cluster_network[*集群网络*]：用于在 {harvester-product-name} 集群中传输网络流量的流量隔离转发路径。
++
+在部署期间，创建一个名为 xref:../networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] 的集群网络，用于集群内部通信。 `mgmt` 允许虚拟机从基础设施网络（外部于集群）访问，每个节点通过管理网络接口连接以进行集群管理。 {harvester-product-name} 还允许您创建 xref:../networking/cluster-network.adoc#_custom_cluster_network[自定义集群网络]，可专用于虚拟机流量。
+
+* xref:../networking/cluster-network.adoc#_network_configuration[*网络配置*]：定义集群节点如何连接到特定的集群网络。
++
+每个网络配置对应一组具有统一网络规格的节点。只有被网络配置覆盖的节点才能访问相关的集群网络。这种安排为您在配置异构集群时提供了灵活性，特别是在每个节点的网络接口名称不同的情况下。
+
+* xref:../networking/cluster-network.adoc#_vm_network[*虚拟机网络*]：虚拟网络，供虚拟机与其他虚拟机和外部网络通信。
++
+每个虚拟机网络都链接到特定的集群网络，用于虚拟机流量的传输。您可以根据需求创建 xref:../networking/vm-network.adoc#_vlan_network[VLAN 网络] 或 xref:../networking/vm-network.adoc#_untagged_network[无标签网络]，例如流量隔离、网络分段、管理便利性或与外部网络环境的对接。
+
+在使用单节点集群测试 `mgmt` 时，您可以创建一个使用 {harvester-product-name} 的虚拟机网络。
+
+== 8.导入虚拟机镜像。
+
+在 UI 上，您可以通过从本地文件系统上传镜像或指定可从集群访问的镜像 URL，导入 ISO、qcow2 和原始 xref:../virtual-machines/vm-images/upload-image.adoc[镜像]。
+
+== 9.导入 SSH 密钥。（建议方法）
+
+您可以将 SSH 公钥存储在 {harvester-product-name} 中。当虚拟机启动时，可以将存储的密钥 xref:../virtual-machines/access-vm.adoc#_ssh_access[注入] 到虚拟机中，以允许通过 SSH 进行安全访问。已验证的密钥在 UI 上的 *SSH 密钥* 屏幕上显示。
+
+== 10.创建虚拟机。
+
+您可以使用以下方法之一创建 xref:../virtual-machines/create-vm.adoc[Linux 虚拟机]：
+
+* UI：在 *虚拟机* 屏幕上，点击 *创建* 并配置每个选项卡上的设置。
+* Kubernetes API：创建一个 `VirtualMachine` 对象。
+* xref:../integrations/terraform/terraform-provider.adoc[Terraform 提供者]：定义一个 `harvester_virtualmachine` 资源块。
+
+在 UI 上创建 xref:../virtual-machines/create-windows-vm.adoc[Windows 虚拟机] 涉及略有不同的步骤。{harvester-product-name} 提供了一个名为 `windows-iso-image-base-template` 的虚拟机模板，该模板通过添加带有 Virtio 驱动程序的卷来简化虚拟机配置过程。如果您需要 Virtio 设备但选择不使用模板，则必须为 Windows 添加自己的 Virtio 驱动程序，以启用正确的硬件检测。
+
+== 下一步怎么办？
+
+以下章节提供了指导，带您了解如何备份和恢复虚拟机，管理主机，以及如何使用{rancher-product-name}与{harvester-product-name}。
+
+* xref:../virtual-machines/backup-restore.adoc[虚拟机备份、快照与恢复]
+* xref:../hosts/hosts.adoc[主机管理]
+* xref:../integrations/rancher/rancher-integration.adoc[{rancher-product-name}集成]

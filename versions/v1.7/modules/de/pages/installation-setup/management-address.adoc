@@ -1,0 +1,88 @@
+= Verwaltungsadresse
+:revdate: 2025-06-23
+:page-revdate: {revdate}
+
+{harvester-product-name} stellt eine feste virtuelle IP (VIP) als Verwaltungsadresse bereit, wobei die VIP sich von jeder Knoten-IP unterscheiden muss. Die Verwaltungsadresse finden Sie im Dashboard der Konsole nach der Installation.
+
+[NOTE]
+====
+
+Wenn Sie die IP-Adresse ausgewählt haben, die über DHCP konfiguriert werden soll, müssen Sie eine statische MAC-zu-IP-Adresszuordnung auf Ihrem DHCP-Server konfigurieren, um eine persistente virtuelle IP zu haben.
+====
+
+image::install/iso-installed.png[]
+
+== Anforderungen
+
+* Die VIP und die Management-Schnittstellen der Knoten müssen im selben Subnetz liegen.
+* Alle {harvester-product-name} Management-Schnittstellen der Knoten müssen sich im selben Layer-2-Netzwerksegment befinden.
+
+Beide sind erforderlich, da die VIP auf dem Address Resolution Protocol (ARP) basiert, das ein Layer-2-Protokoll ist.
+
+Die VIP kann jeder {harvester-product-name} Management-Schnittstelle der Knoten zugewiesen werden und kann jederzeit wechseln (nicht nur bei einem Knotenfehler). Wenn die VIP die Hosts wechselt, werden _gratuitous ARPs_ gesendet, damit andere Hosts im Netzwerk wissen, wohin sie den Verkehr für die Verwaltungs-IP-Adresse des {harvester-product-name} Clusters (die VIP) leiten sollen.
+
+[CAUTION]
+====
+
+Wenn Sie planen, einen {harvester-product-name} Cluster in einem Bare-Metal-Rechenzentrum zu hosten, wird der Dienstanbieter wahrscheinlich eine "schwebende" oder "reservierte" IP-Adresse als VIP festlegen, die Sie einem Ihrer Server zuweisen können. Das Aktualisieren dieser Zuordnung bewirkt, dass der Verkehr sofort zu dem neuen Knoten fließt, dem er zugewiesen ist. In diesen Situationen kann {harvester-product-name} die schwebende/reservierte IP-Zuordnung in den Systemen Ihres Anbieters nicht aktualisieren, wenn die VIP die Hosts wechselt.
+
+Darüber hinaus können die "gratuitous ARPs" der VIP je nach Netzwerkkonfiguration Ihres Anbieters zwischen Ihren {harvester-product-name} Knoten ebenfalls ineffektiv sein (zum Beispiel, wenn Ihre {harvester-product-name} Hosts sich nicht im selben Layer-2-Netzwerk befinden). Sie müssen die schwebende/reservierte IP-Zuordnung manuell aktualisieren, wenn die VIP die Hosts wechselt, um sicherzustellen, dass der Cluster ordnungsgemäß funktioniert. Für weitere Informationen siehe <<Identifying the node the VIP is assigned to,Identifizierung des Knotens, dem die VIP zugewiesen ist>>.
+====
+
+== Wie man die VIP-MAC-Adresse erhält
+
+Um die VIP-MAC-Adresse zu erhalten, können Sie den folgenden Befehl auf dem Verwaltungs-Knoten ausführen:
+
+[,shell]
+----
+$ kubectl get svc -n kube-system ingress-expose -ojsonpath='{.metadata.annotations.kube-vip\.io/hwaddr}'
+----
+
+Beispiel für die Ausgabe:
+
+[,json]
+----
+{"kube-vip.io/hwaddr":"02:00:00:09:7f:3f","kube-vip.io/requestedIP":"10.84.102.31"}
+----
+
+== Identifizierung des Knotens, dem die VIP zugewiesen ist
+
+Sie können kubectl verwenden (entweder auf Ihrem lokalen Rechner mit der {harvester-product-name} kubeconfig-Datei oder beim Verwenden von SSH, um sich mit einem beliebigen {harvester-product-name} Verwaltungs-Knoten als Root-Benutzer zu verbinden).
+
+[,console]
+----
+kubectl -n kube-system get svc ingress-expose -o jsonpath='{.metadata.annotations.kube-vip\.io/vipHost}'
+----
+
+Beispielausgabe:
+
+[,console]
+----
+harvester-xzj76
+----
+
+Alternativ können Sie SSH verwenden, um sich mit jedem {harvester-product-name} Verwaltungs-Knoten zu verbinden und dann den Befehl `ip address show mgmt-br` auszuführen.
+
+Beispiel:
+
+[,console]
+----
+harvester-xzj76:~ # ip address show mgmt-br
+4: mgmt-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default qlen 1000
+    link/ether 8c:dc:d4:b5:f0:fd brd ff:ff:ff:ff:ff:ff
+    inet 172.19.108.45/21 brd 172.19.111.255 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+    inet 172.19.108.34/32 scope global mgmt-br
+       valid_lft forever preferred_lft forever
+----
+
+Wenn die Ausgabe sowohl die VIP- als auch die Knotenadresse enthält, wird die VIP dem Knoten zugewiesen, mit dem Sie verbunden sind.
+
+== Verwendungen
+
+Die Verwaltungsadresse:
+
+* Ermöglicht den Zugriff auf die {harvester-product-name} API/UI über das `HTTPS` Protokoll.
+* Ermöglicht anderen Knoten, dem Cluster beizutreten.
++
+image:install/configure-management-address.png[]

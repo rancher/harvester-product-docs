@@ -1,0 +1,167 @@
+= 隔离的环境
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+本节描述了如何在隔离的环境中使用{harvester-product-name}。一些用例可能是在离线状态下安装{harvester-product-name}，在防火墙后面或在代理后面。
+
+ISO 映像包含了在隔离的环境中使其正常工作的所有软件包。
+
+== 在HTTP代理后工作
+
+在某些环境中，从服务器或虚拟机到外部服务的连接需要HTTP(S)代理。
+
+=== 在安装期间配置HTTP代理
+
+您可以在xref:../installation-setup/methods/iso-install.adoc[ISO安装]期间配置HTTP(S)代理，如下图所示：
+
+image::install/iso-proxy.png[iso-proxy]
+
+=== 配置HTTP代理
+
+您可以使用用户界面配置HTTP(S)代理。
+
+. 转到用户界面的设置页面。
+. 找到`http-proxy`设置，点击*⋮ > 编辑设置*
+. 输入`http-proxy`、`https-proxy`和`no-proxy`的值。
+
+image::proxy-setting.png[proxy-setting]
+
+[NOTE]
+====
+{harvester-product-name}将必要的地址附加到用户配置的`no-proxy`中，以确保内部流量正常工作。即，`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`。自v1.1.2起，`harvester-system`已被添加到列表中。
+
+当集群中的节点不使用代理进行相互通信时，需要在第一个节点成功安装后将CIDR添加到`http-proxy.noProxy`。请参考xref:../troubleshooting/cluster.adoc#_fail_to_deploy_a_multi_node_cluster_due_to_incorrect_http_proxy_setting[无法部署多节点集群]。
+====
+
+== 来宾集群镜像
+
+安装和运行{harvester-product-name}所需的所有镜像都方便地打包在ISO中，消除了在裸机节点上预加载镜像的需要。一个{harvester-product-name}集群在后台独立有效地管理它们。
+
+然而，理解由xref:../integrations/rancher/node-driver/node-driver.adoc[Harvester Node Driver]创建的来宾Kubernetes集群（例如，{rke2-product-name}集群）是一个独立实体，与{harvester-product-name}集群不同，这一点至关重要。来宾集群在虚拟机内运行，需要从互联网或 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/global-configuration/global-default-private-registry.html#_configure_a_private_registry_with_credentials_when_creating_a_cluster[私有注册表]中拉取镜像。
+
+如果在来宾Kubernetes集群中将*Cloud Provider*选项配置为{harvester-product-name}，则会部署Harvester Cloud Provider和容器存储接口（CSI）驱动程序。
+
+image::cluster-registry.png[集群注册表]
+
+因此，我们建议在您的隔离的环境中监控每个RKE2版本，并将所需的镜像拉取到您的私有注册表中。请参考 https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[支持矩阵]以获取最佳的Harvester Cloud Provider和CSI驱动程序能力支持。
+
+== 与外部{rancher-short-name}集成
+
+{rancher-short-name}决定在导入{harvester-product-name}集群时使用的`rancher-agent`镜像。如果镜像未包含在{harvester-product-name} ISO中，则必须从互联网拉取并在每个节点上加载，或推送到{harvester-product-name}集群的注册表中。
+
+[,bash]
+----
+# Run the following commands on a computer that can access both the internet and the {harvester-product-name} cluster.
+docker pull rancher/rancher-agent:<version>
+docker save rancher/rancher-agent:<version> -o rancher-agent-<version>.tar
+
+# Copy the image TAR file to the air-gapped environment.
+scp rancher-agent-<version>.tar rancher@<harvester-node-ip>:/tmp
+
+# Use SSH to connect to the {harvester-product-name} node, and then load the image.
+ssh rancher@<harvester-node-ip>
+sudo -i
+docker load -i /tmp/rancher-agent-<version>.tar
+----
+
+== 带有{rancher-short-name}集成的Harvester UI扩展
+
+Harvester UI扩展是访问{harvester-product-name} UI在{rancher-short-name} v2.10.x及更高版本中的必需组件。然而，在隔离的环境中无法通过网络安装扩展，因此您必须执行以下变通方法：
+
+. 拉取镜像 https://hub.docker.com/r/rancher/ui-plugin-catalog/tags[rancher/ui-plugin-catalog]，并使用最新标签。
+
+. 在{rancher-short-name} UI中，转到*扩展*，然后选择*⋮ -> 管理扩展目录*。
++
+image::air-gapped/air-gappted-harvester-ui-extension-01.png[Rancher UI - 管理扩展目录]
+
+. 指定所需的信息。
++
+image::air-gapped/air-gappted-harvester-ui-extension-02.png[Rancher UI - 导入扩展目录]
++
+* *目录镜像引用*:指定私有注册表URL和镜像储存库。
+* *镜像拉取密钥*:指定在需要用户名和密码时访问注册表的密钥。您必须在 `cattle-ui-plugin-system` 名称空间中创建该密钥。将 `kubernetes.io/dockercfg` 或 `kubernetes.io/dockerconfigjson` 作为 `type` 的值。
++
+示例：
++
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-registry-secret-rancher
+  namespace: cattle-ui-plugin-system
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {base64 encoded data}
+----
+
+. 点击 *加载*，然后等待一段时间以加载扩展。
++
+image::air-gapped/air-gappted-harvester-ui-extension-03.png[Rancher UI - 扩展目录]
+
+. 在 *可用* 标签上，找到名为 *Harvester* 的扩展，然后点击 *安装*。
++
+image::air-gapped/air-gappted-harvester-ui-extension-04.png[Rancher UI - 可用扩展]
+
+. 选择与 {harvester-product-name} 集群匹配的版本，然后点击 *安装*。
++
+有关更多信息，请参见 xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[Harvester UI 扩展支持矩阵]。
++
+image::air-gapped/air-gappted-harvester-ui-extension-05.png[Rancher UI - 选择 Harvester UI 扩展版本]
++
+image::air-gapped/air-gappted-harvester-ui-extension-06.png[Rancher UI - Harvester UI 扩展已安装]
+
+. 前往 *虚拟化管理 -> Harvester 集群*。
++
+您现在可以导入 {harvester-product-name} 集群并访问 {harvester-product-name} UI。
++
+image::air-gapped/air-gappted-harvester-ui-extension-07.png[Rancher UI - Harvester 集群]
+
+== 时间要求
+
+可靠的网络时间协议 (NTP) 服务器对于在 Kubernetes 集群中的所有节点上维护正确的系统时间至关重要，尤其是在运行 {harvester-product-name} 时。Kubernetes 依赖于 etcd，一个分布式键值存储，它需要精确的时间同步以确保数据一致性，并防止领导者选举、日志复制和集群稳定性的问题。
+
+在隔离的环境中，当外部时间源不可用时，保持准确且同步的时间变得更加重要。如果没有适当的时间同步，集群节点可能会遇到身份验证故障、调度问题，甚至数据损坏。为了减轻这些风险，组织应部署一个强大的内部 NTP 服务器，以在网络内的所有系统之间同步时间。
+
+确保集群中的时间准确一致对于可靠性、安全性和整体系统完整性至关重要。
+
+== 查错
+
+=== UI 扩展未出现
+
+如果*扩展*屏幕为空，请转到*储存库*（*⋮ -> 管理储存库*），然后点击*刷新*。
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-01.png[Rancher UI - 管理储存库]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-02.png[Rancher UI - 连接被拒绝错误]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-03.png[Rancher UI - 刷新储存库屏幕]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-04.png[Rancher UI - 储存库]
+
+=== 安装失败
+
+如果在安装过程中遇到错误，请检查`uiplugins`资源。
+
+image::air-gapped/air-gappted-harvester-ui-extension-05-01.png[Rancher UI - Harvester UI 扩展安装错误]
+
+示例：
+
+[,shell]
+----
+bash-4.4# k get uiplugins -A
+NAMESPACE                 NAME        PLUGIN NAME   VERSION   STATE
+cattle-ui-plugin-system   harvester   harvester     1.0.3     pending
+bash-4.4# k get uiplugins harvester --namespace cattle-ui-plugin-system -o yaml
+apiVersion: catalog.cattle.io/v1
+kind: UIPlugin
+metadata:
+  # skip
+  name: harvester
+  namespace: cattle-ui-plugin-system
+spec:
+  plugin:
+    endpoint: http://ui-plugin-catalog-svc.cattle-ui-plugin-system:8080/plugin/harvester-1.0.3
+----
+
+确保`svc.namespace`可以从{rancher-short-name}访问。如果该端点不可访问，您可以直接使用集群IP，例如`10.43.33.58:8080/plugin/harvester-1.0.3`。

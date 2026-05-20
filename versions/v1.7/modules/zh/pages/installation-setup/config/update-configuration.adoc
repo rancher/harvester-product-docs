@@ -1,0 +1,124 @@
+= 安装后更新配置
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+{harvester-product-name} 操作系统具有不可变设计，这意味着操作系统中的大多数文件在重启后会恢复到其预配置状态。操作系统在启动时从配置文件加载系统组件的预配置值。
+
+要更新配置，您必须首先更新系统中的运行时值，然后更新配置文件，以确保更改在重启后依然生效。
+
+然而，从 v1.7.0 开始，使用 `nmcli` 工具进行的网络配置更改会自动保留，因为 `/etc/NetworkManager` 目录现在已包含在持久路径列表中。
+
+[NOTE]
+====
+如果您从 `v1.1.2` 之前的版本升级，examples 中的 `cloud-init` 文件将是 `/oem/99_custom.yaml`。如有需要，请替换该值。
+====
+
+== `rancher` 用户的密码
+
+=== 运行时更改
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[使用 用户帐户登录到 Harvester 节点]`rancher`。
+
+. 通过运行命令 `rancher` 重置 `passwd` 用户帐户的密码。
+
+=== 配置持久性
+
+. 备份 {elemental-product-name} `cloud-init` 文件 `/oem/90_custom.yaml`。
++
+[,sh]
+----
+ cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
+----
+
+. 编辑 `/oem/90_custom.yaml` 并更新 yaml 路径 `stages.initramfs[0].users.rancher.passwd`。
+
+有关以加密形式指定 `rancher` 用户帐户密码的信息，请参见 [`os.password`](./harvester-configuration.md#ospassword)。
+
+== NTP 服务器
+
+有关 NTP 设置的信息，请参见 xref:hosts/hosts.adoc#_ntp_configuration[NTP 服务器]。
+
+== DNS 服务器
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[使用 root 帐户登录到 Harvester 节点]。
+
+. 检查管理接口配置，然后运行以下任一命令：
++
+** 未配置为使用 VLAN：
++
+[,shell]
+----
+nmcli con modify bridge-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br
+----
+** 配置为使用 VLAN：
++
+[,shell]
+----
+nmcli con modify vlan-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br.VLAN_ID
+----
++
+您必须将 `VLAN_ID` 替换为实际的 ID。要查看已配置的连接和设备列表，请运行命令 `nmcli con`。
+
+. 通过运行 `/etc/resolv.conf` 命令验证文件 `cat` 是否包含正确的 DNS 服务器。
++
+[,shell]
+----
+cat /etc/resolv.conf
+----
+
+. 重启 `rke2-coredns` 部署。
++
+[,shell]
+----
+kubectl rollout restart deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+. 验证 `rke2-coredns` 部署是否已成功完成。
++
+[,shell]
+----
+kubectl rollout status deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+== 绑定从属设备
+
+您可以更新管理绑定接口 `mgmt-bo` 的从属接口。
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[使用 root 帐户登录到 Harvester 节点]。
+
+. 使用以下命令识别接口名称：
++
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    connected               bridge-mgmt +
+\... +
+mgmt-bo          bond      connected               bond-mgmt +
+ens6             ethernet  connected               bond-slave-ens6 +
+ens7             ethernet  disconnected            -- +
+\...
+----
+
+. 使用 `nmcli` 工具为接口创建连接并将其附加到管理绑定接口。
++
+示例：
++
+[shell]
+----
+$ nmcli con add type bond-slave ifname ens7 master mgmt-bo +
+连接 'bond-slave-ens7' (5a379328-178a-4167-b065-b5426facd659) 成功添加。
+----
+
+您现在应该能够看到设备已连接。
+
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    connected               bridge-mgmt +
+\... +
+mgmt-bo          bond      connected               bond-mgmt +
+ens6             ethernet  connected               bond-slave-ens6 +
+ens7             ethernet  connected               bond-slave-ens7
+----

@@ -1,0 +1,156 @@
+= オペレーティングシステムに関する問題
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+HarvesterはopenSUSEベースのOSで動作します。このOSは https://github.com/rancher/elemental-toolkit[elemental-toolkit]によって生成されたアーティファクトです。以下のセクションには、ユーザーがOS関連の問題をトラブルシューティングするための情報とヒントが含まれています。
+
+== Harvesterノードにログインする方法
+
+ユーザーは、インストール時に提供されたパスワードまたはSSH鍵ペア、そしてユーザー名`rancher`を使用してHarvesterノードにログインできます。
+ユーザー`rancher`は、パスワードを入力せずに特権コマンドを実行できます：
+
+----
+# Run a privileged command
+rancher@node1:~> sudo blkid
+
+# Or become root
+rancher@node1:~> sudo -i
+node1:~ # blkid
+----
+
+== パッケージをインストールするにはどうすればよいですか？なぜ一部のパスが読み取り専用なのですか？
+
+OSファイルシステムは、コンテナイメージのように、イメージベースで不変ですが、一部のディレクトリを除きます。
+
+デバッグ目的でHarvester OSにパッケージされていないプログラムを実行するには、*toolboxコンテナ*を使用することをお勧めします。 https://harvesterhci.io/kb/package_your_own_toolbox_image/[この記事]を参照して、toolboxコンテナの構築と実行方法を学んでください。
+
+Harvester OSは、一時的に読み書きモードを有効にする方法も提供しています。以下の手順に従ってください：
+
+[CAUTION]
+====
+読み書きモードを有効にすると、ファイルが変更された場合にシステムが壊れる可能性があります。自己責任でご利用ください。
+====
+
+* バージョン`v0.3.0`の場合、読み書きモードを有効にした後、 https://github.com/harvester/harvester/issues/1388[一部のディレクトリを非オーバーレイにするための回避策を適用する必要があります。]稼働中のHarvesterノードで、以下のコマンドをrootとして実行してください：
++
+----
+  cat > /oem/91_hack.yaml <<'EOF'
+  name: "Rootfs Layout Settings for debugrw"
+  stages:
+    rootfs:
+      - if: 'grep -q root=LABEL=COS_STATE /proc/cmdline && grep -q rd.cos.debugrw /proc/cmdline'
+        name: "Layout configuration for debugrw"
+        environment_file: /run/cos/cos-layout.env
+        environment:
+          RW_PATHS: " "
+  EOF
+----
+
+* システムを再起動してGRUBメニューに入ります。ESCを押してメニューに留まります。
++
+image::troubleshooting/grub-menu.png[]
+
+* 最初のメニューエントリで`e`を押してください。`rd.cos.debugrw`を`linux (loop0)$kernel $kernelcmd`行に追加します。システムを起動するには`Ctrl + x`を押してください。
++
+image::troubleshooting/edit-boot-parameter.png[]
+
+== カーネルパラメータを永続的に編集する方法
+
+[NOTE]
+====
+以下の手順は回避策です。Harvesterは、恒久的な解決策が整った際にコミュニティに通知します。
+====
+
+* 状態ディレクトリを読み書きモードで再マウントします：
++
+----
+  # blkid -L COS_STATE
+  /dev/vda2
+  # mount -o remount,rw /dev/vda2 /run/initramfs/cos-state
+----
+
+* grub設定ファイルを編集し、`linux (loop0)$kernel $kernelcmd`行にパラメータを追加します。以下の例では、`nomodeset`パラメータを追加します：
++
+----
+  # vim /run/initramfs/cos-state/grub2/grub.cfg
+  menuentry "${display_name}" --id cos {
+    # label is kept around for backward compatibility
+    set label=${active_label}
+    set img=/cOS/active.img
+    loopback $loopdev /$img
+    source ($loopdev)/etc/cos/bootargs.cfg
+    linux ($loopdev)$kernel $kernelcmd ${extra_cmdline} ${extra_active_cmdline} nomodeset
+    initrd ($loopdev)$initramfs
+  }
+----
+
+* 変更を有効にするには再起動してください。
+
+== デフォルトのGRUBブートメニューエントリを変更する方法
+
+デフォルトエントリを変更するには、まずメニューエントリの`--id`属性を確認してください。GRUBメニューエントリは以下のファイルにあります：
+
+* `/run/initramfs/cos-state/grub2/grub.cfg`:デフォルト、フォールバック、およびリカバリエントリを含みます
+* `/run/initramfs/cos-state/grubcustom`:デバッグエントリを含みます
+
+以下の例では、エントリのIDは`debug`です。
+
+----
+# cat \
+    /run/initramfs/cos-state/grub2/grub.cfg \
+    /run/initramfs/cos-state/grubcustom
+
+<...>
+menuentry "${display_name} (debug)" --id debug {
+  search --no-floppy --set=root --label COS_STATE
+  set img=/cOS/active.img
+  set label=COS_ACTIVE
+  loopback loop0 /$img
+  set root=($root)
+  source (loop0)/etc/cos/bootargs.cfg
+  linux (loop0)$kernel $kernelcmd ${extra_cmdline} ${extra_passive_cmdline} ${crash_kernel_params}
+  initrd (loop0)$initramfs
+}
+----
+
+以下のコマンドを実行することでデフォルトエントリを設定できます：
+
+----
+# mount -o remount,rw /run/initramfs/cos-state
+# grub2-editenv /run/initramfs/cos-state/grub_oem_env set saved_entry=debug
+----
+
+必要に応じて、コマンド`grub2-editenv /run/initramfs/cos-state/grub_oem_env unset saved_entry`を実行することで変更を元に戻すことができます。
+
+== システムクラッシュまたはハングをデバッグする方法
+
+=== クラッシュログを収集します
+
+システムがクラッシュした際にカーネルパニックのトレースがシステムログに記録されない場合、クラッシュログを見つける信頼できる方法の一つはシリアルコンソールを使用することです。
+
+カーネルメッセージをシリアルコンソールに出力するには、以下の手順を使用してください：
+
+* システムをGRUBメニューにブートします。ESCを押してメニューに留まります。
++
+image:troubleshooting/grub-menu.png[]
+
+* 最初のメニューエントリで`e`を押してください。`console=ttyS0,115200n8`を`linux (loop0)$kernel $kernelcmd`行に追加します。システムを起動するには`Ctrl + x`を押してください。
++
+image::troubleshooting/edit-boot-parameter-serial.png[]
++
+[NOTE]
+====
+環境に応じて https://www.kernel.org/doc/html/latest/admin-guide/serial-console.html[コンソールオプション]を調整してください。*必ず*行の最後に`console=`文字列を追加してください。
+====
+
+* ログをキャプチャするためにシリアルポートに接続します。
+
+=== クラッシュダンプを収集します。
+
+カーネルパニックのクラッシュの場合、kdumpを使用してクラッシュダンプを収集できます。
+
+デフォルトでは、OSはkdump機能を有効にせずにブートされます。ユーザーは、ブート時に`debug`メニューエントリを選択することで機能を有効にできます。以下の例のように：
+
+image::troubleshooting/grub-menu-debug.png[]
+
+システムがクラッシュすると、クラッシュダンプは`/var/crash/<time>`ディレクトリに保存されます。クラッシュダンプを開発者に提供することで、問題のトラブルシューティングと解決を助けます。

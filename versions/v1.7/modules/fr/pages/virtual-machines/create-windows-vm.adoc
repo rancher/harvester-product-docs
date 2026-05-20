@@ -1,0 +1,234 @@
+= Créer une machine virtuelle Windows
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Créez une ou plusieurs machines virtuelles à partir de la page *Machines Virtuelles*.
+
+[NOTE]
+====
+Pour créer des machines virtuelles Linux, veuillez vous référer à xref:./create-vm.adoc[cette page].
+====
+
+== Comment créer une machine virtuelle Windows
+
+=== Section d'en-tête
+
+. Créez une instance de machine virtuelle unique ou plusieurs instances de machines virtuelles.
+. Définissez le nom de la machine virtuelle.
+. (Optionnel) Fournissez une description pour la machine virtuelle.
+. (Optionnel) Sélectionnez le modèle de machine virtuelle `windows-iso-image-base-template`. Ce modèle ajoutera un volume avec les `virtio` pilotes pour Windows.
+
+=== Onglet de base
+
+. Configurez le nombre de `CPU` cœurs attribués à la machine virtuelle.
+. Configurez la quantité de `Memory` attribuée à la machine virtuelle.
+
+image::vm/create-windows-vm.png[create-windows-vm]
+
+[NOTE]
+====
+Comme mentionné ci-dessus, il est recommandé d'utiliser le modèle de machine virtuelle Windows. La section `Volumes` décrira les options que le modèle de machine virtuelle Windows a créées automatiquement.
+====
+
+[CAUTION]
+====
+Les valeurs `bootOrder` doivent d'abord être définies avec l'image d'installation. Si vous le changez, votre machine virtuelle pourrait ne pas démarrer sur le disque d'installation.
+====
+
+=== Onglet Volumes
+
+. Le *premier volume* est un `Image Volume` avec les valeurs suivantes{nbsp}:
+ .. `Name` : La valeur `cdrom-disk` est définie par défaut. Vous pouvez la conserver ou la changer.
+ .. `Type` : Sélectionnez `cd-rom`.
+ .. `Image` : Sélectionnez l'image Windows à installer. Voir xref:../virtual-machines/vm-images/upload-image.adoc[Télécharger des images] pour la description complète sur la façon de créer de nouvelles images.
+ .. `Size` : La valeur `20` est définie par défaut. Vous pouvez la changer si votre image a une taille plus grande.
+ .. `Bus` : La valeur `SATA` est définie par défaut. Il est recommandé de ne pas la changer.
+. Le *deuxième volume* est un `Volume` avec les valeurs suivantes{nbsp}:
+ .. `Name` : La valeur `rootdisk` est définie par défaut. Vous pouvez la conserver ou la changer.
+ .. `Type` : Sélectionnez `disk`.
+ .. `StorageClass` : Vous pouvez utiliser la StorageClass par défaut `harvester-longhorn` ou en spécifier une personnalisée.
+ .. `Size` : La valeur `32` est définie par défaut. Voir les exigences en matière d'espace disque pour https://docs.microsoft.com/en-us/windows-server/get-started/hardware-requirements#storage-controller-and-disk-space-requirements[Windows Server] et https://docs.microsoft.com/en-us/windows/whats-new/windows-11-requirements#hardware-requirements[Windows 11] avant de changer cette valeur.
+ .. `Bus` : La valeur `VirtIO` est définie par défaut. Vous pouvez la conserver ou la changer pour les autres options disponibles, `SATA` ou `SCSI`.
+. Le *troisième volume* est un `Container` avec les valeurs suivantes{nbsp}:
+ .. `Name` : La valeur `virtio-container-disk` est définie par défaut. Vous pouvez la conserver ou la changer.
+ .. `Type` : Sélectionnez `cd-rom`.
+ .. `Docker Image` : La valeur `registry.suse.com/suse/vmdp/vmdp:2.5.4.2` est définie par défaut. Nous recommandons de ne pas changer cette valeur.
+ .. `Bus` : La valeur `SATA` est définie par défaut. Nous recommandons de ne pas changer cette valeur.
+. Vous pouvez ajouter des disques supplémentaires en utilisant les boutons `Add Volume`, `Add Existing Volume`, `Add VM Image` ou `Add Container`.
+
+image::vm/create-windows-vm-volumes.png[create-windows-vm-volumes]
+
+=== Onglet Réseaux
+
+. Le *Réseau de gestion* est ajouté par défaut avec les valeurs suivantes{nbsp}:
+ .. `Name` :  La valeur `default` est définie par défaut. Vous pouvez le conserver ou le changer.
+ .. `Model` : La valeur `e1000` est définie par défaut. Vous pouvez le conserver ou le changer pour les autres options disponibles dans le menu déroulant.
+ .. `Network` : La valeur `management Network` est définie par défaut. Vous ne pouvez pas changer cette option si aucun autre réseau n'a été créé. Voir xref:../networking/vm-network.adoc[Réseau VM] pour la description complète sur la façon de créer de nouveaux réseaux.
+ .. `Type` : La valeur `masquerade` est définie par défaut. Vous pouvez le conserver ou le changer pour l'autre option disponible, `bridge`.
+. Vous pouvez ajouter des réseaux supplémentaires en cliquant sur `Add Network`.
+
+image::vm/create-windows-vm-networks.png[create-windows-vm-networks]
+
+[CAUTION]
+====
+Modifier les paramètres de `Node Scheduling` peut impacter les fonctionnalités de {harvester-product-name}, comme la désactivation de `Live migration`.
+====
+
+=== Onglet de planification des nœuds
+
+. `Node Scheduling` est défini sur `Run VM on any available node` par défaut. Vous pouvez le conserver ou le changer pour les autres options disponibles dans le menu déroulant.
+
+image::vm/create-windows-vm-scheduling.png[create-windows-vm-scheduling]
+
+=== Onglet Options avancées
+
+. `OS Type` : La valeur `Windows` est définie par défaut. Il est recommandé de ne pas le changer.
+. `Machine Type` : La valeur `None` est définie par défaut. Il est recommandé de ne pas le changer. Consultez la documentation https://kubevirt.io/user-guide/virtual_machines/virtual_hardware/#machine-type[KubeVirt Machine Type] avant de modifier cette valeur.
+. (Facultatif) `Hostname`{nbsp}: Définissez le nom d'hôte de la machine virtuelle.
+. (Facultatif) `Cloud Config`{nbsp}: Les valeurs de `User Data` et `Network Data` sont toutes deux définies avec des valeurs par défaut. Actuellement, ces configurations ne sont pas appliquées aux machines virtuelles basées sur Windows.
+. (Facultatif) `Enable TPM`, `Booting in EFI mode`, `Secure Boot`{nbsp}: Le dispositif TPM 2.0 et le firmware UEFI avec Secure Boot sont des exigences strictes pour Windows 11.
+
+[NOTE]
+====
+Actuellement, seuls les vTPM non persistants sont pris en charge, et leur état est effacé après chaque arrêt de la machine virtuelle. Par conséquent, https://learn.microsoft.com/en-us/windows/security/information-protection/bitlocker/bitlocker-overview[Bitlocker] ne doit pas être activé.
+====
+
+image::vm/create-windows-vm-advanced.png[create-windows-vm-advanced]
+
+=== Section de pied de page
+
+Une fois tous les paramètres en place, cliquez sur `Create`.
+
+[NOTE]
+====
+Si vous devez ajouter des paramètres avancés, vous pouvez modifier la configuration de la machine virtuelle directement en cliquant sur `Edit as YAML`.
+Et si vous souhaitez annuler toutes les modifications apportées, cliquez sur `Cancel`.
+====
+
+== Installation de Windows
+
+. Sélectionnez la machine virtuelle que vous venez de créer, puis cliquez sur `Start`.
+. Démarrez l'installateur et suivez les instructions données par l'installateur.
+. (Optionnel) Si vous utilisez des volumes basés sur `virtio`, vous devrez charger le pilote spécifique pour permettre à l'installateur de les détecter. Si vous utilisez le modèle de machine virtuelle `windows-iso-image-base-template`, l'instruction est la suivante{nbsp}:
+ .. Cliquez sur `Load driver`, puis cliquez sur `Browse` dans la boîte de dialogue, et trouvez un lecteur CD-ROM avec un préfixe `VMDP-WIN`. Ensuite, trouvez le répertoire du pilote selon la version de Windows que vous installez{nbsp}; par exemple, Windows Server 2012r2 devrait développer `win8.1-2012r2` et choisir le répertoire `pvvx` à l'intérieur.
+ image:vm/find-virtio-driver-directory.png[find-virtio-driver-directory]
+ .. Cliquez sur `OK` pour permettre à l'installateur de scanner ce répertoire à la recherche de pilotes, choisissez `SUSE Block Driver for Windows`, et cliquez sur `Next` pour charger le pilote.
+ image:vm/select-virtio-block-driver.png[select-virtio-block-driver]
+ .. Attendez que l'installateur charge le pilote. Si vous choisissez la bonne version du pilote, les volumes `virtio` seront détectés une fois le pilote chargé.
+ image:vm/installer-found-virtio-drive.png[installer-found-virtio-drive]
+. (Optionnel) Si vous utilisez d'autres matériels basés sur `virtio` comme un adaptateur réseau, vous devrez installer ces pilotes manuellement après avoir terminé l'installation. Pour installer des pilotes, ouvrez le disque de pilotes VMDP et utilisez l'installateur en fonction de votre plateforme.
+
+La matrice de support du pack de pilotes VMDP pour Windows est la suivante (supposons que le chemin du lecteur CD-ROM VMDP soit E) :
+
+|===
+| Version | Pris en charge | Chemin du pilote
+
+| Windows 7
+| Non
+| `N/A`
+
+| Windows Server 2008
+| Non
+| `N/A`
+
+| Windows Server 2008r2
+| Non
+| `N/A`
+
+| Windows 8 x86(x64)
+| Oui
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows Server 2012 x86(x64)
+| Oui
+| `E:\win8-2012\x86(x64)\pvvx`
+
+| Windows 8.1 x86(x64)
+| Oui
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows Server 2012r2 x86(x64)
+| Oui
+| `E:\win8.1-2012r2\x86(x64)\pvvx`
+
+| Windows 10 x86(x64)
+| Oui
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2016 x86(x64)
+| Oui
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows Server 2019 x86(x64)
+| Oui
+| `E:\win10-server16-19\x86(x64)\pvvx`
+
+| Windows 11 x86(x64)
+| Oui
+| `E:\win10-11-server22\x86(x64)\pvvx`
+
+| Windows Server 2022 x86(x64)
+| Oui
+| `E:\win10-11-server22\x86(x64)\pvvx`
+|===
+
+[NOTE]
+====
+Si vous n'avez pas utilisé le modèle `windows-iso-image-base-template`, et que vous avez toujours besoin de `virtio` appareils, veuillez vous assurer d'ajouter votre pilote virtio Windows personnalisé pour permettre la détection correcte du matériel.
+====
+
+[NOTE]
+====
+Pour des instructions complètes sur l'installation du pilote invité VMDP et des outils, consultez la documentation à https://documentation.suse.com/sle-vmdp/2.5/html/vmdp/index.html
+====
+
+== Problèmes connus
+
+=== ISO Windows incapable de démarrer en mode EFI
+
+Lorsque vous utilisez le mode EFI avec Windows, vous pouvez constater que le système a démarré avec d'autres appareils comme HDD ou un shell UEFI comme celui ci-dessous{nbsp}:
+
+image::vm/efi-shell.png[efi-shell]
+
+C'est parce que Windows demandera un `Press any key to boot from CD or DVD...` pour laisser l'utilisateur décider s'il souhaite démarrer à partir de l'ISO d'installation ou non, et cela nécessite une intervention humaine pour permettre au système de démarrer à partir du CD ou du DVD.
+
+image::vm/boot-from-cd.png[boot-from-cd]
+
+Alternativement, si le système a déjà démarré dans le shell UEFI, vous pouvez taper `reset` pour forcer le système à redémarrer. Une fois l'invite apparue, vous pouvez appuyer sur n'importe quelle touche pour permettre au système de démarrer à partir de l'ISO Windows.
+
+=== La VM plante lorsque la mémoire réservée n'est pas suffisante
+
+Il y a un problème connu avec la machine virtuelle Windows lorsqu'elle est allouée plus de 8GiB sans suffisamment de mémoire réservée configurée. La machine virtuelle plante sans avertissement.
+
+Cela peut être corrigé en allouant au moins 256MiB de mémoire réservée au modèle dans l'onglet Options avancées. Si `256MiB` ne fonctionne pas, essayez `512MiB`.
+
+image::vm/reserved-memory-config.png[configuration-de-mémoire-réservée]
+
+=== BSoD (Écran bleu de la mort) au premier démarrage de Windows
+
+Il existe un problème connu avec les machines virtuelles Windows utilisant Windows Server 2016 et des versions ultérieures, un BSoD avec le code d'erreur `KMODE_EXCEPTION_NOT_HANDLED` peut apparaître au premier démarrage de Windows. Nous continuons à l'examiner et nous corrigerons ce problème dans une future version.
+
+En tant que solution de contournement, vous pouvez créer ou modifier le fichier `/etc/modprobe.d/kvm.conf` dans l'installation de {harvester-product-name} en mettant à jour `/oem/99_custom.yaml` comme ci-dessous{nbsp}:
+
+[,YAML]
+----
+name: Harvester Configuration
+stages:
+  initramfs:
+  - commands: # ...
+    files:
+    - path: /etc/modprobe.d/kvm.conf
+      permissions: 384
+      owner: 0
+      group: 0
+      content: |
+          options kvm ignore_msrs=1
+      encoding: ""
+      ownerstring: ""
+      # ...
+----
+
+[NOTE]
+====
+Ceci est toujours une solution expérimentale. Pour plus d'informations, veuillez vous référer à https://github.com/harvester/harvester/issues/276[ce problème] et veuillez nous faire savoir si vous avez rencontré des problèmes après avoir appliqué cette solution de contournement.
+====

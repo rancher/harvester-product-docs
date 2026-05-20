@@ -1,0 +1,39 @@
+= Editar un volumen
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+Después de crear un volumen, puedes editar tu volumen haciendo clic en el botón `⋮` y seleccionando la opción `Edit Config`.
+
+== Expandir un volumen
+
+Puedes expandir un volumen aumentando el valor del parámetro `Size` directamente. Para evitar que la expansión se vea afectada por datos R/W inesperados, {harvester-product-name} solo admite expansión `offline`. Debes apagar la VM o desacoplar el volumen primero si está adjunto a una VM, y el volumen desacoplado se adjuntará automáticamente a un nodo aleatorio con https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[modo de mantenimiento] para expandirse automáticamente.
+
+image::volume/expand-volume.png[expand-volume]
+
+=== Expansión de volumen en línea
+
+Para minimizar el tiempo de inactividad, {harvester-product-name} te permite expandir volúmenes que están adjuntos a una máquina virtual en funcionamiento o que tienen un PVC adjunto a un pod en funcionamiento en el clúster huésped. Dependiendo del proveedor de almacenamiento subyacente, es posible que debas tomar pasos adicionales para utilizar esta función.
+
+* *{longhorn-product-name}*: {harvester-product-name} considera que {longhorn-product-name} tiene soporte para la expansión de volumen en línea, incluso si existen diferencias entre las versiones del Motor de Datos Longhorn. Actualmente, el Motor de Datos V1 admite completamente la expansión de volumen en línea, mientras que el Motor de Datos V2 no admite la expansión de volumen en absoluto (independientemente del estado de conexión del volumen).
+
+* *Almacenamiento de terceros*: {harvester-product-name} rechaza las solicitudes de expansión de volumen en línea para almacenamiento de terceros por defecto. Si has confirmado que tu proveedor de almacenamiento admite la expansión de volumen en línea, puedes utilizar la configuración xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`] para marcar a ese proveedor de almacenamiento como validado.
+
+[IMPORTANT]
+====
+El redimensionamiento en línea de volúmenes de sistema de archivos conectados en caliente no es compatible. Cuando un volumen de sistema de archivos está montado en el pod `virt-launcher`, conectar en caliente un nuevo volumen de sistema de archivos activa las operaciones `NodeUnPublish` y `NodeUnstage` en el volumen anterior, lo que impide un redimensionamiento adicional.
+
+Además, no puedes utilizar la función xref:virtual-machines/edit-vm.adoc[Editar Config] en la interfaz de usuario {harvester-product-name} *Máquinas Virtuales* para redimensionar un volumen mientras la máquina virtual está en funcionamiento. Ciertas limitaciones impiden que la interfaz de usuario actual muestre con precisión los resultados de las operaciones de expansión de volumen. Para obtener más información, consulta https://github.com/harvester/harvester/issues/8669[problema #8669].
+====
+
+== Finalizar una expansión de volumen fallida
+
+Si especificas un tamaño mayor que la capacidad de {longhorn-product-name} durante la expansión, el estado de la expansión del volumen quedará atascado en `Resizing`. Puedes finalizar la expansión de volumen fallida haciendo clic en el botón `⋮` y seleccionando la opción `Cancel Expand`.
+
+image::volume/cancel-failed-volume-expansion.png[cancel-failed-volume-expansion]
+
+== Cambiar la StorageClass de un volumen existente
+
+La StorageClass de un volumen existente no se puede cambiar. Sin embargo, puedes cambiar la StorageClass al restaurar un nuevo volumen desde la instantánea siguiendo los pasos a continuación:
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[Tomar una instantánea del volumen].
+. Selecciona StorageClass al xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[restaurar el volumen usando la instantánea].

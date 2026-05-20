@@ -1,0 +1,197 @@
+= ISO 安装
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+{harvester-product-name} 作为可引导的设备映像，您可以直接在裸机服务器上使用 ISO 映像进行安装。要获取 ISO 映像，请从 https://github.com/harvester/harvester/releases[发布] 页面下载 *💿 harvester-v1.x.x-amd64.iso*。
+
+在安装过程中，您可以选择 *创建新集群* 或 *将节点加入现有集群*。
+
+以下 https://youtu.be/X0VIGZ_lExQ[视频] 显示了 ISO 安装的快速概述。
+
++++++++++<iframe width="800" height="400" src="https://www.youtube.com/embed/X0VIGZ_lExQ" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="">[]++++++</iframe>+++++++++
+
+== 安装步骤
+
+. 挂载 ISO 文件并通过选择 `Harvester Installer` 选项启动服务器。
++
+image::install/iso-install.png[iso-install.png]
++
+安装程序会自动检查硬件，并在未满足最低要求时显示警告信息。如果所有检查都通过，则不会显示 *硬件检查* 屏幕。
++
+image::install/hardware-checks.png[hardware-checks.png]
+
+. 使用箭头键选择安装模式。默认情况下，第一个节点将是集群的管理节点。
++
+image::install/choose-installation-mode.png[choose-installation-mode.png]
++
+** `Create a new Harvester cluster`: 创建一个全新的集群。
+** `Join an existing Harvester cluster`: 加入现有集群。您需要加入的集群的 VIP 和集群词元。
+** `Install Harvester binaries only`：如果选择此选项，首次启动后需要进行额外的设置。
++
+[IMPORTANT]
+====
+当有 3 个节点时，最先添加的其他 2 个节点会自动提升为管理节点，以形成 HA 集群。如果您想从不同区域提升管理节点，可以在自定义主机步骤中通过提供 xref:../../installation-setup/config/configuration-file.adoc[配置文件] 的 URL 在 xref:../../installation-setup/config/configuration-file.adoc#_os_labels[os.labels] 配置中添加节点标签 `topology.kubernetes.io/zone`。在这种情况下，至少需要三个不同的区域。
+====
+
+. 为节点选择一个角色。如果您选择了安装模式 `Join an existing Harvester cluster`，则需要执行此步骤。
++
+image::install/select-role.png[choose-node-role.png]
++
+** `Default Role`：允许节点作为管理节点或工作节点运行。此角色没有任何特定的权限或限制。
+** `Management Role`：当 {harvester-product-name} 提升节点为管理节点时，允许节点被优先考虑。
+** `Witness Role`：限制节点在特定集群中作为见证节点（仅作为etcd节点运行）。
+** `Worker Role`：限制节点在特定集群中作为工作节点（永远不会提升为管理节点）。
+
+. 配置访问节点的密码。默认的SSH用户是 `rancher`。
++
+image::install/config-password.png[config-password.png]
+
+. 选择您想要安装集群的安装磁盘和您想要存储虚拟机数据的数据磁盘。默认情况下，{harvester-product-name} 对于UEFI和BIOS使用 https://en.wikipedia.org/wiki/GUID_Partition_Table[GUID分区表(GPT)] 分区方案。如果您使用BIOS启动，则可以选择 https://en.wikipedia.org/wiki/Master_boot_record[主引导记录(MBR)]。
++
+[IMPORTANT]
+====
+在v1.7.0中，已弃用对传统BIOS启动的支持，并将在以后的版本中移除。使用此启动模式的现有 {harvester-product-name} 集群将继续运行，但升级到更高版本可能需要在UEFI模式下重新安装。为避免问题和中断，在新安装中使用UEFI。
+====
++
+image::install/choose-installation-target-data-disk.png[choose-installation-target-data-disk.png]
++
+** `Installation disk`：用于安装集群的磁盘。
+** `Data disk`：用于存储虚拟机数据的磁盘。建议选择单独的磁盘来存储虚拟机数据。这不适用于见证节点。
+** `Persistent size`：如果您只有一个磁盘或将同一个磁盘用于操作系统和虚拟机数据，则需要配置持久分区大小以存储系统软件包和容器镜像。默认和最小持久分区大小为150 GiB。您可以指定大小，例如 200Gi 或 153600Mi。
+
+. 配置节点的 `HostName`。
++
+image::install/config-hostname.png[config-hostname.png]
+
+. 为管理网络配置网络接口。默认情况下，{harvester-product-name} 创建一个名为 `mgmt-bo` 的 xref:../../installation-setup/requirements.adoc#_hardware_requirements[绑定接口]，用于 xref:../../networking/cluster-network.adoc#_built_in_cluster_network[内置管理集群网络]，IP 地址可以通过 DHCP 配置或静态分配。
++
+image::install/config-network.png[config-network.png]
++
+[NOTE]
+====
+连接到绑定接口的物理交换机必须严格配置为干道端口。这些端口必须接受标记流量，并发送带有虚拟机网络使用的 VLAN ID 的标记流量。
+
+在集群的生命周期内，无法更改节点 IP。如果使用 DHCP，您必须确保 DHCP 服务器始终为同一节点提供相同的 IP。如果节点 IP 被更改，相关节点将无法加入集群，甚至可能导致集群崩溃。
+
+此外，配置 DHCP 服务器时，您需要添加 _路由器_ 选项 (`option routers`)。此选项用于在主机上添加默认路由。没有默认路由，节点将无法启动。
+
+例如：
+
+----
+Linux~ # ip route
+default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+绑定接口的默认 MTU 值为 `1500`。要使用不同的 MTU 值，请按照以下步骤在 Harvester 配置文件中配置 xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[[`install.management_interface`] 设置。
+
+有关更多信息，请参见 xref:./pxe-boot-install.adoc#_dhcp_server_configuration[DHCP 服务器配置]。
+====
+
+. （可选）为集群 Pod 和服务配置 CIDR。
++
+要使用默认值，请留空字段。
++
+image::install/config-cluster-cidrs.png[config-cluster-cidrs.png]
++
+[IMPORTANT]
+====
+CIDR 值不得重叠，并且必须在 10.0.0.0/8、172.16.0.0/12 或 192.168.0.0/16 的私有 IP 地址范围内。
+
+DNS 服务 IP 必须在 *服务 CIDR* 字段定义的范围内。
+====
++
+有效的 CIDR 配置示例：
++
+* *Pod CIDR*:172.16.0.0/16
+* *服务 CIDR*:172.22.0.0/16
+* *集群 DNS IP*:172.22.0.10
+
+. （可选）配置 `DNS Servers`。使用逗号作为分隔符添加更多 DNS 服务器。留空以使用默认 DNS 服务器。
++
+image::install/config-dns-server.png[config-dns-server.png]
+
+. 通过选择 `VIP Mode` 配置虚拟 IP (VIP)。此 VIP 用于访问集群或其他节点加入集群。
++
+[NOTE]
+====
+对于配置了静态 MAC 到 IP 地址映射的 DHCP 设置，请在提供的字段中输入 MAC 地址以获取唯一的持久虚拟 IP (VIP)。否则，请留空。
+====
++
+image::install/config-virtual-ip.png[config-virtual-ip.png]
+
+. 配置 `Cluster token`。此词元用于将其他节点添加到集群。
++
+image::install/config-cluster-token.png[config-cluster-token.png]
+
+. 配置 `NTP servers` 以确保所有节点的时间同步。其默认值为 `0.suse.pool.ntp.org`。使用逗号作为分隔符添加更多 NTP 服务器。
++
+image::install/config-ntp-server.png[config-ntp-server.png]
++
+[NOTE]
+====
+使用多个 NTP 服务器提供冗余、更好的准确性、容错和提高性能。它确保即使一个服务器失败或提供错误数据，时间同步仍然继续，并有助于在不同服务器之间分配负载。
+====
+
+. （可选）如果您需要使用 HTTP 代理访问外部网络，请输入 `Proxy address`。否则，请留空。
++
+image::install/config-proxy.png[config-proxy.png]
+
+. （可选）您可以通过提供 `HTTP URL` 来选择导入 SSH 密钥。例如，您的 GitHub 公共密钥 `https://github.com/<username>.keys` 可以使用。
++
+image::install/import-ssh-keys.png[import-ssh-keys.png]
+
+. （可选）如果您需要使用 xref:../../installation-setup/config/configuration-file.adoc[配置文件] 自定义主机，请在此输入 `HTTP URL`。
++
+image::install/remote-config.png[remote-config.png]
+
+. 审核并确认您的安装选项。确认安装选项后，{harvester-product-name} 将安装到您的主机上。安装可能需要几分钟才能完成。
++
+image::install/confirm-install.png[confirm-install.png]
+
+. 安装完成后，您的节点将重新启动。重启后，控制台将显示管理 URL 和状态。Web 界面的默认 URL 是 `https://your-virtual-ip`。您可以使用 `F12` 从控制台切换到 Shell，并输入 `exit` 返回控制台。
++
+
+[NOTE]
+====
+在第一页选择 `Install Harvester binaries only` 需要在第一次启动后进行额外设置。
+====
+
++
+image::install/iso-installed.png[iso-installed.png]
+
+. 首次登录时，系统会提示您为默认 `admin` 用户设置密码。
++
+image::install/first-time-login.png[first-login.png]
+
+////
+
+[NOTE]
+====
+In some cases, if you are using an older VGA connector, you may encounter an `panic: invalid dimensions` error with ISO installation. See issue [#2937](https://github.com/harvester/harvester/issues/2937#issuecomment-1278545927) for a workaround.
+====
+
+////
+
+== 已知问题
+
+=== 安装程序在使用旧款显卡/显示器时可能会崩溃。
+
+在某些情况下，如果您使用的是旧款显卡/显示器，您可能会在 ISO 安装过程中遇到 `panic: invalid dimensions` 错误。
+
+image::install/invalid-dimensions.png[invalid-dimensions.png]
+
+我们正在处理这个已知问题，并计划在未来的版本中修复。您可以尝试使用另一个 GRUB 选项，强制其在启动时使用 `1024x768` 的分辨率。
+
+image::install/force-resolution.png[force-resolution.png]
+
+如果您使用的版本早于 v1.1.1，请尝试以下解决方法：
+
+. 使用 ISO 启动，并按 `E` 编辑第一个菜单项：
++
+image::install/grub-menu.png[grub-menu.png]
+
+. 将 `vga=792` 附加到以 `$linux` 开头的行：
++
+image::install/edit-menu-entry.png[edit-menu-entry.png]
+
+. 按 `Ctrl+X` 或 `F10` 启动。

@@ -1,0 +1,160 @@
+= Téléverser des images
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+Actuellement, il existe trois méthodes prises en charge pour créer une image{nbsp}: téléverser des images via URL, téléverser des images via des fichiers locaux et créer des images via des volumes.
+
+== Téléverser des images via URL
+
+[tabs]
+======
+UI::
++
+Pour importer des images de machine virtuelle dans la page *Images*, saisissez une URL accessible depuis le cluster. La description et les étiquettes sont optionnelles.
++
+[NOTE]
+====
+* Le nom de l'image est automatiquement rempli en utilisant le nom de fichier de l'adresse URL. Vous pouvez personnaliser le nom de l'image à tout moment.
+* Évitez d'utiliser une URL de build quotidien (par exemple, le https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[build quotidien d'Ubuntu Jammy]). Lorsque toutes les répliques d'une image de sauvegarde Longhorn sont perdues, Longhorn tente de télécharger à nouveau le fichier à des fins d'auto-réparation. Utiliser une URL de build quotidien pose problème car l'URL elle-même change, entraînant un décalage de somme de contrôle et un conflit qui entraîne la perte de répliques.
+====
++
+[CAUTION]
+====
+De grands fichiers image peuvent causer des problèmes de mémoire dans {harvester-product-name} lorsque vous utilisez des StorageClasses tiers avec des URL de téléchargement hébergées sur des serveurs qui ne prennent pas en charge les requêtes de plage HTTP (par exemple, `http.server` de Python). Pour des téléchargements fiables, utilisez plutôt NGINX ou Apache. (Ce problème est résolu dans la version v1.6.1.)
+====
++
+image::upload-image.png[]
+
+API::
++
+Pour importer une image de machine virtuelle depuis un dépôt en utilisant l'API, créez un objet `VirtualMachineImage`. Vous devez spécifier une URL accessible depuis le cluster. 
++
+Exemple :
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap
+  namespace: default
+spec:
+  description: A human-readable description for the VM image
+  displayName: openSUSE-Leap
+  sourceType: download
+  url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+  checksum: 80c27afb7cd791ac86ee1b0b0c572a242f6142579db5beac841e71151d370cd6
+----
++
+Pour plus d'informations, consultez la xref:api.adoc[référence API]. 
+
+Terraform::
++
+[,json]
+----
+resource "harvester_image" "opensuse154" {
+  name      = "opensuse154"
+  namespace = "harvester-public"
+
+  display_name = "openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+  source_type  = "download"
+  url          = "https://downloadcontent-us1.opensuse.org/repositories/Cloud:/Images:/Leap_15.4/images/openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+}
+----
+======
+
+== Télécharger des images via fichier local
+
+Actuellement, les images qcow2, raw et image ISO sont prises en charge.
+
+[NOTE]
+====
+* Veuillez ne pas actualiser la page tant que le téléversement du fichier n'est pas terminé.
+====
+
+image::upload-image-local.png[]
+
+=== Erreur HTTP 413 dans {rancher-product-name} Gestion Multi-Cluster
+
+Vous pouvez téléverser des images depuis l'écran xref:/integrations/rancher/virtualization-management.adoc#_importing_harvester_cluster[*Gestion Multi-Cluster*] sur l'interface *{rancher-product-name} UI*. Lorsque le statut d'une image est _Téléchargement_ mais que l'indicateur de progression affiche _0%_ pendant une période prolongée, vérifiez le code d'état de la réponse HTTP. _413_ indique que la taille du corps de la requête dépasse la limite.
+
+image::img-413-code.png[]
+
+La taille maximale du corps de la requête doit être spécifique au cluster qui héberge {rancher-product-name} (par exemple, les clusters RKE2 ont une limite par défaut de 1 Mo mais aucune limite de ce type n'existe dans les clusters K3s).
+
+La solution actuelle consiste à téléverser des images depuis l'interface *{harvester-product-name} UI*. Si vous choisissez de téléverser des images depuis l'interface {rancher-product-name} UI, vous devrez peut-être configurer les paramètres associés sur le serveur d'entrée (par exemple, https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size[`proxy-body-size`] dans NGINX).
+
+Si {rancher-product-name} est déployé sur un cluster RKE2, effectuez les étapes suivantes{nbsp}:
+
+. Modifiez l'entrée {rancher-product-name}.
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. Indiquez une valeur pour `nginx.ingress.kubernetes.io/proxy-body-size`.
++
+Exemple :
++
+image:img-ingress-client-body.png[]
+
+. Supprimez l'image bloquée, puis redémarrez le processus de téléversement.
+
+=== Téléversement prolongé d'images volumineuses dans {rancher-product-name} Gestion Multi-Cluster
+
+Si vous téléversez une grande image (plus de 10 Go) depuis l'écran *Gestion Multi-Cluster* sur l'interface utilisateur {rancher-product-name}, l'opération peut prendre plus de temps que d'habitude et le statut de l'image (Téléversement) peut ne pas changer.
+
+Ce comportement est lié à _proxy-request-buffering_ dans la configuration d'ingress, qui est également spécifique au cluster qui héberge {rancher-product-name}.
+
+La solution actuelle consiste à téléverser des images depuis l'interface utilisateur *{harvester-product-name}*. Si vous choisissez de téléverser des images depuis l'interface utilisateur {rancher-product-name}, vous devrez peut-être configurer les paramètres associés sur le serveur d'ingress (par exemple, https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering[`proxy-request-buffering`] dans NGINX).
+
+Si {rancher-product-name} est déployé sur un cluster RKE2, effectuez les étapes suivantes{nbsp}:
+
+. Modifiez l'entrée {rancher-product-name}.
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. Désactiver `nginx.ingress.kubernetes.io/proxy-request-buffering`.
++
+Exemple :
++
+image:img-ingress-request-proxy-buffering.png[]
+
+. Supprimez l'image bloquée, puis redémarrez le processus de téléversement.
+
+=== Téléversement d'images précédemment téléchargées depuis {harvester-product-name}
+
+À partir de *v1.5.5*, Longhorn https://github.com/longhorn/backing-image-manager/pull/153[compresse les images de base pour le téléchargement]. Si vous essayez de téléverser une image de base compressée, {harvester-product-name} rejette la tentative et affiche le message *Échec du téléversement{nbsp}: la taille du fichier téléversé xxxx doit être un multiple de 512 octets car Longhorn utilise directIO par défaut* car les données compressées violent l'alignement des données de Longhorn.
+
+Avant de téléverser, décompressez les images de base en utilisant la commande `gzip -d <file name>`.
+
+== Créer des images via des volumes
+
+Sur la page *Volumes*, cliquez sur *Exporter l'image*. Entrez le nom de l'image et sélectionnez une StorageClass pour créer une image.
+
+image::volume/export-volume-to-image-1.png[]
+
+== StorageClass d'image
+
+Lors de la création d'une image, vous pouvez sélectionner une xref:/storage/storageclass.adoc[StorageClass] et utiliser ses paramètres prédéfinis tels que les réplicas, les sélecteurs de nœuds et les sélecteurs de disques.
+
+[NOTE]
+====
+L'image n'utilise pas directement le `StorageClass` sélectionné ici. C'est juste un modèle `StorageClass`.
+
+Au lieu de cela, elle crée une StorageClass spéciale en arrière-plan avec un nom de préfixe de `longhorn-`. Cela est fait automatiquement par le back-end {harvester-product-name}, mais il hérite des paramètres de la StorageClass que vous avez sélectionnée.
+====
+
+image::image-storageclass.png[]
+
+== Étiquettes d'image
+
+Vous pouvez ajouter des étiquettes à l'image, ce qui aide à identifier le type de système d'exploitation plus précisément. De plus, vous pouvez ajouter des étiquettes personnalisées pour le filtrage si nécessaire.
+
+Si le nom de votre image ou l'URL contient des informations valides, l'interface utilisateur reconnaît automatiquement le type de système d'exploitation et la catégorie d'image pour vous. Sinon, vous pouvez également spécifier manuellement ces étiquettes correspondantes sur l'interface utilisateur.
+
+image::image-labels.png[]

@@ -1,0 +1,46 @@
+= Clusters à nœud unique
+:revdate: 2025-07-16
+:page-revdate: {revdate}
+
+{harvester-product-name} prend en charge les clusters à nœud unique pour les implémentations qui peuvent tolérer une résilience réduite ou nécessitent des ressources minimales pour le déploiement initial. Vous pouvez créer des clusters à nœud unique en utilisant les méthodes d'installation standard (xref:/installation-setup/methods/iso-install.adoc[ISO], xref:/installation-setup/methods/usb-install.adoc[USB] et xref:/installation-setup/methods/pxe-boot-install.adoc[démarrage en environnement PXE]).
+
+Les clusters à nœud unique prennent en charge la plupart des fonctionnalités de {harvester-product-name}, y compris la création de clusters RKE2 et les mises à niveau de nœuds (avec certaines limitations). Cependant, ce type de déploiement présente les inconvénients clés suivants{nbsp}:
+
+* Pas de haute disponibilité{nbsp}: Les erreurs et les mises à jour nécessitant le redémarrage du nœud entraînent un temps d'arrêt des machines virtuelles en cours d'exécution.
+* Pas de migration à chaud et pas de support de zéro temps d'arrêt pendant les mises à niveau.
+
+== Conditions préalables
+
+Avant de commencer à déployer votre cluster à nœud unique, assurez-vous que les exigences suivantes sont satisfaites.
+
+* Matériel : xref:/installation-setup/requirements.adoc#_hardware_requirements[Utilisez du matériel de classe serveur] avec des ressources suffisantes pour exécuter {harvester-product-name} et une charge de travail de production. Les ordinateurs portables et la virtualisation imbriquée ne sont pas pris en charge.
+* Réseau : xref:/installation-setup/requirements.adoc#_port_requirements_for_nodes[Configurez les ports] en fonction du type de trafic à transmettre entre les machines virtuelles.
+
+== Nombre de répliques de la StorageClass par défaut
+
+{harvester-product-name} utilise des StorageClasses pour décrire comment {longhorn-product-name} doit provisionner des volumes. Chaque StorageClass a un paramètre qui définit le nombre de répliques à créer pour chaque volume.
+
+La StorageClass par défaut `harvester-longhorn` a une valeur de nombre de répliques de *3* pour une haute disponibilité. Si vous utilisez `harvester-longhorn` dans votre cluster à nœud unique, {longhorn-product-name} ne peut pas créer le nombre par défaut de répliques, et les volumes sont marqués comme _Degraded_ sur l'écran *Volumes* de l'interface utilisateur.
+
+Pour éviter ce problème, vous pouvez effectuer l'une des actions suivantes{nbsp}:
+
+* Changez le xref:/installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[nombre de répliques] de `harvester-longhorn` à *1* en utilisant un xref:/installation-setup/config/configuration-file.adoc[fichier de configuration].
+* xref:/storage/storageclass.adoc#_creating_a_storageclass[Créer une nouvelle StorageClass] avec le paramètre *Nombre de répliques* défini sur *1*. Une fois créé, localisez le nouveau StorageClass dans la liste, puis sélectionnez *⋮* > *Définir comme par défaut*.
+
+== Répliques multiples sur un nœud avec plusieurs disques
+
+{longhorn-product-name} crée uniquement une réplique pour chaque volume, même si le nœud a plusieurs disques, car *Replica Hard Anti-Affinity* est activé par défaut. Lorsqu'une réplique saine existe déjà sur un nœud, le planificateur est empêché de planifier de nouvelles répliques du même volume sur le nœud.
+
+Dans les clusters à haute disponibilité, *Replica Hard Anti-Affinity* garantit la redondance des volumes. Cependant, ce même mécanisme peut entraîner une dégradation des volumes dans les clusters à nœud unique (puisqu'aucun autre nœud n'est disponible pour la planification de nouvelles répliques).
+
+Si vous souhaitez que {longhorn-product-name} crée plusieurs répliques sur un nœud avec plusieurs disques, effectuez les étapes suivantes{nbsp}:
+
+. Activer https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_node_level_soft_anti_affinity[`Replica Node Level Soft Anti-Affinity`] : Lorsque ce paramètre est activé, {longhorn-product-name} planifie de nouvelles répliques sur des nœuds avec des répliques saines existantes du même volume.
+. Désactiver https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_disk_level_soft_anti_affinity[`Replica Disk Level Soft Anti-Affinity`] : Lorsque ce paramètre est désactivé, {longhorn-product-name} ne planifie pas de nouvelles répliques sur des disques avec des répliques saines existantes du même volume. Désactiver ce paramètre offre une tolérance aux pannes pour les disques dans les clusters à nœud unique.
+. (Optionnel) xref:../storage/storageclass.adoc#_creating_a_storageclass[Créer un nouveau StorageClass] et spécifier les balises de disque qui doivent être correspondantes lors de la planification des volumes.
+
+== Mises à jour et maintenance
+
+Les clusters à nœud unique ne prennent pas en charge xref:/virtual-machines/live-migration.adoc[Live Migration], donc les machines virtuelles deviennent indisponibles pendant la mise à niveau du cluster. {harvester-product-name} force l'arrêt de toutes les machines virtuelles avant de commencer le processus de mise à niveau. Vous pouvez configurer {harvester-product-name} pour restaurer automatiquement les machines virtuelles en cours d'exécution en utilisant l'option `restoreVM` du paramètre xref:/installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`].
+
+Activer xref:/hosts/hosts.adoc#_node_maintenance[Maintenance Mode] n'est également pas possible car cette opération repose sur la fonctionnalité de Live Migration, et {harvester-product-name} ne peut pas placer le seul plan de contrôle en mode maintenance.

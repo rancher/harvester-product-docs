@@ -1,0 +1,158 @@
+= PCI设备控制器
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+在SUSE®虚拟化中，`PCIDevice`表示具有PCI地址的主机设备。
+可以通过创建`PCIDeviceClaim`资源或使用用户界面启用直通，将设备通过虚拟机监控器传递给虚拟机。通过超级管理程序传递设备意味着虚拟机可以直接访问该设备，并有效地拥有该设备。虚拟机甚至可以为该设备安装自己的驱动程序。
+
+这可以通过使用`pcidevices-controller`附加产品来实现。
+
+要使用PCI设备功能，用户需要先启用`pcidevices-controller`附加产品。
+
+image::vm-import-controller/EnableAddon.png[]
+
+一旦`pcidevices-controller`附加产品成功部署，它需要几分钟来扫描并使 PCIDevice CRD 可用。
+
+image::pcidevices/PcideviceEnabled.png[]
+
+== 在PCI设备上启用直通
+
+. 现在转到`Advanced -> PCI Devices`页面：
++
+image::pcidevices/advanced-pcidevices-index.png[]
+
+. 按供应商名称（例如NVIDIA、Intel等）或设备名称搜索您的设备。
++
+image::pcidevices/search-pcidevices.png[]
+
+. 选择您想要启用直通的设备：
++
+image::pcidevices/select-pcidevices.png[]
+
+. 然后点击*启用直通*并阅读警告信息。如果您仍然想启用这些设备，请点击*启用*并等待所有设备被`Enabled`。
++
+[CAUTION]
+====
+请不要使用`host-owned` PCI设备（例如，管理和VLAN网卡）。不正确的设备分配可能会对您的集群造成损害，包括节点故障。
+====
++
+image::pcidevices/enable-pcidevices-inprogress.png[]
++
+image::pcidevices/enable-pcidevices-done.png[]
+
+== 将PCI设备附加到虚拟机
+
+启用这些PCI设备后，您可以导航到*虚拟机*页面并选择*编辑配置*以传递这些设备。
+
+image::pcidevices/vm-pcidevices-edit-config.png[]
+
+选择*PCI设备*并使用*可用PCI设备*下拉菜单。从显示的列表中选择您想要附加的设备，然后点击*保存*。
+
+image::pcidevices/vm-pcidevices-attach.png[]
+
+== 在虚拟机中使用直通的 PCI设备
+
+启动虚拟机，并在虚拟机中运行 `lspci`，附加的 PCI 设备将会显示出来，尽管虚拟机中的 PCI 地址不一定与主机中的 PCI 地址匹配。
+
+== 在虚拟机中为您的 PCI 设备安装驱动程序
+
+这就像在主机中安装驱动程序一样。PCI 直通功能将主机设备绑定到 `vfio-pci` 驱动程序，这使得虚拟机能够使用它们自己的驱动程序。
+
+== 已知问题
+
+* https://github.com/harvester/harvester/issues/6648[问题 #6648]:如果集群中有多个相同的 PCI 设备实例，虚拟机可能会被调度到错误的节点上。
+
+pcidevices-controller 附加产品目前使用唯一资源描述符将设备发布到 kubelet。如果集群中存在多个相同设备类型的 `PCIDeviceClaims`，则这些 `PCIDeviceClaims` 使用相同的唯一资源描述符，因此虚拟机可能会被调度到错误的节点上。为了确保使用正确的设备和节点，在配置 *节点调度* 设置时选择 *在特定节点上运行虚拟机*。
+
+image::pcidevices/vm-scheduling.png[]
+
+== SR-IOV 网络设备
+
+image::pcidevices/SriovNetworkDevicesLink.png[]
+
+`pcidevices-controller` 附加产品现在可以扫描底层主机上的网络接口，并检查它们是否支持 SRIOV 虚拟功能 (VFs)。如果找到有效设备，`pcidevices-controller` 将生成一个新的 `SRIOVNetworkDevice` 对象。
+
+image::pcidevices/SriovNetworkDevicesList.png[]
+
+要在 SriovNetworkDevice 上创建 VFs，您可以点击 *⋮ -> 启用*，然后定义 *虚拟功能数量*。
+
+image::pcidevices/SriovNetworkDeviceEnable.png[]
+
+image::pcidevices/SriovNetworkVFDefinition.png[]
+
+`pcidevices-controller` 将在网络接口上定义 VFs，并报告新创建的 VFs 的新 PCI 设备状态。
+
+image::pcidevices/SriovNetworkDevicesVFStatus.png[]
+
+在下次重新扫描时，`pcidevices-controller` 将为 VFs 创建 PCI设备。这可能需要最多 1 分钟。
+
+您现在可以导航到 *PCI 设备* 页面以查看新设备。
+
+我们还引入了一个新过滤器，以帮助您按底层网络接口过滤 PCI 设备。
+
+image::pcidevices/SriovNetworkDevicesFilter.png[]
+
+新创建的 PCI 设备可以像其他任何 PCI 设备一样传递给虚拟机。
+
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== USB 设备
+
+在 Harvester 中，`USBDevice` 资源代表节点上的 USB 设备。USB 设备可以被超级管理程序 "直通"，以允许虚拟机直接访问。这是通过 `pcidevices-controller` 附加产品完成的。要使用 USB 直通，您可以创建一个 `USBDeviceClaim` 资源或在 Harvester 用户界面上启用该功能。
+
+USB 直通与 PCI 直通略有不同。例如，您可以通过创建一个 `PCIDeviceClaim` 完全控制一个带有四个 USB 端口的 USB 控制器。但是，您也可以创建一个 `USBDeviceClaim` 仅控制一个 USB 端口。其他三个 USB 端口仍然可用于节点。
+
+[CAUTION]
+====
+在您移除 USB 设备之前，请先将其从虚拟机中分离，然后在 *USB 设备* 屏幕上禁用直通。
+====
+
+=== 在 USB 设备上启用直通
+
+. 在 Harvester 用户界面上，转到 *高级 -> USB 设备*。
++
+image::pcidevices/index.png[]
++
+. 在列表中找到设备。
++
+image::pcidevices/search.png[]
++
+. 选择目标设备，然后选择 *⋮ -> 启用直通*。
++
+image::pcidevices/select.png[]
++
+. 阅读确认消息，然后点击 *启用*。
++
+请稍等，直到设备状态更改为 *已启用*。
++
+image::pcidevices/enable-done.png[]
+
+=== 将 USB 设备连接到虚拟机
+
+. 验证目标设备上是否启用了直通。
++
+. 转到 *虚拟机*，然后创建一个虚拟机或编辑现有虚拟机的配置。
++
+. 在虚拟机配置屏幕上，转到 *USB 设备* 选项卡，然后从 *可用 USB 设备* 列表中选择一个设备。
++
+image::pcidevices/attach-vm.png[]
++
+. 点击 *创建* 或 *保存*。
+
+=== 查看附加到虚拟机的 USB 设备
+
+. 启动并访问虚拟机。
++
+. 运行 `lsusb`。
++
+此工具显示有关 USB 总线和附加设备的信息。
++
+image::pcidevices/usb-in-vm.png[]
+
+=== 局限性
+
+* 附加 USB 设备的虚拟机无法进行实时迁移，因为设备绑定到特定节点。
++
+* 不支持热插拔和重新插拔 USB 设备。有关更多信息，请参见 https://github.com/kubevirt/kubevirt/issues/11979[KubeVirt 问题 #11979]。
++
+* 如果在重新连接设备或重启节点时设备路径发生变化，您必须从虚拟机中分离设备，然后再次启用直通。

@@ -1,0 +1,59 @@
+= リソースのオーバーコミット
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name}は、CPU、メモリ、およびストレージのリソース過負荷割合のグローバル設定をサポートします。xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]を設定することで、物理リソースが完全に利用されている場合でも、追加の仮想マシンのスケジューリングが可能になります。
+
+{harvester-product-name}は、計算ノードでCPUとRAMをオーバーコミットすることを許可します。これにより、インスタンスのパフォーマンスを低下させる代わりに、クラウド上で実行されるインスタンスの数を増やすことができます。コンピュートサービスは、デフォルトで以下の比率を使用します：
+
+* CPU割り当て比率：1600%
+* RAM割り当て比率：150%
+* ストレージ割り当て比率：200%
+
+[NOTE]
+====
+従来のメモリオーバーコミットやメモリバルーニングは、この機能ではまだサポートされていません。言い換えれば、仮想マシンインスタンスに割り当てられたメモリは、一度割り当てられると返却できません。
+====
+
+== グローバル設定xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]を構成します。
+
+ユーザーは、以下の手順に従ってグローバル`overcommit-config`を変更でき、変更後は新しく作成された各仮想マシンに適用されます。
+
+. *詳細->設定*に移動します。
++
+image::vm/overcommit-page.png[オーバーコミットページ]
++
+. `overcommit-config`設定を見つけます。
+. 希望するCPU、メモリ、およびストレージの比率を構成します。
++
+image::vm/overcommit-panel.png[オーバーコミットパネル]
+
+== 単一の仮想マシンのオーバーコミットを設定します
+
+グローバル設定に影響を与えずに個々の仮想マシンに特定の設定が必要な場合は、対応する仮想マシンの仕様で`spec.template.spec.domain.resources.limits.<memory|cpu>`の値を直接変更することで簡単に実現できます。
+
+image::vm/vm-overcommit-config.png[仮想マシンオーバーコミット設定]
+
+== システムオーバーヘッドのためにより多くのメモリを予約します
+
+デフォルトでは、{harvester-product-name}は仮想マシンに割り当てられたメモリから一定量のシステム管理オーバーヘッドメモリを予約します。ほとんどの場合、これにより問題は発生しません。ただし、Windows 2022などの一部のオペレーティングシステムは、予約されたメモリよりも多くのメモリを要求します。
+
+この問題に対処するために、{harvester-product-name}は仮想マシンカスタムリソースにアノテーション`harvesterhci.io/reservedMemory`を提供し、予約するメモリの量を指定できるようにします。例えば、仮想マシンのシステムオーバーヘッドのために200 MiBを予約することに決めた場合は、`harvesterhci.io/reservedMemory: 200Mi`を追加します。
+
+[,diff]
+----
+ apiVersion: kubevirt.io/v1
+ kind: VirtualMachine
+ metadata:
+   annotations:
++    harvesterhci.io/reservedMemory: 200Mi
+     kubevirt.io/latest-observed-api-version: v1
+     kubevirt.io/storage-observed-api-version: v1alpha3
+     network.harvesterhci.io/ips: '[]'
+   ...
+   ...
+----
+
+== なぜ私の仮想マシンは不均等にスケジュールされるのですか？
+
+仮想マシンのスケジューリングは、kube-schedulerの基盤となる動作に依存します。詳細については、専用の記事をご覧ください。さらに学びたい場合は、次をチェックしてください: https://harvesterhci.io/kb/vm-scheduling/[VMスケジューリング]。

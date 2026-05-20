@@ -1,0 +1,109 @@
+= Harvester ノード ドライバー
+:revdate: 2025-09-18
+:page-revdate: {revdate}
+
+https://github.com/harvester/docker-machine-driver-harvester[Harvester ノード ドライバー]は、Docker Machine ドライバーに似ており、{harvester-product-name} クラスター内で VM をプロビジョニングするために使用され、{rancher-short-name} はそれを使用して Kubernetes クラスターを起動および管理します。
+
+ノード ドライバーがホストするノード プールに Kubernetes をインストールする利点の一つは、ノードがクラスターとの接続を失った場合、Rancher が自動的に別のノードを作成してクラスターに参加させ、ノード プールの数が期待通りになることを保証することです。
+さらに、Harvester ノード ドライバーはデフォルトでHarvester クラウド プロバイダーと統合されており、xref:/integrations/rancher/cloud-provider.adoc#_load_balancer_support[ビルトインのロード バランサー サポート]や、ベアメタル クラスターからゲスト Kubernetes クラスターへのxref:/integrations/rancher/csi-driver.adoc[ストレージ パススルー]を提供し、ネイティブ ストレージ パフォーマンスを得ることができます。
+
+このセクションでは、Harvester ノード ドライバーを使用して Kubernetes クラスターを起動および管理するための{rancher-short-name}の構成方法を学びます。
+
+[NOTE]
+====
+Harvester ノード ドライバーはクラウド イメージのみをサポートしています。これは、ISOイメージは通常、クリーンなデプロイメント（ユーザーの介入を必要としない）を妨げる追加のセットアップを必要とし、クラウド環境では通常使用されないためです。
+====
+
+== Harvester ノード ドライバー
+
+{rancher-short-name} `v2.6.3` から、Harvester ノード ドライバーはデフォルトで有効になっています。*クラスター管理* > *ドライバー* > *ノード ドライバー* ページに移動して、Harvester ノード ドライバーのステータスを確認できます。
+
+image::rancher/edit-node-driver.png[edit-node-driver]
+
+Harvester ノード ドライバーが有効になっていると、{harvester-product-name} クラスターの上に Kubernetes クラスターを作成し、{rancher-short-name} から管理できます。
+
+image::rancher/harvester-node-driver.png[harvester-node-driver]
+
+[NOTE]
+====
+* サポートされている RKE2 バージョンとゲスト OS バージョンについては、 https://www.suse.com/suse-rancher/support-matrix/all-supported-versions/rancher-v2-7-5[{rancher-short-name} ダウンストリーム クラスター サポート マトリックス]を参照してください。
+* Harvester ノード ドライバーの設定に加えられた変更は永続化されません。適用された変更は、{rancher-short-name} コンテナを再起動するとリセットされます。
+* Harvester ノード ドライバー v0.6.3 以降、バックエンドからの`qemu-guest-agent`の自動インジェクションが削除されました。使用しているイメージに`qemu-guest-agent`パッケージが含まれていない場合でも、`userdata`設定を介してインストールできます。そうでなければ、クラスターは正常にプロビジョニングされません。
++
+[,yaml]
+----
+ #cloud-config
+ package_update: true
+ packages:
+ - qemu-guest-agent
+ runcmd:
+ - - systemctl
+   - enable
+   - '--now'
+   - qemu-guest-agent.service
+----
+====
+
+== 既知の問題
+
+=== {rancher-short-name}は、対応する API トークンが期限切れになると、ゲスト クラスターを管理またはスケールする能力を失います。
+
+*問題*: https://github.com/harvester/harvester/issues/5827[#5827]
+
+*説明*: {rancher-short-name}は、{harvester-product-name}上でゲスト Kubernetes クラスターをプロビジョニングするために埋め込まれた認証トークンを持つ kubeconfigs を使用します。これらのトークンが期限切れになると、{rancher-short-name}は対応する{rancher-short-name}管理のゲスト Kubernetes クラスターに対する管理操作を実行する能力を失います。この問題は、{harvester-product-name}上で実行されているゲスト Kubernetes クラスターにのみ影響し、{rancher-short-name} v2.8.xにアップグレードまたはインストールした後に作成されたクラウド認証情報を使用しており、 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_kubeconfig_default_token_ttl_minutes[kubeconfig-default-token-ttl-minutes]設定と https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/api/api-tokens.html#_auth_token_max_ttl_minutes[auth-token-max-ttl-minutes]設定をそれぞれ30日と90日に減少させました。
+
+*状態*： https://harvesterhci.io/kb/renew_harvester_cloud_credentials[一時的な回避策]が利用可能です。
+
+*最終更新日時*：2024-05-21
+
+== RKE2 Kubernetes クラスター
+
+xref:./rke2-cluster.adoc[RKE2 Kubernetes クラスターの作成]を参照してください。
+
+== K3s Kubernetes クラスター
+
+xref:./k3s-cluster.adoc[K3s Kubernetes クラスターの作成]を参照してください。
+
+== トポロジー分散制約
+
+ゲスト Kubernetes クラスター内では、 https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[トポロジー分散制約]を使用して、ワークロードがノード間でどのように分散されるかを管理できます。これは、リージョンやゾーンなど、障害ドメインに関する要因を考慮に入れたものです。これにより、{harvester-product-name}クラスターリソースの高可用性と効率的なリソース利用が実現されます。
+
+`v1.25.x`より前のRKE2バージョンでは、トポロジーラベル同期機能をサポートするために必要な最小バージョンは次のとおりです：
+
+|===
+| 最小必要RKE2バージョン
+
+| >=  v1.24.3+rke2r1
+| >=  v1.23.9+rke2r1
+| >=  v1.22.12+rke2r1
+|===
+
+さらに、カスタムインストールの場合、Harvester Cloud Providerのバージョンは`>= v0.1.4`である必要があります。
+
+=== ゲスト クラスター ノードにトポロジーラベルを同期する
+
+クラスターのインストール中に、Harvester ノード ドライバーは自動的に VM ノードからゲスト クラスター ノードへのトポロジーラベルの同期を支援します。現在、`region`と`zone`のトポロジーラベルのみがサポートされています。
+
+. {harvester-product-name}ノードの*ホスト* > *設定の編集* > *ラベル*ページでトポロジーラベルを設定します。例えば、次のようにトポロジーラベルを追加します：
++
+[,yaml]
+----
+topology.kubernetes.io/region: us-east-1
+topology.kubernetes.io/zone: us-east-1a
+----
++
+image::rancher/node-add-affinity-labels.png[]
+
+. Harvester クラウド プロバイダーを有効にした Harvester ノード ドライバーを使用して、ダウンストリーム RKE2 クラスターを作成します。VMの再構築後にノードが他のゾーンに移動するのを防ぐために、xref:./rke2-cluster.adoc#_add_node_affinity[ノードアフィニティルール]を追加することをお勧めします。
++
+image::rancher/create-rke2-harvester-cluster-3.png[]
+
+. クラスターが準備完了になったら、ゲスト Kubernetes クラスターのノードにトポロジーラベルが正常に同期されていることを確認してください。
+. 今、ゲスト Kubernetes クラスターにワークロードをデプロイし、 https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/[トポロジー分散制約]を使用して管理できるはずです。
+
+[NOTE]
+====
+Harvester Cloud Provider >= v0.2.0の場合、VM（ゲストノードに対応）が移行または更新されると、{harvester-product-name}ノードのトポロジーラベルが自動的に再同期されます。
+
+Harvester Cloud Provider < v0.2.0の場合、ラベルの同期はゲストノードの初期化中のみ発生します。ノードが異なるリージョンやゾーンに移動するのを防ぐために、クラスターのプロビジョニング中にxref:./rke2-cluster.adoc#_add_node_affinity[ノードアフィニティルール]を追加することをお勧めします。これにより、再構築後も同じゾーンでVMをスケジュールできるようになります。
+====

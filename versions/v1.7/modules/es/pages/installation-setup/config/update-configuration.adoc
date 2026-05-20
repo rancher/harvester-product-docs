@@ -1,0 +1,124 @@
+= Actualizar la configuración después de la instalación
+:revdate: 26-12-2025
+:page-revdate: {revdate}
+
+El sistema operativo {harvester-product-name} tiene un diseño inmutable, lo que significa que la mayoría de los archivos en el sistema operativo vuelven a su estado preconfigurado después de un reinicio. El sistema operativo carga los valores preconfigurados de los componentes del sistema desde los archivos de configuración durante el tiempo de arranque.
+
+Para actualizar una configuración, primero debes actualizar el valor en tiempo de ejecución en el sistema y luego actualizar los archivos de configuración para asegurar que los cambios persistan entre reinicios.
+
+Sin embargo, a partir de la versión v1.7.0, los cambios en la configuración de red realizados utilizando la herramienta `nmcli` persisten automáticamente porque el directorio `/etc/NetworkManager` ahora está incluido en la lista de rutas persistentes.
+
+[NOTE]
+====
+Si actualizas desde una versión anterior a `v1.1.2`, el archivo `cloud-init` en ejemplos será `/oem/99_custom.yaml`. Por favor, sustituye el valor si es necesario.
+====
+
+== Contraseña del usuario `rancher`
+
+=== Cambio en tiempo de ejecución
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Inicia sesión en un nodo Harvester] utilizando la cuenta de usuario `rancher`.
+
+. Restablece la contraseña de la cuenta de usuario `rancher` ejecutando el comando `passwd`.
+
+=== Persistencia de la configuración
+
+. Haz una copia de seguridad del archivo {elemental-product-name} `cloud-init` `/oem/90_custom.yaml`.
++
+[,sh]
+----
+ cp /oem/90_custom.yaml /oem/install/90_custom.yaml.$(date --iso-8601=minutes)
+----
+
+. Edita `/oem/90_custom.yaml` y actualiza la ruta yaml `stages.initramfs[0].users.rancher.passwd`.
+
+Para información sobre cómo especificar la contraseña de la cuenta de usuario `rancher` en forma encriptada, consulta [`os.password`](./harvester-configuration.md#ospassword).
+
+== Servidores NTP
+
+Para información sobre la configuración de NTP, consulta xref:hosts/hosts.adoc#_ntp_configuration[Servidores NTP].
+
+== Servidores DNS
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Inicia sesión en un nodo Harvester] utilizando la cuenta root.
+
+. Verifica la configuración de la interfaz de gestión y luego ejecuta cualquiera de los siguientes comandos:
++
+** No configurado para usar una VLAN:
++
+[,shell]
+----
+nmcli con modify bridge-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br
+----
+** Configurado para usar una VLAN:
++
+[,shell]
+----
+nmcli con modify vlan-mgmt ipv4.dns 8.8.8.8,1.1.1.1 && nmcli device reapply mgmt-br.VLAN_ID
+----
++
+Debes reemplazar `VLAN_ID` con el ID real. Para ver una lista de conexiones y dispositivos configurados, ejecuta el comando `nmcli con`.
+
+. Verifica que el archivo `/etc/resolv.conf` contenga los servidores DNS correctos ejecutando el comando `cat`.
++
+[,shell]
+----
+cat /etc/resolv.conf
+----
+
+. Reinicia la ampliación `rke2-coredns`.
++
+[,shell]
+----
+kubectl rollout restart deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+. Verifica que la ampliación `rke2-coredns` se haya desplegado con éxito.
++
+[,shell]
+----
+kubectl rollout status deployment/rke2-coredns-rke2-coredns -n kube-system
+----
+
+== Esclavos de vinculación
+
+Puedes actualizar las interfaces esclavas de la interfaz de enlace de gestión `mgmt-bo`.
+
+. xref:troubleshooting/operating-system.adoc#_how_to_log_in_to_a_harvester_node[Inicia sesión en un nodo Harvester] utilizando la cuenta root.
+
+. Identifica los nombres de las interfaces utilizando el siguiente comando:
++
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    conectado               bridge-mgmt +
+\... +
+mgmt-bo          bond      conectado               bond-mgmt +
+ens6             ethernet  conectado               bond-slave-ens6 +
+ens7             ethernet  desconectado            -- +
+\...
+----
+
+. Usa la herramienta `nmcli` para crear una conexión para la interfaz y adjuntarla a la vinculación de gestión.
++
+Ejemplo:
++
+[shell]
+----
+$ nmcli con add type bond-slave ifname ens7 master mgmt-bo +
+Conexión 'bond-slave-ens7' (5a379328-178a-4167-b065-b5426facd659) añadida con éxito.
+----
+
+Ahora deberías poder ver que el dispositivo está conectado.
+
+[shell]
+----
+$ nmcli device +
+DEVICE           TYPE      STATE                   CONNECTION +
+mgmt-br          bridge    conectado               bridge-mgmt +
+\... +
+mgmt-bo          bond      conectado               bond-mgmt +
+ens6             ethernet  conectado               bond-slave-ens6 +
+ens7             ethernet  conectado               bond-slave-ens7
+----

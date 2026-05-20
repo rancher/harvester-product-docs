@@ -1,0 +1,93 @@
+= 从 v1.6.x 升级到 v1.6.y
+:revdate: 2025-12-08
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的 {harvester-product-name} 版本可供升级时，*升级* 按钮会出现在 *仪表板* 屏幕上。有关更多信息，请参见 xref:./upgrades.adoc#_start_an_upgrade[开始升级]。
+
+有关在隔离环境中升级 {harvester-product-name} 的信息，请参见 xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离升级]。
+
+=== 在 {rancher-product-name} v2.12 上更新 Harvester UI 扩展
+
+您必须使用兼容版本 (v1.6.x) 的 Harvester UI 扩展来导入 {harvester-product-name} v1.6.x 集群到 {rancher-short-name} v2.12。
+
+. 在 {rancher-short-name} UI 上，转到 *本地 -> 应用 -> 储存库*。
+
+. 找到名为 *harvester* 的储存库，然后选择 *⋮ -> 刷新*。
+
+. 转到 *扩展* 屏幕。
+
+. 找到名为 *Harvester* 的扩展，然后单击 *更新*。
+
+. 选择一个兼容版本，然后单击 *更新*。
+
+. 请稍等，等待扩展更新完成，然后刷新屏幕。
+
+== 已知问题
+
+=== 升级卡在 "预排空" 状态
+
+在某些情况下，实例管理器可能无法清理引擎实例，即使引擎 CR 的状态已更改为 "已停止"。升级过程卡在 "预排空" 状态，因为在相应的 PodDisruptionBudget (PDB) 仍然存在时，实例管理器 pod 无法被删除。
+
+解决方法是在确保所有卷都健康后删除实例管理器 PDB。
+
+相关问题： https://github.com/harvester/harvester/issues/8977[#8977] 和 https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== 来宾集群卡在 "更新中" 状态
+
+在 {harvester-product-name} 升级后，{rke2-short-name} 来宾集群可能会卡在 "更新中" 状态。在 {harvester-product-name} UI 上显示以下错误消息：
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+当来宾节点的IP地址在升级后发生变化时，会导致etcd出现故障。很可能底层虚拟机已重启多次，并从DHCP服务器获取了新的IP地址。
+
+为了解决此问题，请执行以下步骤：
+
+. 在 {rancher-short-name} UI 上，从来宾集群中删除导致错误的节点。
+. 在 {harvester-product-name} UI 上，检查底层虚拟机的状态。
+. 如有必要，请重启虚拟机。
+
+虚拟机被移除，来宾集群尝试创建一个新节点。一旦节点创建，来宾集群的状态将变为“活动”。
+
+相关问题： https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== 已停止的虚拟机卡在“启动”状态。
+
+在实时迁移后，{longhorn-product-name}卷可能在“分离中”和“已分离”状态之间波动。由于卷尚未准备好，相关的虚拟机无法完全启动。
+
+解决方法是使用以下命令清除卷的`status.currentMigrationNodeID`：
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+相关问题： https://github.com/harvester/harvester/issues/8949[#8949] 和 https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+### 4.升级到v1.6.1-rc2卡在“预排空”状态。
+
+如果遵循以下特定的升级路径，升级过程可能会无限期地卡在“预排空”状态：
+
+* 集群首先从v1.5.1升级到v1.6.0。
+* 随后尝试从 v1.6.0 升级到 v1.6.1-rc2。
+
+当您检查 {harvester-product-name} 控制器时，可能会看到以下错误消息：
+
+[,shell]
+----
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:21:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:23:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+harvester-899b4df79-mzgkx apiserver time="2025-10-11T07:25:17Z" level=error msg="error syncing 'fleet-local/custom-a8796656aa4c-machine-plan': handler harvester-upgrade-secret-controller: jobs.batch \"hvst-upgrade-7zqp7-post-drain-hp-113-tink-system\" already exists, requeuing"
+----
+
+这是一个罕见的同步失败：作业已创建，但升级对象未更新。
+
+解决方法是删除现有的排水后作业，然后等待 Upgrade Controller 重新创建它。
+
+相关问题： https://github.com/harvester/harvester/issues/9293[#9293]

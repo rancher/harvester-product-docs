@@ -1,0 +1,177 @@
+= Création d'un volume
+:revdate: 2025-12-05
+:page-revdate: {revdate}
+
+== Créer un volume vide
+
+[tabs]
+======
+UI::
++
+--
+*Section d'en-tête*
+
+. Définir le volume `Name`.
+. (Optionnel) Fournir un `Description` pour le volume. 
+
+*Onglet de base*
+
+. Choisir `New` dans `Source`. 
+. Sélectionner un `StorageClass` existant. 
+. Configurer le `Size` du volume.
++
+image::volume/create-empty-volume.png[créer un volume vide]
+
+[CAUTION]
+====
+* Si le nombre de répliques de la StorageClass sélectionnée est `1` et que le volume est attaché à une machine virtuelle, alors la machine virtuelle est considérée comme xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migrable].
+
+* Lorsqu'un volume est créé, il copie les paramètres associés de la `StorageClass` sélectionnée vers lui-même. Si vous modifiez les paramètres du `StorageClass` plus tard, cela ne s'écrit pas dans le volume.
+====
+
+*Volumes surdimensionnés*
+
+Dans {harvester-product-name} v1.5.0, qui utilise {longhorn-product-name} v1.8.1, les volumes surdimensionnés (par exemple, 999999 Gi de taille) sont marqués **Non prêts** et ne peuvent pas être supprimés.
+
+Pour résoudre ce problème, procédez comme suit :
+
+. Supprimer temporairement la règle de webhook PVC.
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. Attendre que le PVC associé soit supprimé.
+
+. Restaurer la règle de webhook PVC pour réactiver la validation.
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+Le problème sera résolu dans {longhorn-product-name} v1.8.2, qui sera probablement inclus dans {harvester-product-name} v1.5.1.
+
+Problèmes connexes{nbsp}: https://github.com/harvester/harvester/issues/8096[#8096] et https://github.com/longhorn/longhorn/issues/10741[#10741]
+--
+
+API::
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: my-vol
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 10Gi
+  volumeMode: Block
+  volumeName: pvc-my-vol
+----
+
+[CAUTION]
+====
+Ne pas utiliser les StorageClasses `vmstate-persistence` et `longhorn-static` lors de la création de nouveaux volumes. `vmstate-persistence` est utilisé pour la persistance TPM et UEFI, tandis que `longhorn-static` est utilisé pour la gestion des volumes {longhorn-product-name} existants.
+====
+
+Terraform::
++
+Pour créer un volume vide sur {harvester-product-name} avec Terraform en utilisant le https://registry.terraform.io/providers/harvester/harvester/latest[Harvester Terraform Provider], définissez un bloc de ressources `harvester_volume` : 
++
+[,json]
+----
+resource "harvester_volume" "empty-volume" {
+  name      = "empty-volume"
+  namespace = "default"
+
+  size = "10Gi"
+}
+----
+======
+
+== Créer un volume d'image
+
+[tabs]
+======
+UI::
++
+--
+*Section d'en-tête*
+
+. Définir le volume `Name`. 
+. (Optionnel) Fournir un `Description` pour le volume. 
+
+**Onglet de base** 
+
+. Choisir `VM Image` dans `Source`. 
+. Sélectionner un `Image` existant.
+. Configurer le `Size` du volume. 
++
+[CAUTION]
+====
+Lors de la création de volumes à partir d'une image de machine virtuelle, assurez-vous que la taille du volume est supérieure ou égale à la taille de l'image. Le volume peut devenir corrompu si la taille du volume configurée est inférieure à la taille de l'image sous-jacente. Ceci est particulièrement important pour les images qcow2 car la taille virtuelle est généralement supérieure à la taille physique. Par défaut, {harvester-product-name} définira la taille du volume sur la taille virtuelle de l'image.
+====
++
+image::volume/create-image-volume.png[créer un volume d'image]
+--
+
+API::
++
+Créer un volume, initialisé avec le contenu de l'image `image-8rb2z` de l'espace de noms `default` : 
++
+[,yaml]
+----
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  annotations:
+    harvesterhci.io/imageId: default/image-8rb2z
+    volume.beta.kubernetes.io/storage-provisioner: driver.longhorn.io
+    volume.kubernetes.io/storage-provisioner: driver.longhorn.io
+  name: foobar
+  namespace: default
+spec:
+  accessModes:
+    - ReadWriteMany
+  resources:
+    requests:
+      storage: 5Gi
+  storageClassName: longhorn-image-8rb2z
+  volumeMode: Block
+  volumeName: pvc-foobar
+----
+
+Terraform::
++
+Pour créer un volume sur {harvester-product-name} en utilisant Terraform et l'initialiser avec le contenu d'une image, définissez un bloc de ressources `harvester_volume` et définissez la propriété `image`{nbsp}:
++
+[,json]
+----
+resource "harvester_volume" "opensuse154-image-disk" {
+  name      = "opensuse154-image-disk"
+  namespace = "default"
+
+  size  = "10Gi"
+  image = harvester_image.opensuse154.id
+}
+----
+======

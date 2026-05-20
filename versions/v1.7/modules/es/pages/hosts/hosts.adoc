@@ -1,0 +1,714 @@
+= Gestión de hosts
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+Los usuarios pueden ver y gestionar {harvester-product-name} nodos desde la página del host. El primer nodo siempre se configura como un nodo de gestión del clúster. Cuando hay tres o más nodos, los otros dos nodos que se unieron primero se promueven automáticamente a nodos de gestión para formar un clúster HA.
+
+[NOTE]
+====
+Debido a que {harvester-product-name} está construido sobre Kubernetes y utiliza etcd como su base de datos, la tolerancia máxima a fallos de nodos es uno cuando hay tres nodos de gestión.
+====
+
+image::host/host.png[host.png]
+
+{harvester-product-name} reserva recursos de CPU para operaciones a nivel de sistema, por lo que el número total de núcleos indicado en la columna *CPU* es ligeramente inferior al número real de núcleos en cada host. Para más información, consulte xref:virtual-machines/cpu-pinning.adoc#_calculation_of_shared_cpu_pool[Cálculo del pool de CPU compartido].
+
+== Mantenimiento de nodos
+
+Los usuarios administradores pueden habilitar el Modo de Mantenimiento (seleccionar *⋮ > Habilitar Modo de Mantenimiento*) para expulsar automáticamente todas las máquinas virtuales de un nodo. Este modo aprovecha la xref:virtual-machines/live-migration.adoc#_automatically_triggered_batch_migration[migración por lotes] para mover las xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[máquinas virtuales migrables en vivo] a otros nodos, lo cual es útil cuando necesitas reiniciar, actualizar el firmware o reemplazar componentes de hardware. Se requieren al menos dos nodos activos para utilizar esta función.
+
+Las xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[máquinas virtuales no migrables] pueden impedir que el nodo active el Modo de Mantenimiento. Cuando esto ocurre, debes identificar y apagar manualmente esas máquinas virtuales. Para más información, consulte xref:../virtual-machines/live-migration.adoc[Migración en Vivo].
+
+Para forzar a las VMs individuales a apagarse en lugar de migrar a otros nodos, añade la etiqueta `harvesterhci.io/maintain-mode-strategy` y uno de los siguientes valores a esas VMs:
+
+* `Migrate`: Migra la VM en vivo a otro nodo en el clúster. Este es el comportamiento predeterminado si la etiqueta `harvesterhci.io/maintain-mode-strategy` no está configurada.
+* `ShutdownAndRestartAfterEnable`: Reinicia la VM después de que el nodo cambie a modo de mantenimiento. La VM está programada en un nodo diferente.
+* `ShutdownAndRestartAfterDisable`: Apaga la VM cuando el modo de mantenimiento está habilitado y reinicia la VM cuando el modo de mantenimiento está deshabilitado. La VM permanece en el mismo nodo.
+* `Shutdown`: Apaga la VM cuando el modo de mantenimiento está habilitado. La VM permanece apagada en lugar de reiniciarse.
+
+Puedes forzar un apagado colectivo de todas las VMs en un nodo en la pantalla de *Habilitar Modo de Mantenimiento*. Esto desactiva configuraciones individuales utilizando la etiqueta `harvesterhci.io/maintain-mode-strategy`.
+
+Para ejecutar un comando especial antes de apagar una VM, considera usar el https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks[gancho del ciclo de vida del contenedor] `PreStop`.
+
+image::host/node-maintenance.png[node-maintenance.png]
+
+== Aislamiento de un Nodo
+
+Los nodos aislados se marcan como no programables. El aislamiento es útil cuando deseas evitar que se programen nuevas cargas de trabajo en un nodo. Puedes desaislar un nodo para hacerlo programable nuevamente.
+
+image::host/cordon-nodes.png[cordon-node.png]
+
+== Eliminando un Nodo
+
+[CAUTION]
+====
+Antes de eliminar un nodo de un {harvester-product-name} clúster, determina si los nodos restantes tienen suficientes recursos de computación y almacenamiento para asumir la carga de trabajo del nodo que se va a eliminar. Compruebe los siguientes elementos:
+
+* Uso actual de recursos en el clúster (en la pantalla de *Hosts* de la interfaz {harvester-product-name})
+* Capacidad de los nodos restantes para mantener suficientes réplicas para todos los volúmenes
+
+Si los nodos restantes no tienen suficientes recursos, las VMs pueden fallar al migrar y los volúmenes pueden degradarse cuando eliminas un nodo.
+====
+
+=== 1. Verifica si el nodo puede ser eliminado del clúster.
+
+Puedes eliminar de forma segura un nodo del plano de control dependiendo de la cantidad y disponibilidad de otros nodos en el clúster.
+
+* El clúster tiene tres nodos del plano de control y uno o más nodos de trabajo.
++
+Cuando eliminas un nodo del plano de control, un nodo de trabajo será promovido a nodo del plano de control. {harvester-product-name} te permite asignar un rol a cada nodo que se une a un clúster. En versiones anteriores, los nodos de trabajo eran seleccionados aleatoriamente para la promoción. Si prefieres promover nodos específicos, consulta <<Role Management,Gestión de Roles>> y xref:../installation-setup/config/configuration-file.adoc#_install_role[Archivo de Configuración] para más información.
++
+[NOTE]
+====
+La promoción automática de nodos ocurre solo cuando se elimina un nodo del plano de control del clúster. Esto no incluye situaciones en las que un nodo se vuelve no disponible debido a fallos en las comprobaciones de salud. El nodo no saludable mantiene su rol.
+====
+
+* El clúster tiene tres nodos de plano de control y no tiene nodos de trabajo.
++
+Debes añadir un nuevo nodo al clúster antes de eliminar un nodo del plano de control. Esto asegura que el clúster siempre tenga tres nodos de plano de control y que se pueda formar un quórum incluso si falla un nodo del plano de control.
+
+* El clúster solo tiene dos nodos de plano de control y no tiene nodos de trabajo.
++
+Eliminar un nodo del plano de control en esta situación no se recomienda porque los datos de etcd no se replican en un clúster de un solo nodo. La falla de un solo nodo puede hacer que etcd pierda su quórum y apague el clúster.
+
+=== 2. Comprueba el estado de los volúmenes.
+
+. Accede a la xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[interfaz {longhorn-product-name} incrustada].
+. Ve a la pantalla de *Volumen*.
+. Verifica que el estado de todos los volúmenes sea *Saludable*.
+
+=== 3. Desaloja réplicas del nodo que se va a eliminar.
+
+. Accede a la xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[interfaz {longhorn-product-name} incrustada].
+. Ve a la pantalla *Nodo*.
+. Selecciona el nodo que deseas eliminar, haz clic en el icono en la columna *Operación*, y luego selecciona *Editar nodo y discos*.
+. Configure los ajustes siguientes:
+ ** *Programación de Nodos*: Selecciona *Deshabilitar*.
+ ** *Desalojo Solicitado* Selecciona *Verdadero*.
+. Haz clic en *Guardar*.
+. Regresa a la pantalla *Nodo* y verifica que el valor de *Réplicas* para el nodo a eliminar sea *0*.
+
+[IMPORTANT]
+====
+La expulsión no se puede completar si los nodos restantes no pueden aceptar réplicas del nodo a eliminar. En este caso, algunos volúmenes permanecerán en estado *Degraded* hasta que añadas más nodos al clúster.
+====
+
+=== 4. Gestionar máquinas virtuales no migrables
+
+Verifique si hay alguna xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[máquina virtual no migrable].
+
+[TIP]
+====
+* Cree una copia de seguridad o una instantánea para cada máquina virtual no migrable.
+* Puede eliminar los volúmenes/dispositivos específicos del nodo y los selectores de nodo para permitir que las máquinas virtuales se programen en otros nodos. 
++
+NOTE: Como el nodo actual va a ser eliminado, las máquinas virtuales no guardadas/no migradas se perderán.
+* Detenga manualmente las máquinas virtuales no migrables restantes.
+====
+
+=== 5. Expulse cargas de trabajo del nodo a eliminar.
+
+Puede habilitar el <<Node Maintenance,Modo de Mantenimiento>> en el nodo para migrar automáticamente las VMs y cargas de trabajo. También puede xref:../virtual-machines/live-migration.adoc#_starting_a_migration[migrar manualmente en vivo] las VMs a otros nodos.
+
+Todas las cargas de trabajo han sido expulsadas con éxito si el estado del nodo es *Mantenimiento*.
+
+image::host/node-maintain-completed.png[node-maintain-completed.png]
+
+[IMPORTANT]
+====
+Si un clúster tiene solo dos nodos de plano de control, {harvester-product-name} no le permite habilitar el Modo de Mantenimiento en ningún nodo. Puede drenar manualmente el nodo a eliminar utilizando el siguiente comando:
+
+----
+kubectl drain <node_name> --force --ignore-daemonsets --delete-local-data --pod-selector='app!=csi-attacher,app!=csi-provisioner'
+----
+
+De nuevo, eliminar un nodo de plano de control en esta situación es *no recomendado* porque los datos de etcd no están replicados. La falla de un solo nodo puede hacer que etcd pierda su quórum y apague el clúster.
+====
+
+=== 6. Elimina los servicios de RKE2 y apaga el nodo.
+
+. Inicie sesión en el nodo utilizando la cuenta root.
++
+. Ejecute el script `/opt/rke2/bin/rke2-uninstall.sh` para eliminar los servicios de RKE2 que se ejecutan en el nodo.
++
+. Apague el nodo.
+
+=== 7. Elimine el nodo.
+
+. En la interfaz, vaya a la pantalla de **Hosts**.
++
+. Localice el nodo que desea eliminar y luego haga clic en **⋮ -> Eliminar**.
++
+image::host/delete-node.png[]
+
+[NOTE]
+====
+Hay un https://github.com/harvester/harvester/issues/1497[problema conocido] sobre la eliminación forzada del nodo.
+Una vez resuelto, puede omitir este paso.
+====
+
+== Gestión de funciones
+
+Los problemas de hardware pueden obligarle a reemplazar el nodo de gestión. {harvester-product-name} mejora el proceso introduciendo los siguientes roles:
+
+* *Gestión*: Permite que un nodo sea priorizado cuando {harvester-product-name} promueve nodos a nodos de gestión.
+* *Testigo*: Restringe a un nodo a ser un nodo testigo (solo funciona como un nodo etcd) en un clúster específico.
+* *Trabajador*: Restringe a un nodo a ser un nodo trabajador (nunca promovido a nodo de gestión) en un clúster específico.
+
+[CAUTION]
+====
+{harvester-product-name} actualmente permite solo un nodo testigo en el clúster.
+====
+
+Para más información sobre la asignación de roles a nodos, consulte xref:../installation-setup/methods/iso-install.adoc[Instalación ISO].
+
+== Gestión de múltiples discos
+
+=== Añadir discos adicionales
+
+Los usuarios pueden ver y añadir múltiples discos como volúmenes de datos adicionales desde la página de edición del host.
+
+. Vaya a la página de *Hosts*.
+. En el nodo que desea modificar, haga clic en *⋮ -> Editar configuración*.
++
+image::host/multidisk-mgmt-01.png[Editar Configuración]
+
+. Selecciona la pestaña *Almacenamiento* y haz clic en *Añadir Disco*.
++
+image::host/multidisk-mgmt-02.png[Añadir Discos]
++
+[CAUTION]
+====
+{harvester-product-name} no soporta añadir particiones como discos adicionales. Si deseas añadirlo como un disco adicional, asegúrate de eliminar todas las particiones primero (por ejemplo, usando `fdisk`).
+====
+
+. Selecciona un aprovisionador para el disco.
++
+** *LonghornV1 (CSI)*: Este es el aprovisionador por defecto.
++
+image::host/multidisk-mgmt-03.png[Provisioner LonghornV1]
++
+Debes establecer *Forzar Formato* a *Sí* si el dispositivo de bloque nunca ha sido forzado a formatear.
++
+image::host/multidisk-mgmt-08.png[Forzar Formato]
++
+** *LVM*: Selecciona este aprovisionador si deseas usar xref:../add-ons/lvm-local-storage.adoc[] para crear volúmenes persistentes para tus cargas de trabajo.
++
+image::host/multidisk-mgmt-05.png[Provisioner LVM]
+
+. Haz clic en *Guardar*.
+
+. En la pantalla de detalles del host, verifica que los discos se hayan añadido y que se haya establecido el aprovisionador correcto.
++
+También puedes añadir <<Storage Tags,etiquetas de almacenamiento>> si deseas que los datos del volumen {longhorn-product-name} se almacenen en nodos o discos específicos. Las etiquetas de almacenamiento solo se pueden usar con los aprovisionadores *LonghornV1 (CSI)* y *LonghornV2 (CSI)*.
++
+image::host/multidisk-mgmt-06.png[Etiqueta de disco 01]
++
+image::host/multidisk-mgmt-07.png[Etiqueta de disco 02]
+
+[NOTE]
+====
+Para que {harvester-product-name} identifique los discos, cada disco necesita tener un https://en.wikipedia.org/wiki/World_Wide_Name[WWN] único. De lo contrario, {harvester-product-name} se negará a añadir el disco.
+Si tu disco no tiene un WWN, puedes formatearlo con el sistema de archivos `EXT4` para ayudar a {harvester-product-name} a reconocer el disco.
+====
++
+[NOTE]
+====
+Si estás probando {harvester-product-name} en un entorno QEMU, necesitarás usar QEMU v6.0 o posterior. Las versiones anteriores de QEMU siempre generarán el mismo WWN para la emulación de discos NVMe. Esto hará que {harvester-product-name} no añada los discos adicionales, como se explicó anteriormente. Sin embargo, aún puedes añadir un disco virtual con el controlador SCSI. La información del WWN podría añadirse manualmente junto con la operación de adjuntar el disco. Para más detalles, por favor consulta el https://github.com/harvester/vagrant-rancherd/blob/2782981b6017754d016f5b72d630dff4895f7ad6/scripts/attach-disk.sh#L75[guion].
+====
+
+=== Etiquetas de almacenamiento
+
+La función de etiquetas de almacenamiento permite que solo ciertos nodos o discos se utilicen para almacenar datos de volumen {longhorn-product-name}. Por ejemplo, los datos sensibles al rendimiento pueden utilizar solo los discos de alto rendimiento que pueden etiquetarse como `fast`, `ssd` o `nvme`, o solo los nodos de alto rendimiento etiquetados como `baremetal`.
+
+Esta función admite tanto discos como nodos.
+
+==== Configuración
+
+Las etiquetas se pueden configurar a través de la interfaz de usuario {harvester-product-name} en la página del host:
+
+. Haz clic en `Hosts` \-> `Edit Config` \-> `Storage`
+. Haz clic en `Add Host/Disk Tags` para empezar a escribir y pulsa enter para añadir nuevas etiquetas.
+. Haz clic en `Save` para actualizar etiquetas.
+. En la página xref:../storage/storageclass.adoc[StorageClasses], crea una nueva clase de almacenamiento y selecciona esas etiquetas definidas en los campos `Node Selector` y `Disk Selector`.
+
+Todos los volúmenes programados existentes en el nodo o disco no se verán afectados por las nuevas etiquetas.
+
+[NOTE]
+====
+Cuando se especifican múltiples etiquetas para un volumen, el disco y los nodos (a los que pertenece el disco) deben tener todas las etiquetas especificadas para ser utilizables.
+====
+
+=== Eliminar discos
+
+Antes de eliminar un disco, primero debes desalojar las réplicas {longhorn-product-name} en el disco.
+
+[NOTE]
+====
+Los datos de la réplica se reconstruirán automáticamente en otro disco para mantener la alta disponibilidad.
+====
+
+==== Identifica el disco a eliminar
+
+. Ve a la página *Hosts*.
+. En el nodo que contiene el disco, selecciona el nombre del nodo y ve a la pestaña *Almacenamiento*.
+. Encuentra el disco que deseas eliminar. Supongamos que queremos eliminar `/dev/sdb`, y el punto de montaje del disco es `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04`.
+
+image::host/remove-disks-harvester-find-disk.png[Encuentra el disco a eliminar]
+
+==== Desaloja réplicas ({longhorn-product-name} panel de control)
+
+. Por favor, sigue xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[esta sesión] para habilitar el panel de control {longhorn-product-name} integrado.
+. Visita el panel de control {longhorn-product-name} y ve a la página *Nodo*.
+. Expande el nodo que contiene el disco. Confirma que el punto de montaje `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04` está en la lista de discos.
++
+image::host/remove-disks-longhorn-nodes.png[Verifica el disco a eliminar]
+
+. Selecciona *Editar nodo y discos*.
++
+image::host/remove-disks-longhorn-nodes-edit.png[Editar nodo y discos]
+
+. Desplázate hasta el disco que deseas eliminar.
+ ** Establece `Scheduling` en `Disable`.
+ ** Establece `Eviction Requested` en `True`.
+ ** Selecciona *Guardar*. No selecciones el icono de eliminar.
++
+image::host/remove-disks-longhorn-nodes-evict-disk.png[Desalojar disco]
+
+. El disco será deshabilitado. Por favor, espera hasta que el recuento de réplicas del disco sea `0` para proceder con la eliminación del disco.
++
+image::host/remove-disks-longhorn-wait-replicas.png[Espera réplicas]
+
+==== Elimina el disco
+
+. Ve a la página *Hosts*.
+. En el nodo que contiene el disco, selecciona *⋮ -> Editar Config*.
+. Ve a la pestaña *Almacenamiento* y selecciona *x*  para eliminar el disco.
++
+image::host/remove-disks-harvester-remove.png[Eliminar disco]
+
+. Selecciona *Guardar* para eliminar el disco.
+
+== Restricciones de Distribución de Topología
+
+https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#node-labels[Las etiquetas de nodo] se utilizan para identificar los dominios de topología en los que se encuentra cada nodo. Puedes configurar etiquetas como https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone[`topology.kubernetes.io/zone`] en la interfaz de usuario {harvester-product-name}.
+
+. Ve a *Hosts*.
++
+. Selecciona el nodo objetivo y luego selecciona *⋮ -> Editar Config*.
++
+. En la pestaña *Etiquetas*, haz clic en *Añadir Etiqueta* y luego especifica la etiqueta `topology.kubernetes.io/zone` y un valor.
++
+. Haz clic en *Guardar*.
+
+La etiqueta se sincroniza automáticamente con el nodo {longhorn-product-name} correspondiente.
+
+== Hugepages
+
+Los hugepages mejoran la gestión de memoria en Linux al permitir que el núcleo de Linux asigne memoria en bloques significativamente más grandes que el predeterminado de 4 KB. Tamaños de página más grandes mejoran la eficiencia al reducir el tiempo de CPU requerido para que el núcleo de Linux procese las asignaciones de memoria. Esto, a su vez, puede aumentar el rendimiento general del sistema.
+
+Existen dos tipos de hugepages:
+
+* Persistente o estática: Pre-asignado en función de los parámetros de arranque del núcleo de Linux relevantes o configuraciones de {harvester-product-name}.
+* Anónimo o transparente: Asignado y desasignado automáticamente por el núcleo de Linux.
+
+Puedes ver información sobre la asignación actual de hugepages para cada nodo.
+
+. En la interfaz de usuario {harvester-product-name}, ve a la pantalla *Hosts*.
+
+. Haz clic en el nodo objetivo, luego selecciona la pestaña *Hugepages*.
+
+La información en la pestaña *Hugepages* se divide en dos secciones:
+
+* *Meminfo*: Muestra la cantidad total de memoria en uso para hugepages anónimos (transparentes), el tamaño de hugepage por defecto y detalles sobre hugepages persistentes (estáticas).
++
+El campo *Anonymous Hugepages (bytes)* normalmente muestra un valor grande, reflejando la RAM utilizada automáticamente por el núcleo para hugepages transparentes.
++
+Por el contrario, el campo *Total Hugepages*, que representa hugepages asignados estáticamente, normalmente se mantiene en `0`. Sin embargo, si el motor de datos Longhorn V2 está habilitado, este valor cambia a `1024`.
+
+* *Transparent Hugepages*: Muestra la configuración actual de hugepages transparentes.
++
+La siguiente tabla describe las opciones y los valores por defecto para cada configuración:
++
+|===
+| Opción | Valores admitidos | Valor por defecto
+
+| *Habilitado*
+| `Always`, `Madvise`, `Never`
+| `Always`
+
+| *Shared Memory Enabled*
+| `Always`, `Within Size`, `Advise`, `Never`, `Deny`, `Force`
+| `Never`
+
+| *Defragmentación*
+| `Always`, `Defer`, `Defer+Madvise`, `Madvise`, `Never`
+| `Madvise`
+|===
++
+Puedes modificar estas configuraciones para cada nodo seleccionando *⋮ -> Editar Config* y luego haciendo clic en la pestaña *Hugepages*.
++
+Para más información sobre las opciones, consulta https://docs.kernel.org/admin-guide/mm/transhuge.html[Soporte de Transparent Hugepage] en la documentación del núcleo de Linux.
+
+== Modo Ksmtuned
+
+Ksmtuned es una herramienta de automatización de KSM desplegada como un DaemonSet para ejecutar Ksmtuned en cada nodo. Iniciará o detendrá el KSM observando el porcentaje de memoria disponible (*es decir, Coeficiente de Umbral*). Por defecto, necesitas habilitar manualmente Ksmtuned en la interfaz de usuario de cada nodo. Podrás ver las estadísticas del KSM desde la interfaz de usuario del nodo después de 1-2 minutos.(consulta https://www.kernel.org/doc/html/latest/admin-guide/mm/ksm.html#ksm-daemon-sysfs-interface[KSM] para más detalles).
+
+=== Ejecución Rápida
+
+. Ve a la página *Hosts*.
+. En el nodo que deseas modificar, haz clic en *⋮ -> Editar Config*.
+. Selecciona la pestaña *Ksmtuned* y selecciona *Ejecutar* en *Estrategia de Ejecución*.
+. (Opcional) Puedes modificar *Coeficiente de Umbral* según sea necesario.
++
+image::host/edit-ksmtuned.png[Editar Ksmtuned]
+
+. Haz clic en *Guardar* para actualizar.
+. Espera alrededor de 1-2 minutos y podrás comprobar sus *Estadísticas* haciendo clic en *la pestaña ->Ksmtuned de tu nodo*.
++
+image::host/view-ksmtuned-statistics.png[Ver Estadísticas de Ksmtuned]
+
+=== Parámetros
+
+*Estrategia de Ejecución:*
+
+* *Terminar:* Terminar Ksmtuned y KSM. Las VMs aún pueden usar páginas de memoria compartida.
+* *Ejecutar:* Ejecutar Ksmtuned.
+* *Podar:* Terminar Ksmtuned y podar las páginas de memoria de KSM.
+
+*Coeficiente de Umbral*: configura el porcentaje de memoria disponible. Si la memoria disponible es menor que el umbral, se iniciará el KSM; de lo contrario, se detendrá el KSM.
+
+*Fusionar entre nodos:* especifica si las páginas de diferentes nodos NUMA pueden ser fusionadas.
+
+*Modo:*
+
+* *Estándar:* El modo por defecto. El nodo de control ksmd utiliza aproximadamente el 20% de una sola CPU. Utiliza los siguientes parámetros:
+
+[,yaml]
+----
+Boost: 0
+Decay: 0
+Maximum Pages: 100
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Alto rendimiento:* El nodo ksmd utiliza entre el 20% y el 100% de una sola CPU y tiene una mayor eficiencia en el escaneo y la fusión. Utiliza los siguientes parámetros:
+
+[,yaml]
+----
+Boost: 200
+Decay: 50
+Maximum Pages: 10000
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Personalizado:* Puedes personalizar la configuración para alcanzar el rendimiento que deseas.
+
+Ksmtuned utiliza los siguientes parámetros para controlar la eficiencia de KSM:
+
+|===
+| Parámetros | Descripción
+
+| Mejorar
+| El número de páginas escaneadas se incrementa cada vez que la memoria disponible es menor que el *Coeficiente de Umbral*.
+
+| Decaimiento
+| El número de páginas escaneadas se decrementa cada vez que la memoria disponible es mayor que el *Coeficiente de Umbral*.
+
+| Páginas Máximas
+| Número máximo de páginas por escaneo.
+
+| Páginas Mínimas
+| El número mínimo de páginas por escaneo, también la configuración para la primera ejecución.
+
+| Tiempo de Espera (ms)
+| El intervalo entre dos escaneos, que se calcula con la fórmula (*Tiempo de Espera* * 16 * 1024 * 1024 / Memoria Total). Mínimo: 10ms.
+|===
+
+*Por ejemplo, supón que tienes un nodo de memoria de 512GiB que utiliza los siguientes parámetros:*
+
+[,yaml]
+----
+Boost: 300
+Decay: 100
+Maximum Pages: 5000
+Minimum Pages: 1000
+Sleep Time: 50
+----
+
+Cuando Ksmtuned se inicia, inicializa `pages_to_scan` en KSM a 1000 (*Páginas Mínimas*) y establece `sleep_millisecs` en 10 (50 * 16 * 1024 * 1024 / 536870912 KiB < 10).
+
+KSM se inicia cuando la memoria disponible cae por debajo del *Coeficiente de Umbral*. Si detecta que está en ejecución, `pages_to_scan` se incrementa en 300 (*Boost*) cada minuto hasta alcanzar 5000 (*Páginas Máximas*).
+
+KSM se detendrá cuando la memoria disponible esté por encima del *Coeficiente de Umbral*. Si detecta que está detenido, `pages_to_scan` se decrementa en 100 (*Decaimiento*) cada minuto hasta alcanzar 1000 (*Páginas Mínimas*).
+
+== Configuración de NTP
+
+La sincronización de tiempo es un aspecto importante de la arquitectura de clúster distribuido. Debido a esto, {harvester-product-name} proporciona una forma más sencilla de configurar los ajustes de NTP.
+
+{harvester-product-name} soporta la configuración de NTP en la pantalla de Ajustes de la UI {harvester-product-name} (*Avanzado* > *Ajustes*). Puedes configurar los ajustes de NTP para todo el clúster {harvester-product-name} en cualquier momento, y los ajustes se aplican a todos los nodos del clúster.
+
+image::host/harvester-ntp-settings.png[]
+
+Puedes configurar múltiples servidores NTP a la vez.
+
+image::host/harvester-ntp-settings-multiple.png[]
+
+Puedes comprobar los ajustes en la anotación `node.harvesterhci.io/ntp-service` en los nodos de Kubernetes:
+
+* `ntpSyncStatus`: Estado de la conexión a los servidores NTP (valores posibles: `disabled`, `synced` y `unsynced`)
+* `currentNtpServers`: Lista de servidores NTP existentes
+
+ $ kubectl get nodes harvester-node-0 -o yaml |yq -e '.metadata.annotations.["node.harvesterhci.io/ntp-service"]'
+ {"ntpSyncStatus":"synced","currentNtpServers":"0.suse.pool.ntp.org 1.suse.pool.ntp.org"}
+
+[NOTE]
+====
+
+
+. No modifiques el archivo de configuración de NTP en cada nodo. {harvester-product-name} sincronizará automáticamente los ajustes que configuraste en la UI {harvester-product-name} a los nodos.
+. Si actualizaste {harvester-product-name} desde una versión anterior, la lista *ntp-servers* en la pantalla de Ajustes estará vacía (ver captura de pantalla). Debes configurar manualmente los ajustes de NTP porque {harvester-product-name} no es consciente de los ajustes anteriores y no puede detectar conflictos.
+====
+
+image::host/harvester-ntp-settings-empty.png[]
+
+== Configuración de nodo nativo de nube
+
+Puede que necesites personalizar uno o más nodos después de instalar {harvester-product-name}. Este proceso generalmente implica actualizar la xref:../installation-setup/config/update-configuration.adoc[configuración de tiempo de ejecución] y modificar archivos en el directorio `/oem` de cada nodo para que los cambios persistan después de reiniciar.
+
+Estas personalizaciones se pueden describir en un manifiesto de Kubernetes y luego aplicarse al clúster subyacente utilizando kubectl u otras herramientas centradas en GitOps como https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}].
+
+[WARNING]
+====
+Las configuraciones incorrectas pueden comprometer la capacidad de un nodo {harvester-product-name} para arrancar, o incluso dañar la estabilidad general del clúster. Puedes prevenir tales problemas leyendo la documentación del kit de herramientas Elemental para aprender a https://rancher.github.io/elemental-toolkit/docs/customizing/[personalizar Elemental correctamente].
+====
+
+=== Creando un recurso de CloudInit
+
+La personalización del nodo {harvester-product-name} está limitada solo por tu creatividad y por lo que el marcado del kit de herramientas Elemental puede expresar sintácticamente. La documentación, por lo tanto, no puede proporcionar una lista exhaustiva de posibles personalizaciones y casos de uso.
+
+*Ejemplo: Quieres añadir una clave SSH autorizada para el usuario `rancher` por defecto en todos los nodos.*
+
+Comienza creando un manifiesto de Kubernetes para un recurso de CloudInit.
+
+----
+file: ssh_access.yaml
+----
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-access
+spec:
+  matchSelector: {}
+  filename: 99_ssh.yaml
+  contents: |
+    stages:
+      network:
+        - authorized_keys:
+            rancher:
+              - ssh-ed25519 AAAA...
+----
+
+Este manifiesto describe un documento cloud-init de Elemental que se aplicará a _todos los nodos_ (porque el campo `matchSelector: {}` vacío coincide con todo). El documento YAML en el campo `.spec.contents` se renderizará a `/oem/99_ssh.yaml` (debido al campo `.spec.filename`.)
+
+Aplica este ejemplo utilizando el comando `kubectl apply -f ssh_access.yaml`.
+
+[TIP]
+====
+Reinicia los nodos {harvester-product-name} relevantes para que el ejecutor del kit de herramientas Elemental pueda aplicar la nueva configuración al arrancar.
+====
+
+==== Especificación del recurso de CloudInit
+
+|===
+| Campo | required | Descripción
+
+| selector de coincidencia
+| Sí
+| Configuración que te permite especificar los nodos que recibirán los cambios de configuración.
+
+| nombre_archivo
+| Sí
+| Nombre del archivo que aparece en `/oem`.
+
+| contenido
+| Sí
+| Archivo de estilo cloud-init del kit de herramientas Elemental que se renderizará a un archivo en `/oem`.
+
+| en pausa
+| No
+| Cuando se establece en `true`, el archivo no se actualizará en los nodos a medida que cambie.
+|===
+
+El campo `matchSelector` se puede utilizar para dirigir nodos específicos o grupos de nodos en función de sus etiquetas.
+
+Ejemplo:
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+----
+
+[NOTE]
+====
+Todos los pares clave-valor de etiquetas listados en el campo `matchSelector` deben coincidir con las etiquetas de los nodos previstos.
+
+En el siguiente ejemplo, `matchSelector` coincidirá con `harvester-node-1` solo si ese nodo también tiene la etiqueta `example.com/role` con el valor `role-a`.
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+  example.com/role: "role-a"
+----
+====
+
+=== Actualizando un recurso de CloudInit
+
+Puedes usar el comando `kubectl edit` para actualizar un recurso de CloudInit. Sin embargo, hay una advertencia si el campo `matchSelector` se actualiza para excluir uno o más nodos de la personalización. Consulta la nota en la sección <<Deleting a CloudInit Resource>> sobre cómo revertir personalizaciones.
+
+[,console]
+----
+# kubectl edit cloudinit CLOUDINIT_NAME
+----
+
+=== Eliminando un recurso de CloudInit
+
+Puedes usar el comando `kubectl delete` para eliminar un recurso de CloudInit del clúster {harvester-product-name}.
+
+[,console]
+----
+# kubectl delete cloudinit CLOUDINIT_NAME
+----
+
+[NOTE]
+====
+{harvester-product-name} no puede "revertir" personalizaciones descritas anteriormente porque el recurso de CloudInit puede describir cualquier cosa que se pueda expresar como una personalización del kit de herramientas Elemental, incluyendo comandos de shell arbitrarios.
+
+En el ejemplo <<Creating a CloudInit Resource>>, el archivo YAML contiene la sección `authorized_keys`. Esta es una acción de solo añadir en el kit de herramientas Elemental. Cuando el recurso se cambia o se elimina, el archivo `authorized_keys` en {rancher-product-name} seguirá conteniendo la antigua clave pública.
+
+*Eres responsable de modificar o crear un recurso de CloudInit que revierta los cambios (si es necesario) antes de reiniciar el nodo.*
+====
+
+=== Resolución de problemas de implementaciones de CloudInit
+
+Si un documento de cloud-init del kit de herramientas Elemental no aparece en `/oem` o no contiene los contenidos esperados, el bloque de estado del recurso de CloudInit podría contener pistas útiles.
+
+[,console]
+----
+# kubectl get cloudinit CLOUDINIT_NAME -o yaml
+----
+
+[,yaml]
+----
+status:
+  rollouts:
+    harvester-dngmf:
+      conditions:
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: 99_ssh.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+Los pod(s) `harvester-node-manager` en el espacio de nombres `harvester-system` también pueden contener algunas pistas sobre por qué no está renderizando un archivo a un nodo.
+Este pod es parte de un daemonset, por lo que puede ser útil comprobar el pod que se está ejecutando en el nodo de interés.
+
+== Consola remota
+
+Puedes configurar la URL de la consola para la gestión remota del servidor. Esta consola es particularmente útil en entornos donde el acceso físico es limitado.
+
+. En la interfaz de usuario {harvester-product-name}, ve a *Hosts*.
++
+. Localiza el host de destino y luego selecciona *⋮ -> Editar Config*.
++
+image::host/remote_console_config.png[]
++
+. Especifica la *URL de la Consola* y luego haz clic en *Guardar*.
++
+Ejemplo (con HPE iLO):
++
+image::host/remote_console_url.png[]
++
+. Haz clic en *Consola* para acceder al servidor remoto.
++
+image::host/remote_console_button.png[]
+
+== Rotación de certificados caducados
+
+Si los certificados RKE2 han caducado, no puedes usar la configuración `auto-rotate-rke2-certificates` para rotarlos. La configuración solo funciona cuando el clúster (`cluster.provisioning`) está marcado como `Ready`.
+
+[,shell]
+----
+> kubectl get cluster.provisioning -n fleet-local local -o yaml | yq -e '.status.conditions[] | select(.type=="Ready")'
+lastUpdateTime: "2025-10-22T06:41:33Z"
+status: "True"
+type: Ready
+----
+
+Si el valor del campo `status` es `False`, debes rotar manualmente los certificados siguiendo estos pasos en cada nodo:
+
+. Inicia sesión en el nodo utilizando la cuenta root.
+
+. Detén el servicio RKE2.
++
+** Nodos de gestión
++
+[,shell]
+----
+systemctl stop rke2-server
+----
++
+** Nodos de trabajo
++
+[,shell]
+----
+systemctl stop rke2-agent
+----
+
+. Rota los certificados RKE2.
++
+[,shell]
+----
+/opt/rke2/bin/rke2 certificate rotate
+----
+
+. Inicia el servicio RKE2.
++
+** Nodos de gestión
++
+[,shell]
+----
+systemctl start rke2-server
+----
++
+** Nodos de trabajo
++
+[,shell]
+----
+systemctl start rke2-agent
+----
+
+. Reinicia `rancher-system-agent` el servicio.
++
+[,shell]
+----
+systemctl restart rancher-system-agent
+----

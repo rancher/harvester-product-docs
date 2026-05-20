@@ -1,0 +1,117 @@
+= 常见问题
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+本常见问题解答正在不断完善，旨在回答用户关于Harvester最常见的问题。
+
+== 我如何通过 SSH 登录到 Harvester 节点？
+
+[,shell]
+----
+$ ssh rancher@node-ip
+----
+
+== Harvester 仪表板的默认登录用户名和密码是什么？
+
+[,shell]
+----
+username: admin
+password: # you will be promoted to set the default password when logging in for the first time
+----
+
+== 我如何访问 Harvester cluster 的 kubeconfig 文件？
+
+选项 1。您可以从 Harvester 仪表板的支持页面下载 kubeconfig 文件。
+
+image:harvester-kubeconfig.png[harvester-kubeconfig.png]
+
+选项 2。您可以从其中一个 Harvester 管理节点获取 kubeconfig 文件。例如，
+
+[,shell]
+----
+$ sudo su
+$ cat /etc/rancher/rke2/rke2.yaml
+----
+
+== 如何安装正在运行的虚拟机的qemu-guest-agent？
+
+[,shell]
+----
+# cloud-init will only be executed once, reboot it after add the cloud-init config with the following command.
+$ cloud-init clean --logs --reboot
+----
+
+https://cloudinit.readthedocs.io/en/latest/reference/cli.html#clean
+
+== 我如何重置管理员密码？
+
+如果您忘记了管理员密码，可以通过命令行重置。SSH 到其中一个管理节点并运行以下命令：
+
+[,shell]
+----
+# switch to root and run
+$ kubectl  -n cattle-system exec $(kubectl --kubeconfig $KUBECONFIG -n cattle-system get pods -l app=rancher --no-headers | head -1 | awk '{ print $1 }') -c rancher -- reset-password
+New password for default administrator (user-xxxxx):
+<new_password>
+----
+
+== 我添加了一个带有分区的额外磁盘。为什么它没有被检测到？
+
+从 Harvester v1.0.2 开始，我们不再支持添加额外分区磁盘，因此请确保先删除所有分区（例如，使用 `fdisk`）。
+
+== 为什么有些 Harvester pod 变成了 ErrImagePull/ImagePullBackOff？
+
+这可能是因为您的 Harvester cluster 是一个隔离的设置，缺少一些预加载的容器镜像。Kubernetes有一个机制，可以对膨胀的镜像存储进行垃圾回收。当存储容器镜像的分区超过85%时，`kubelet`会尝试根据最后使用时间修剪镜像，从最旧的开始，直到占用率低于80%。这些数字（85% 和 80%）是 Kubernetes 默认的高/低阈值。
+
+要从此状态恢复，请根据集群的配置执行以下操作之一：
+
+* 从集群外部拉取缺失的镜像（如果是隔离的环境，您可能需要提前设置 HTTP 代理）。
+* 手动从 Harvester ISO 映像导入镜像。
++
+[NOTE]
+====
+以 v1.1.2 为例，从官方 URL 下载 Harvester ISO 映像。然后从 ISO 镜像中提取镜像列表，以决定我们要导入哪个镜像 tarball。例如，我们想要导入缺失的容器镜像 `rancher/harvester-upgrade`。
+
+[,shell]
+----
+$ curl -sfL https://releases.rancher.com/harvester/v1.1.2/harvester-v1.1.2-amd64.iso -o harvester.iso
+
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images-lists images-lists
+
+$ grep -R "rancher/harvester-upgrade" images-lists/
+images-lists/harvester-images-v1.1.2.txt:docker.io/rancher/harvester-upgrade:v1.1.2
+----
+
+找出镜像 tarball 的位置，并从 ISO 镜像中提取它。解压提取的 zstd 镜像 tarball。
+
+[,shell]
+----
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images/harvester-images-v1.1.2.tar.zst harvester.tar.zst
+
+$ zstd -d --rm harvester.tar.zst
+----
+
+将镜像 tarball 上传到需要恢复的 Harvester 节点。最后，在每个节点上执行以下命令以导入容器镜像。
+
+[,shell]
+----
+$ ctr -n k8s.io images import harvester.tar
+$ rm harvester.tar
+----
+====
+
+* 在该节点上查找其他节点的缺失镜像，然后从仍然存在镜像的节点导出镜像并在缺失节点上导入它们。
+
+为了防止这种情况发生，我们建议在每次成功升级 Harvester 后，如果镜像存储磁盘空间紧张，清理上一个版本中未使用的容器镜像。我们提供了一个 https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[harv-purge-images 脚本]，使清理磁盘空间变得简单，特别是对于容器镜像存储。该脚本必须在每个 Harvester 节点上执行。例如，如果集群最初在 v1.1.2 中，现在升级到 v1.2.0，您可以执行以下操作以丢弃仅在 v1.1.2 中使用但在 v1.2.0 中不再需要的容器镜像：
+
+[,shell]
+----
+# on each node
+$ ./harv-purge-images.sh v1.1.2 v1.2.0
+----
+
+[CAUTION]
+====
+* 该脚本仅下载镜像列表并比较这两个列表，以计算两个版本之间的差异。它不与集群通信，因此不知道集群是从哪个版本升级的。
+* 我们发布了自 v1.1.0 以来发布的每个版本的镜像列表。对于早于 v1.1.0 的集群，您必须手动清理旧镜像。
+====

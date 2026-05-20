@@ -1,0 +1,46 @@
+= Einzelknoten-Cluster
+:revdate: 2025-07-16
+:page-revdate: {revdate}
+
+{harvester-product-name} unterstützt Einzelknoten-Cluster für Implementierungen, die eine geringere Resilienz tolerieren können oder minimale anfängliche Bereitstellungsressourcen erfordern. Sie können Einzelknoten-Cluster mit den standardmäßigen Installationsmethoden (xref:/installation-setup/methods/iso-install.adoc[ISO], xref:/installation-setup/methods/usb-install.adoc[USB] und xref:/installation-setup/methods/pxe-boot-install.adoc[PXE-Boot]) erstellen.
+
+Einzelknoten-Cluster unterstützen die meisten {harvester-product-name}-Funktionen, einschließlich der Erstellung von RKE2-Clustern und Knoten-Upgrades (mit einigen Einschränkungen). Diese Implementierungsart hat jedoch die folgenden wesentlichen Nachteile:
+
+* Keine hohe Verfügbarkeit: Fehler und Aktualisierungen, die einen Neustart des Knotens erfordern, führen zu Ausfallzeit für laufende virtuelle Maschinen.
+* Keine Live-Migration und keine Unterstützung für einen unterbrechungsfreien Betrieb während Upgrades.
+
+== Voraussetzungen
+
+Bevor Sie mit der Implementierung Ihres Einzelknoten-Clusters beginnen, stellen Sie sicher, dass die folgenden Anforderungen erfüllt sind.
+
+* Hardware: xref:/installation-setup/requirements.adoc#_hardware_requirements[Verwenden Sie serverklassige Hardware] mit ausreichenden Ressourcen, um {harvester-product-name} und eine Produktionslast auszuführen. Laptops und verschachtelte Virtualisierung werden nicht unterstützt.
+* Netzwerk: xref:/installation-setup/requirements.adoc#_port_requirements_for_nodes[Konfigurieren Sie Ports] basierend auf der Art des Verkehrs, der zwischen virtuellen Maschinen übertragen werden soll.
+
+== Replikazahl der Standard-StorageClass
+
+{harvester-product-name} verwendet StorageClasses, um zu beschreiben, wie {longhorn-product-name} Volumes bereitstellen muss. Jede StorageClass hat einen Parameter, der die Anzahl der Replikate definiert, die für jedes Volume erstellt werden sollen.
+
+Die Standard-StorageClass `harvester-longhorn` hat einen Replikazahlwert von *3* für hohe Verfügbarkeit. Wenn Sie `harvester-longhorn` in Ihrem Einzelknoten-Cluster verwenden, kann {longhorn-product-name} die Standardanzahl an Replikaten nicht erstellen, und Volumes werden auf dem *Volumes*-Bildschirm der Benutzeroberfläche als _Degraded_ markiert.
+
+Um dieses Problem zu vermeiden, können Sie eine der folgenden Aktionen durchführen:
+
+* Ändern Sie die xref:/installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[Replikazahl] von `harvester-longhorn` auf *1* mithilfe einer xref:/installation-setup/config/configuration-file.adoc[Konfigurationsdatei].
+* xref:/storage/storageclass.adoc#_creating_a_storageclass[Erstellen Sie eine neue StorageClass] mit dem Parameter *Anzahl der Replikate*, der auf *1* gesetzt ist. Sobald erstellt, suchen Sie die neue StorageClass in der Liste und wählen Sie dann *⋮* > *Als Standard festlegen*.
+
+== Mehrere Replikate auf einem Knoten mit mehreren Festplatten
+
+{longhorn-product-name} erstellt nur ein Replikat für jedes Volume, auch wenn der Knoten mehrere Festplatten hat, da *Replica Hard Anti-Affinity* standardmäßig aktiviert ist. Wenn bereits ein gesundes Replikat auf einem Knoten vorhanden ist, wird der Scheduler daran gehindert, neue Replikate des gleichen Volumes auf dem Knoten zu planen.
+
+In Clustern mit hoher Verfügbarkeit sorgt *Replica Hard Anti-Affinity* für Volumenredundanz. Dieser Mechanismus kann jedoch dazu führen, dass Volumes in Clustern mit nur einem Knoten degradiert werden (da keine anderen Knoten für die Planung neuer Replikate verfügbar sind).
+
+Wenn Sie möchten, dass {longhorn-product-name} mehrere Replikate auf einem Knoten mit mehreren Festplatten erstellt, führen Sie die folgenden Schritte aus:
+
+. Aktivieren Sie https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_node_level_soft_anti_affinity[`Replica Node Level Soft Anti-Affinity`]: Wenn diese Einstellung aktiviert ist, plant {longhorn-product-name} neue Replikate auf Knoten mit vorhandenen gesunden Replikaten des gleichen Volumes.
+. Deaktivieren Sie https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_disk_level_soft_anti_affinity[`Replica Disk Level Soft Anti-Affinity`]: Wenn diese Einstellung deaktiviert ist, plant {longhorn-product-name} keine neuen Replikate auf Festplatten mit vorhandenen gesunden Replikaten des gleichen Volumes. Das Deaktivieren dieser Einstellung bietet Fehlertoleranz für Festplatten in Clustern mit nur einem Knoten.
+. (Optional) xref:../storage/storageclass.adoc#_creating_a_storageclass[Erstellen Sie eine neue StorageClass] und geben Sie die Festplatten-Tags an, die bei der Volumenplanung übereinstimmen müssen.
+
+== Upgrades und Wartung
+
+Cluster mit nur einem Knoten unterstützen xref:/virtual-machines/live-migration.adoc[Live Migration] nicht, sodass virtuelle Maschinen während der Cluster-Upgrades nicht verfügbar sind. {harvester-product-name} fährt alle virtuellen Maschinen gewaltsam herunter, bevor der Upgradeprozess gestartet wird. Sie können {harvester-product-name} so konfigurieren, dass laufende virtuelle Maschinen automatisch mit der `restoreVM` Option der xref:/installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`] Einstellung wiederhergestellt werden.
+
+Das Aktivieren des xref:/hosts/hosts.adoc#_node_maintenance[Wartungsmodus] ist ebenfalls nicht möglich, da dieser Vorgang auf der Funktionalität der Live Migration basiert und {harvester-product-name} den einzigen Steuerungsknoten nicht in den Wartungsmodus versetzen kann.

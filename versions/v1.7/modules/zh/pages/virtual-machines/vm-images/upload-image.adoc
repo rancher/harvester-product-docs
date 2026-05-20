@@ -1,0 +1,160 @@
+= 上传镜像
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+目前，支持三种创建镜像的方式：通过 URL 上传镜像、通过本地文件上传镜像，以及通过卷创建镜像。
+
+== 通过 URL 上传镜像
+
+[tabs]
+======
+UI::
++
+要在 *镜像* 页面导入虚拟机镜像，请输入一个可以从集群访问的 URL。描述和标签是可选的。
++
+[NOTE]
+====
+* 镜像名称会自动填充为 URL 地址中的文件名。您可以随时自定义镜像名称。
+* 避免使用每日构建的 URL（例如， https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[Ubuntu Jammy 每日构建]）。当所有 Longhorn 后备镜像的副本丢失时，Longhorn 会尝试重新下载文件以进行自我修复。使用每日构建的 URL 是有问题的，因为 URL 本身会发生变化，导致校验和不匹配和冲突，从而导致副本丢失。
+====
++
+[CAUTION]
+====
+大型镜像文件可能会在 {harvester-product-name} 中造成内存问题，尤其是当您使用不支持 HTTP 范围请求的第三方 StorageClasses 的下载 URL 时（例如，Python 的 `http.server`）。为了可靠的下载，请使用 NGINX 或 Apache。（此问题在 v1.6.1 中已修复。）
+====
++
+image::upload-image.png[]
+
+API::
++
+要通过 API 从储存库导入虚拟机镜像，请创建一个 `VirtualMachineImage` 对象。您必须指定一个可以从集群访问的 URL。
++
+示例：
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap
+  namespace: default
+spec:
+  description: A human-readable description for the VM image
+  displayName: openSUSE-Leap
+  sourceType: download
+  url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+  checksum: 80c27afb7cd791ac86ee1b0b0c572a242f6142579db5beac841e71151d370cd6
+----
++
+有关更多信息，请参见 xref:api.adoc[API 参考]。
+
+Terraform::
++
+[,json]
+----
+resource "harvester_image" "opensuse154" {
+  name      = "opensuse154"
+  namespace = "harvester-public"
+
+  display_name = "openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+  source_type  = "download"
+  url          = "https://downloadcontent-us1.opensuse.org/repositories/Cloud:/Images:/Leap_15.4/images/openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+}
+----
+======
+
+== 通过本地文件上传镜像
+
+目前，支持 qcow2、raw 和 ISO 映像。
+
+[NOTE]
+====
+* 请在文件上传完成之前不要刷新页面。
+====
+
+image::upload-image-local.png[]
+
+=== HTTP 413 错误在 {rancher-product-name} 多集群管理中
+
+您可以在 *{rancher-product-name} 界面* 的 xref:/integrations/rancher/virtualization-management.adoc#_importing_harvester_cluster[*多集群管理*] 界面上传镜像。当镜像的状态为 _上传中_ 但进度指示器长时间显示 _0%_ 时，请检查 HTTP 响应状态码。_413_ 表示请求体的大小超过了限制。
+
+image::img-413-code.png[]
+
+最大请求体大小应特定于托管 {rancher-product-name} 的集群（例如，RKE2 集群的默认限制为 1 MB，但 K3s 集群没有此限制）。
+
+当前的解决方法是从 *{harvester-product-name} 界面* 上传镜像。如果您选择从 {rancher-product-name} 界面上传镜像，您可能需要在入口服务器上配置相关设置（例如， https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size[`proxy-body-size`] 在 NGINX 中）。
+
+如果 {rancher-product-name} 部署在 RKE2 集群上，请执行以下步骤：
+
+. 编辑 {rancher-product-name} 入口。
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. 为 `nginx.ingress.kubernetes.io/proxy-body-size` 指定一个值。
++
+示例：
++
+image:img-ingress-client-body.png[]
+
+. 删除卡住的镜像，然后重新启动上传过程。
+
+=== 在 {rancher-product-name} 多集群管理中长时间上传大镜像
+
+如果您从 *多集群管理* 屏幕在 {rancher-product-name} 界面上传大镜像（超过 10 GB），操作可能会比平常更长，镜像状态（上传中）可能不会改变。
+
+此行为与入口配置中的 _proxy-request-buffering_ 相关，这一配置也特定于托管 {rancher-product-name} 的集群。
+
+当前的解决方法是从 *{harvester-product-name} 界面上传镜像。如果您选择从 {rancher-product-name} 界面上传镜像，您可能需要在入口服务器上配置相关设置（例如， https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering[`proxy-request-buffering`] 在 NGINX 中）。
+
+如果 {rancher-product-name} 部署在 RKE2 集群上，请执行以下步骤：
+
+. 编辑 {rancher-product-name} 入口。
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. 关闭 `nginx.ingress.kubernetes.io/proxy-request-buffering`。
++
+示例：
++
+image:img-ingress-request-proxy-buffering.png[]
+
+. 删除卡住的镜像，然后重新启动上传过程。
+
+=== 上传之前从 {harvester-product-name} 下载的镜像
+
+从 *v1.5.5* 开始，Longhorn https://github.com/longhorn/backing-image-manager/pull/153[对用于下载的后备镜像进行压缩]。如果您尝试上传压缩的后备镜像，{harvester-product-name} 会拒绝该尝试并显示消息 *上传失败：上传的文件大小 xxxx 应为 512 字节的倍数，因为 Longhorn 默认使用 directIO*，这是因为压缩数据违反了 Longhorn 的数据对齐要求。
+
+在上传之前，使用命令 `gzip -d <file name>` 解压后备镜像。
+
+== 通过卷创建镜像
+
+在*卷*页面上，点击*导出镜像*。输入镜像名称并选择一个存储类以创建镜像。
+
+image::volume/export-volume-to-image-1.png[]
+
+== 镜像存储类
+
+在创建镜像时，您可以选择一个xref:/storage/storageclass.adoc[存储类]并使用其预定义参数，如副本、节点选择器和磁盘选择器。
+
+[NOTE]
+====
+镜像并不直接使用此处选择的`StorageClass`。它只是一个`StorageClass`模板。
+
+相反，它在后台创建一个特殊的存储类，前缀名称为`longhorn-`。这由{harvester-product-name}后端自动完成，但它继承了您选择的存储类的参数。
+====
+
+image::image-storageclass.png[]
+
+== 镜像标签
+
+您可以为镜像添加标签，这有助于更准确地识别操作系统类型。此外，如果需要，您还可以添加任何自定义标签以进行过滤。
+
+如果您的镜像名称或 URL 包含任何有效信息，用户界面会自动识别操作系统类型和镜像类别。如果没有，您也可以在用户界面上手动指定相应的标签。
+
+image::image-labels.png[]

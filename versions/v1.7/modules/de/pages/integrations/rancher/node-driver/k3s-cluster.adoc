@@ -1,0 +1,92 @@
+= Erstellen eines K3s Kubernetes-Clusters
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Sie können jetzt K3s Kubernetes-Cluster auf dem Harvester-Cluster in Rancher mit dem integrierten Harvester-Knotentreiber bereitstellen.
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* Der Harvester K3s Knotentreiber befindet sich in *Tech Preview*.
+* Die Bereitstellung von K3s Kubernetes-Clustern umfasst die Konfiguration der IP-Adresse der zugrunde liegenden virtuellen Maschinen. Sie können dies mit einem DHCP-Server im VLAN-Netzwerk tun, an das die virtuellen Maschinen angeschlossen sind. Wenn ein solcher Server im Netzwerk nicht vorhanden ist, können Sie die Funktion xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] verwenden, um die IP-Adresse zu konfigurieren.
+* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN-Netzwerk] ist für den Harvester-Knotentreiber erforderlich.
+* Der Harvester-Knotentreiber unterstützt nur Cloud-Images.
+* Für die Portanforderungen der Gastcluster, die innerhalb von Harvester bereitgestellt werden, siehe die xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[Portanforderungen für Gastcluster].
+====
+
+== Erstellen Sie Ihre Cloud-Anmeldeinformationen
+
+. Klicken Sie auf *☰ > Clusterverwaltung*.
+. Klicken Sie auf *Cloud-Anmeldeinformationen*.
+. Klicken Sie auf *Erstellen*.
+. Klicken Sie auf *Harvester*.
+. Geben Sie den Namen Ihrer Cloud-Anmeldeinformation ein
+. Wählen Sie "Importierter Harvester-Cluster".
+. Klicken Sie auf *Erstellen*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== K3s Kubernetes-Cluster erstellen
+
+Sie können ein K3s Kubernetes-Cluster von der Seite *Clusterverwaltung* über den K3s-Knotentreiber erstellen.
+
+. Wählen Sie das Menü *Clusters* aus.
+. Klicken Sie auf die Schaltfläche *Erstellen*.
+. Schalten Sie den Schalter zu *RKE2/K3s* um.
+. Wählen Sie den Harvester-Knotentreiber aus.
+. Wählen Sie eine *Cloud-Anmeldeinformation* aus
+. Geben Sie den *Cluster-Namen* ein (erforderlich).
+. Geben Sie den *Namespace* ein (erforderlich).
+. Geben Sie das *Image* ein (erforderlich).
+. Geben Sie den *Netzwerknamen* ein (erforderlich).
+. Geben Sie den *SSH-Benutzer* ein (erforderlich).
+. Klicken Sie auf *Erstellen*.
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== Knotenaffinität hinzufügen
+
+Der Harvester-Knotentreiber unterstützt jetzt die Planung einer Gruppe von Maschinen auf bestimmten Knoten durch die Knotenaffinitätsregeln. Dies bietet hohe Verfügbarkeit und bessere Ressourcennutzung.
+
+Die Knotenaffinität kann während der Clustererstellung zu den Maschinenpools hinzugefügt werden:
+
+. Klicken Sie auf die `Show Advanced` Schaltfläche und klicken Sie auf die `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Setzen Sie die Priorität auf `Required`, wenn Sie möchten, dass der Scheduler die Maschinen nur plant, wenn die Regeln erfüllt sind.
+. Klicken Sie auf `Add Rule`, um die Knotenaffinitätsregeln anzugeben, z. B. für den xref:./node-driver.adoc#_topology_spread_constraints[topology spread constraints] Anwendungsfall können Sie die `region` und `zone` Labels wie folgt hinzufügen:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+. Klicken Sie auf `Create`, um die Knotenvorlage zu speichern. Nachdem der Cluster installiert ist, können Sie überprüfen, ob seine Maschinenknoten gemäß den Affinitätsregeln geplant sind.
+
+== Verwendung des Harvester K3s Node-Treibers in einer Air-Gapped-Umgebung
+
+Die Bereitstellung von K3s basiert auf dem `qemu-guest-agent` Paket, um die IP der virtuellen Maschine zu erhalten.
+
+Es kann jedoch sein, dass es in einer Air-Gapped-Umgebung nicht machbar ist, Pakete zu installieren.
+
+Sie können die Installationsbeschränkungen mit den folgenden Optionen angehen:
+
+* Option 1. Verwenden Sie ein VM-Image, das mit den erforderlichen Paketen (z. B. `iptables`, `qemu-guest-agent`) vorkonfiguriert ist.
+* Option 2. Gehen Sie zu *Erweiterte Optionen anzeigen* > *Benutzerdaten*, um VMs zu ermöglichen, die erforderlichen Pakete über einen HTTP(S)-Proxy zu installieren.
+
+Beispiel für `user data` in der Harvester-Knotenvorlage:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

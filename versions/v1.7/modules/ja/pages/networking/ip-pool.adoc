@@ -1,0 +1,146 @@
+= IPプール
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+IPプールは、{harvester-product-name}ロードバランサー（LB）専用のビルトインIPアドレス管理（IPAM）ソリューションです。
+
+== 機能
+
+* *複数のIP範囲:*各IPプールには、複数のIP範囲またはCIDRを含めることができます。
+* *割り当て履歴:*IPプールは、すべてのIPアドレスの割り当て履歴を追跡し、ロードバランサー名によって以前に割り当てられたアドレスを優先的に割り当てます。
++
+[,yaml]
+----
+status:
+  allocatedHistory:
+    192.168.178.8: default/rke2-default-lb-pool-2fab9ac0
+----
+
+* *スコープ:*IPプールは、特定のネットワーク、プロジェクト、ネームスペース、またはゲストクラスターに制限することができます。
+
+== IPプールの作成
+
+. {harvester-product-name} UIで、*ネットワーク -> IPプール*に移動します。
+. 「*作成*」を選択します。
+. IPプールの名前を指定します。
+. *範囲*タブで、1つ以上のIP範囲を指定します。
++
+image::networking/multiple-ranges.png[IPプール内の複数のIP範囲]
+. 「*セレクタ*」タブで、IPプールの優先度とスコープ（ネームスペース）を指定します。
++
+image::networking/ippool-scope.png[IPプールのスコープ]
+
+=== Rancher UIを使用してIPプールを作成する
+
+{harvester-product-name}クラスターを{rancher-short-name}にインポートした場合、{rancher-short-name} UIを使用してIPプールを作成できます（*仮想化管理* -> IPプール:作成*）。ただし、*スコープ*セクションでは、ネームスペースに加えてプロジェクトとゲストKubernetesクラスターを指定する必要があります。詳細については、xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[マルチテナンシーの例]および https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[プロジェクトとKubernetesの名前空間をRancherで使用する]を参照してください。
+
+IPプールは、*スコープ*セクションに*プロジェクト*、*ネームスペース*、および*ゲストKubernetesクラスター*フィールドが*すべて*に設定された1つのエントリのみを含む場合、グローバルリソースとして指定されます。
+
+== 選択ポリシー
+
+各IPプールには特定の範囲があり、LB `annotations`に対応する要件を指定できます。指定された要件を満たすIPプールは、自動的にLBにIPアドレスを割り当てます。
+
+* LBは、要件を表現するために以下の注釈を利用します（すべての注釈はオプションです）：
+ ** `loadbalancer.harvesterhci.io/network`は、ゲストクラスターのノードが使用するVMネットワークを指定します。
+ ** `loadbalancer.harvesterhci.io/project`と`loadbalancer.harvesterhci.io/namespace`は、ゲストクラスターを構成するVMのプロジェクトとネームスペースを特定します。
+ ** `loadbalancer.harvesterhci.io/cluster`は、ゲストクラスターの名前を示します。
+* IPプールには、LBの要件に一致させるためのネットワークとスコープを含むセレクターがあります。
+ ** ネットワークは厳しい条件です。オプションのIPプールは、LB注釈`loadbalancer.harvesterhci.io/network`の値と一致する必要があります。
+ ** グローバルIPプールを除くすべてのIPプールは、優先度が`0`の場合、他のものとは異なるユニークなスコープを持っています。LBのプロジェクト、ネームスペース、またはクラスター名は、このプールからIPを取得したい場合、IPプールのスコープ内にある必要があります。
+* `spec.selector.priority`は、IPプールの優先度を指定します。数が大きくなるほど、優先度が高くなります。優先度が`0`でない場合、値は異なる必要があります。優先度は、古いIPプールを新しいものに移行するのに役立ちます。
+* IPプールがすべてのプロジェクト、名前空間、ゲストクラスターに一致するスコープを持つ場合、それはグローバルIPプールと呼ばれ、1つのグローバルIPプールのみが許可されます。LBの要件に一致するIPプールがない場合、IPAMは存在する場合、グローバルIPプールからIPアドレスを割り当てます。
+
+=== 例
+
+* *例1:*`192.168.100.0/24` ネームスペース内で `default` の範囲の IP プールを設定したいと思います。このシナリオでは、`default` ネームスペース内のすべてのロードバランサーが、この指定された IP プールから IP アドレスを受け取ります。
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: default-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.100.0/24
+  selector:
+    scope:
+      namespace: default
+----
+
+* *例2:*ネットワーク `default/vlan1` 内にデプロイされたゲストクラスター `rke2` があり、その `project/namespace` 名は `product/default` です。それに対して排他的な IP プール範囲 `192.168.10.10-192.168.10.20` を構成したい場合。次の `YAML` 設定を参照してください。
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: rke2-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.10.0/24
+    rangeStart: 192.168.10.10
+    rangeEnd: 192.168.10.20
+  selector:
+    network: default/vlan1
+    scope:
+    - project: product
+      namespace: default
+      guestCluster: rke2
+----
+
+* *例3:*`default` ネームスペースのために IP プール `default-ip-pool` を指定した場合、IP プール `default-ip-pool` を範囲 `192.168.200.0/24` の別の IP プール `default-ip-pool-2` に移行したいと思います。同じスコープに対して 1 つの IP プールを指定することは許可されていませんが、IP プール `default-ip-pool-2` に `default-ip-pool` よりも高い優先度を与えることができます。次の `YAML` 設定を参照してください。
++
+[,yaml]
+----
+  apiVersion: networking.harvesterhci.io/v1beta1
+  kind: IPPool
+  metadata:
+    name: default-ip-pool-2
+  spec:
+    ranges:
+    - subnet: 192.168.200.0/24
+    selector:
+      priority: 1  # The priority is higher than default-ip-pool
+      scope:
+        namespace: default
+----
+
+* *例4:*CIDR 範囲 `192.168.20.0/24` のグローバル IP プールを構成したいと思います。
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
+spec:
+  ranges:
+  - subnet: 192.168.20.0/24
+  selector:
+    scope:
+    - project: "*"
+      namespace: "*"
+      guestCluster: "*"
+----
+
+== 割り当てポリシー
+
+* IP プールは、割り当て履歴に基づいて以前に割り当てられた IP アドレスの割り当てを優先します。
+* IP アドレスは昇順で割り当てられます。
+
+== ベストプラクティス
+
+=== VM タイプのロードバランサー用 IP プール
+
+* スコープセレクターの「*プロジェクト*」および「*ゲスト Kubernetes クラスター*」フィールドを空白のままにして、<<Creating an IP pool,「{harvester-product-name} UI」を使用して>> IPプールを作成します。
+
+* もし <<Creating an IP pool using the Rancher UI,{rancher-short-name} UI>> を使用しなければならない場合は、*プロジェクト* および *ゲスト Kubernetes クラスター* フィールドを *すべて* または *なし* に設定してください。
+
+=== ゲストクラスタータイプのロードバランサー用 IP プール
+
+* リソース管理と分離を向上させるために、ターゲットプロジェクトとゲスト Kubernetes クラスターを指定できるよう、<<Creating an IP pool using the Rancher UI,「{rancher-short-name} UI」を使用して>> IPプールを作成します。
+
+* グローバル IP プールを作成する際は注意してください。単一のゲストクラスターがプール全体を使い果たす可能性があり、他のクラスターがサービスを提供できなくなることがあります。さらに、アドレスがまだ使用中の場合、プールを削除することはできません。

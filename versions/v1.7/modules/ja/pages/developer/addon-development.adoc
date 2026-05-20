@@ -1,0 +1,60 @@
+= アドオン開発ガイド
+:revdate: 2025-06-17
+:page-revdate: {revdate}
+
+{harvester-product-name} アドオンを使用すると、要件に基づいて特定の製品およびサードパーティのコンポーネントを有効または無効にできます。アドオンは、 https://documentation.suse.com/cloudnative/rke2/latest/en/helm.html#_using_the_helm_crd[{rke2-product-name} HelmChart リソース定義 (CRD)] のラッパーとして機能します。
+
+== 前提条件
+
+* 既存の {harvester-product-name} クラスター
+
+== アドオン仕様
+
+`Addon` CRD は次のフィールドをサポートしています。
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Addon
+metadata:
+  name: example-add-on           # Name of add-on
+  namespace: example-namespace  # Namespace where the add-on CRD is deployed and where the associated Kubernetes components will be deployed
+  labels:                       # Optional add-on labels
+    Add-on.harvesterhci.io/experimental: "true" # Predefined label used on the UI to identify add-ons with the "experimental" maturity level
+spec:
+  enabled: false                # Boolean indicating if an add-on should be enabled or disabled on definition
+  repo: https://chartsrepo.com  # Helm chart repository containing the Helm chart managed by the add-on
+  version: "v0.19.0"            # Version of the Helm chart to be installed
+  chart: mychart                # Name of the Helm chart in the Helm chart repository
+  valuesContent: |-             # File (values.yaml) that must be passed to the Helm chart
+    contents of values.yaml
+    that need to be passed
+    to the chart
+----
+
+[NOTE]
+====
+実験的なアドオンは {harvester-product-name} に直接パッケージ化されていません。例として、 https://github.com/harvester/experimental-addons/blob/main/rancher-vcluster/rancher-vcluster.yaml[`rancher-vcluster`] アドオンがあります。
+====
+
+== インストール
+
+[,bash]
+----
+kubectl apply -f /path/to/add-on.yaml
+----
+
+== 使用方法
+
+`Addon` CRD を作成した後、`enabled` フィールドを切り替えて関連する Helm チャートを有効または無効にできます。
+
+== アップグレード
+
+`repo`、`version`、`chart` または `valueContent` フィールドの変更は `helm upgrade` をトリガーし、既存の Helm チャートのアップグレードを強制します。
+
+== アンインストール
+
+[,bash]
+----
+kubectl delete -f /path/to/Add-on.yaml
+----

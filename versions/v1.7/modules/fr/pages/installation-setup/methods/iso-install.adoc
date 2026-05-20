@@ -1,0 +1,197 @@
+= Installation ISO
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+{harvester-product-name} est livré sous forme d'image d'appliance amorçable, vous pouvez l'installer directement sur un serveur matériel sans système d'exploitation avec l'image ISO. Pour obtenir l'image ISO, téléchargez *💿 harvester-v1.x.x-amd64.iso* depuis la page https://github.com/harvester/harvester/releases[Releases].
+
+Lors de l'installation, vous pouvez soit *créer un nouveau cluster*, soit *joindre le nœud à un cluster existant*.
+
+La https://youtu.be/X0VIGZ_lExQ[vidéo] suivante montre un aperçu rapide d'une installation ISO.
+
++++++++++<iframe width="800" height="400" src="https://www.youtube.com/embed/X0VIGZ_lExQ" title="" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture" allowfullscreen="">[]++++++</iframe>+++++++++
+
+== Procédure d'installation
+
+. Montez le fichier ISO et démarrez le serveur en sélectionnant l'option `Harvester Installer`.
++
+image::install/iso-install.png[iso-install.png]
++
+L'installateur vérifie automatiquement le matériel et affiche des messages d'avertissement si les exigences minimales ne sont pas respectées. L'écran *Vérifications matérielles* n'est pas affiché si tous les contrôles sont réussis.
++
+image::install/hardware-checks.png[hardware-checks.png]
+
+. Utilisez les touches fléchées pour choisir un mode d'installation. Par défaut, le premier nœud sera le nœud de gestion du cluster.
++
+image::install/choose-installation-mode.png[choose-installation-mode.png]
++
+** `Create a new Harvester cluster`{nbsp}: crée un cluster entièrement nouveau.
+** `Join an existing Harvester cluster`{nbsp}: rejoint un cluster existant. Vous avez besoin du VIP et du token du cluster que vous souhaitez rejoindre.
+** `Install Harvester binaries only` : Si vous choisissez cette option, une configuration supplémentaire est requise après le premier démarrage.
++
+[IMPORTANT]
+====
+Lorsque trois nœuds sont présents, les deux autres nœuds ajoutés en premier sont automatiquement promus en nœuds de gestion pour former un cluster HA. Si vous souhaitez promouvoir des nœuds de gestion provenant de différentes zones, vous pouvez ajouter l'étiquette de nœud `topology.kubernetes.io/zone` dans la configuration xref:../../installation-setup/config/configuration-file.adoc#_os_labels[os.labels] en fournissant une URL de xref:../../installation-setup/config/configuration-file.adoc[fichier de configuration] lors de l'étape de personnalisation de l'hôte. Dans ce cas, au moins trois zones différentes sont requises.
+====
+
+. Choisissez un rôle pour le nœud. Vous devez effectuer cette étape si vous avez sélectionné le mode d'installation `Join an existing Harvester cluster`.
++
+image::install/select-role.png[choose-node-role.png]
++
+** `Default Role` : Permet à un nœud de fonctionner comme un nœud de gestion ou un nœud de travail. Ce rôle n'a pas de privilèges ou de restrictions spécifiques.
+** `Management Role` : Permet à un nœud d'être priorisé lorsque {harvester-product-name} promeut des nœuds en nœuds de gestion.
+** `Witness Role` : Restreint un nœud à être un nœud témoin (fonctionne uniquement comme un nœud etcd) dans un cluster spécifique.
+** `Worker Role` : Restreint un nœud à être un nœud de travail (jamais promu en nœud de gestion) dans un cluster spécifique.
+
+. Configurez un mot de passe pour accéder au nœud. L'utilisateur SSH par défaut est `rancher`.
++
+image::install/config-password.png[config-password.png]
+
+. Choisissez le disque d'installation sur lequel vous souhaitez installer le cluster et le disque de données sur lequel vous souhaitez stocker les données de la VM. Par défaut, {harvester-product-name} utilise le schéma de partitionnement https://en.wikipedia.org/wiki/GUID_Partition_Table[Table de partition GUID (GPT)] pour UEFI et BIOS. Si vous utilisez le démarrage BIOS, vous aurez alors l'option de sélectionner https://en.wikipedia.org/wiki/Master_boot_record[Secteur d'amorçage principal (MBR)].
++
+[IMPORTANT]
+====
+La prise en charge du démarrage BIOS hérité cessera d'être assurée à partir de la version 1.7.0 et sera supprimée dans une version ultérieure. Les clusters {harvester-product-name} existants qui utilisent ce mode de démarrage continueront de fonctionner, mais la mise à niveau vers des versions ultérieures peut nécessiter une réinstallation en mode UEFI. Pour éviter des problèmes et des interruptions, utilisez UEFI dans les nouvelles installations.
+====
++
+image::install/choose-installation-target-data-disk.png[choose-installation-target-data-disk.png]
++
+** `Installation disk` : Le disque sur lequel installer le cluster.
+** `Data disk` : Le disque pour stocker les données de la VM. Il est recommandé de choisir un disque séparé pour stocker les données de la VM. Cela ne s'applique pas aux nœuds témoins.
+** `Persistent size` : Si vous n'avez qu'un seul disque ou si vous utilisez le même disque pour le système d'exploitation et les données de la VM, vous devez configurer la taille de la partition persistante pour stocker les paquets système et les images de conteneurs. La taille de partition persistante par défaut et minimale est de 150 GiB. Vous pouvez spécifier une taille comme 200Gi ou 153600Mi.
+
+. Configurez le `HostName` du nœud.
++
+image::install/config-hostname.png[config-hostname.png]
+
+. Configurez l(es) interface(s) réseau pour le réseau de gestion. Par défaut, {harvester-product-name} crée une xref:../../installation-setup/requirements.adoc#_hardware_requirements[interface Bond] nommée `mgmt-bo` pour le xref:../../networking/cluster-network.adoc#_built_in_cluster_network[réseau de gestion intégré], et l'adresse IP peut être configurée via DHCP ou assignée statiquement.
++
+image::install/config-network.png[config-network.png]
++
+[NOTE]
+====
+Les commutateurs physiques connectés aux interfaces Bond doivent être configurés strictement en tant que ports de trunk. Ces ports doivent accepter le trafic étiqueté et envoyer le trafic étiqueté avec l'ID VLAN utilisé par le réseau VM.
+
+Il n'est pas possible de changer l'IP du nœud tout au long du cycle de vie d'un cluster. Si vous utilisez DHCP, vous devez vous assurer que le serveur DHCP offre toujours la même IP pour le même nœud. Si l'IP du nœud est modifiée, le nœud concerné ne pourra pas rejoindre le cluster et pourrait même compromettre son fonctionnement.
+
+De plus, vous devez ajouter l'option _routeurs_ (`option routers`) lors de la configuration du serveur DHCP. Cette option est utilisée pour ajouter la route par défaut sur l'hôte. Sans la route par défaut, le nœud échouera à démarrer.
+
+Par exemple :
+
+----
+Linux~ # ip route
+default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+La valeur MTU par défaut de l'interface Bond est de `1500`. Pour utiliser une valeur MTU différente, configurez le xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[[`install.management_interface`] paramètre dans un fichier de configuration Harvester selon l'étape suivante.
+
+Pour plus d'informations, voir xref:./pxe-boot-install.adoc#_dhcp_server_configuration[Configuration du serveur DHCP].
+====
+
+. (Optionnel) Configurez les CIDR pour les pods et services du cluster.
++
+Pour utiliser les valeurs par défaut, laissez les champs vides.
++
+image::install/config-cluster-cidrs.png[config-cluster-cidrs.png]
++
+[IMPORTANT]
+====
+Les valeurs CIDR ne doivent pas se chevaucher et doivent être dans la plage d'adresses IP privées de 10.0.0.0/8, 172.16.0.0/12 ou 192.168.0.0/16.
+
+L'IP du service DNS doit être dans la plage définie par le champ *CIDR de service*.
+====
++
+Exemple d'une configuration CIDR valide{nbsp}:
++
+* *CIDR de Pod*{nbsp}: 172.16.0.0/16
+* *CIDR de Service*{nbsp}: 172.22.0.0/16
+* *IP DNS de Cluster*{nbsp}: 172.22.0.10
+
+. (Optionnel) Configurez le `DNS Servers`. Utilisez des virgules comme délimiteur pour ajouter d'autres serveurs DNS. Laissez-le vide pour utiliser le serveur DNS par défaut.
++
+image::install/config-dns-server.png[config-dns-server.png]
+
+. Configurez l'IP virtuelle (VIP) en sélectionnant un `VIP Mode`. Cette VIP est utilisée pour accéder au cluster ou pour que d'autres nœuds rejoignent le cluster.
++
+[NOTE]
+====
+Pour la configuration DHCP avec des mappages d'adresses MAC à IP statiques configurés, entrez l'adresse MAC dans le champ fourni pour récupérer l'IP virtuelle persistante unique (VIP). Sinon, laissez-le vide.
+====
++
+image::install/config-virtual-ip.png[config-virtual-ip.png]
+
+. Configurez le `Cluster token`. Ce token est utilisé pour ajouter d'autres nœuds au cluster.
++
+image::install/config-cluster-token.png[config-cluster-token.png]
+
+. Configurez `NTP servers` pour vous assurer que les heures de tous les nœuds sont synchronisées. Cela est défini par défaut sur `0.suse.pool.ntp.org`. Utilisez des virgules comme délimiteur pour ajouter d'autres serveurs NTP.
++
+image::install/config-ntp-server.png[config-ntp-server.png]
++
+[NOTE]
+====
+L'utilisation de plusieurs serveurs NTP offre une redondance, une meilleure précision, une tolérance aux pannes et des performances améliorées. Cela garantit que la synchronisation de l'heure continue même si un serveur échoue ou fournit des données incorrectes, et aide à répartir la charge entre différents serveurs.
+====
+
+. (Optionnel) Si vous devez utiliser un proxy HTTP pour accéder au monde extérieur, entrez le `Proxy address`. Sinon, laissez ceci vide.
++
+image::install/config-proxy.png[config-proxy.png]
+
+. (Optionnel) Vous pouvez choisir d'importer des clés SSH en fournissant `HTTP URL`. Par exemple, vos clés publiques GitHub `https://github.com/<username>.keys` peuvent être utilisées.
++
+image::install/import-ssh-keys.png[import-ssh-keys.png]
+
+. (Optionnel) Si vous devez personnaliser l'hôte avec un xref:../../installation-setup/config/configuration-file.adoc[fichier de configuration], entrez le `HTTP URL` ici.
++
+image::install/remote-config.png[remote-config.png]
+
+. Examinez et confirmez vos options d'installation. Après avoir confirmé les options d'installation, {harvester-product-name} sera installé sur votre hôte. L'installation peut prendre quelques minutes pour être complète.
++
+image::install/confirm-install.png[confirm-install.png]
+
+. Une fois l'installation terminée, votre nœud redémarre. Après le redémarrage, la console affiche l'URL de gestion et l'état. L'URL par défaut de l'interface web est `https://your-virtual-ip`. Vous pouvez utiliser `F12` pour passer de la console au Shell et taper `exit` pour revenir à la console.
++
+
+[NOTE]
+====
+Choisir `Install Harvester binaries only` sur la première page nécessite une configuration supplémentaire après le premier démarrage.
+====
+
++
+image::install/iso-installed.png[iso-installed.png]
+
+. Vous serez invité à définir le mot de passe pour l'utilisateur par défaut `admin` lors de votre première connexion.
++
+image::install/first-time-login.png[first-login.png]
+
+////
+
+[NOTE]
+====
+In some cases, if you are using an older VGA connector, you may encounter an `panic: invalid dimensions` error with ISO installation. See issue [#2937](https://github.com/harvester/harvester/issues/2937#issuecomment-1278545927) for a workaround.
+====
+
+////
+
+== Problème connu
+
+=== L'installateur peut planter lors de l'utilisation d'une ancienne carte graphique/moniteur.
+
+Dans certains cas, si vous utilisez une ancienne carte graphique/moniteur, vous pouvez rencontrer une erreur `panic: invalid dimensions` lors de l'installation de l'ISO.
+
+image::install/invalid-dimensions.png[invalid-dimensions.png]
+
+Nous travaillons sur ce problème connu et prévoyons un correctif pour une future version. Vous pouvez essayer d'utiliser une autre entrée GRUB pour forcer l'utilisation de la résolution de `1024x768` lors du démarrage.
+
+image::install/force-resolution.png[force-resolution.png]
+
+Si vous utilisez une version antérieure à v1.1.1, veuillez essayer la solution de contournement suivante{nbsp}:
+
+. Démarrez avec l'ISO et appuyez sur `E` pour modifier la première entrée du menu :
++
+image::install/grub-menu.png[grub-menu.png]
+
+. Ajoutez `vga=792` à la ligne commençant par `$linux` :
++
+image::install/edit-menu-entry.png[edit-menu-entry.png]
+
+. Appuyez sur `Ctrl+X` ou `F10` pour démarrer.

@@ -1,0 +1,92 @@
+= Pinning de CPU
+:revdate: 2025-10-20
+:page-revdate: {revdate}
+
+{harvester-product-name} suporta pinning de CPU para máquinas virtuais. Para usar esse recurso, você deve primeiro habilitar o Gerenciador de CPU nos nós e, em seguida, habilitar o pinning de CPU ao criar a máquina virtual.
+
+== Kubernetes CPU Manager
+
+O recurso https://kubernetes.io/docs/tasks/administer-cluster/cpu-management-policies/[Gerenciador de CPU] melhora a alocação de recursos de CPU em clusters Kubernetes, garantindo que cargas de trabalho com necessidades de desempenho rigorosas recebam recursos de CPU estáveis e previsíveis. Isso é especialmente importante para aplicações de alto desempenho e sensíveis à latência.
+
+{harvester-product-name} usa a política de Gerenciador de CPU `static` quando o Gerenciador de CPU está habilitado. Essa política gerencia um pool compartilhado de CPUs que inicialmente inclui todas as CPUs nos nós com a seguinte configuração:
+
+* Pods na classe de qualidade de serviço (QoS) https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#guaranteed[`Guaranteed`] que solicitam núcleos de CPU inteiros (por exemplo, CPU: "2") são atribuídos CPUs dedicados. Essas CPUs ficam com o pinning de CPU aplicado ao pod e são removidas do pool compartilhado de CPU.
++
+* Pods nas classes de QoS https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#burstable[`Burstable`] e https://kubernetes.io/docs/concepts/workloads/pods/pod-qos/#besteffort[`BestEffort`] compartilham as CPUs restantes no pool compartilhado.
+
+=== Cálculo do Pool Compartilhado de CPU
+
+{harvester-product-name} reserva recursos de CPU para operações em nível de sistema com base na https://cloud.google.com/kubernetes-engine/docs/concepts/plan-node-sizes#cpu_reservations[fórmula GKE], com os valores https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#system-reserved[`systemReserved`] e https://kubernetes.io/docs/tasks/administer-cluster/reserve-compute-resources/#kube-reserved[`kubeReserved`] alocados em uma proporção de 2:3.
+
+Exemplo (nó com 16 núcleos de CPU):
+
+----
+systemReserved: 408 millicores
+kubeReserved: 612 millicores
+----
+
+Neste exemplo, aproximadamente 15 núcleos (14980 millicores) estão disponíveis para cargas de trabalho.
+
+Quando uma máquina virtual (pod) na classe QoS Garantida solicita 4 CPUs, 4 núcleos são dedicados a essa máquina virtual. Pods nas outras classes de QoS compartilham os 11 núcleos restantes no pool compartilhado.
+
+== Habilitar e Desabilitar o Gerenciador de CPU
+
+Quando você habilita o Gerenciador de CPU, {harvester-product-name} define a política do Gerenciador de CPU para `static`. Quando você desabilita o recurso, {harvester-product-name} altera a política do Gerenciador de CPU de volta para `none`. 
+
+Você deve habilitar ou desabilitar o Gerenciador de CPU em cada nó separadamente.
+
+. Na interface do {harvester-product-name}, vá para *Hosts*.
++
+. Localize o nó na lista e, em seguida, selecione *⋮ -> Habilitar Gerenciador de CPU* ou *Desabilitar Gerenciador de CPU*.
++
+Permita algum tempo para que {harvester-product-name} aplique a política correspondente do Gerenciador de CPU.
++
+image::vm/cpu-pinning-enable-cpu-manager.png[enable-cpu-manager]
++
+image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
+
+=== Limitações
+
+* O Gerenciador de CPU não pode ser habilitado no nó de testemunha.
++
+* O Gerenciador de CPU deve ser habilitado ou desabilitado em cada nó de gerenciamento separadamente. Você deve aguardar a conclusão da operação antes de iniciar outra.
++
+* Máquinas virtuais com o pinning de CPU habilitado devem ser paradas antes que o Gerenciador de CPU seja desabilitado no nó correspondente.
+
+== Habilitar Pinning de CPU em uma Nova Máquina Virtual
+
+. Verifique se o Gerenciador de CPU está habilitado em um ou mais nós.
++
+[IMPORTANT]
+====
+Se o Gerenciador de CPU não estiver habilitado em pelo menos um nó, a máquina virtual ficará presa no estado `Unschedulable` após a inicialização. Para mais informações, veja xref:virtual-machines/create-vm.adoc#_related_cpu_pinning_concepts[Conceitos Relacionados ao Pinning de CPU].
+====
++
+. Vá para *Máquinas Virtuais*.
++
+. Clique em *Criar*.
++
+image::vm/cpu-pinning-create-vm.png[criar-vm]
++
+. Na aba *Opções Avançadas*, selecione *Habilitar Pinning de CPU*.
++
+image::vm/cpu-pinning-vm-advanced-options.png[vm-advanced-options]
++
+. Clique em *Salvar*.
+
+Habilitar o pinning de CPU adiciona `dedicatedCpuPlacement: true` a `.spec.template.spec.domain.cpu` na configuração da máquina virtual (YAML). Quando `dedicatedCpuPlacement` é definido como `true`, os pedidos de recursos de CPU e memória são automaticamente ajustados para corresponder aos limites, garantindo que os critérios para QoS Garantido sejam atendidos.
+
+Como os pedidos e limites são idênticos, as configurações de xref:./resource-overcommit.adoc[Overcommit de Recursos] de CPU e memória não se aplicam a máquinas virtuais com pinning de CPU habilitado.
+
+[NOTE]
+====
+Para usar o pinning de CPU em uma máquina virtual existente, você deve reiniciar a máquina virtual após habilitar o recurso e salvar a alteração.
+====
+
+== Migração ao Vivo de Máquina Virtual
+
+Máquinas virtuais com pinning de CPU habilitado podem ser migradas apenas se o Gerenciador de CPU estiver habilitado no nó de destino.
+
+== Upgrades
+
+Ao fazer upgrade de um nó, {harvester-product-name} drena todos os pods e migra ao vivo as máquinas virtuais para outro nó. Para evitar interrupções no processo de fazer upgrade, certifique-se de que o Gerenciador de CPU esteja habilitado em outros nós e que recursos suficientes estejam disponíveis sempre que você usar máquinas virtuais com pinning de CPU habilitado.

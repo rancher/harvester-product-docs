@@ -1,0 +1,484 @@
+= PXE 引导安装
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+{harvester-product-name}可以通过PXE引导自动安装。
+
+我们建议使用 https://ipxe.org/[iPXE]进行网络引导。它比传统的PXE引导程序具有更多功能，并且可能在现代网络接口卡（NIC）中可用。如果您的NIC没有iPXE固件，可以先从TFTP服务器加载iPXE固件镜像。
+
+要查看示例iPXE脚本，请访问 https://github.com/harvester/ipxe-examples[iPXE示例]。
+
+== 先决条件
+
+节点需要至少*8 GiB*的RAM，因为安装程序会将完整的ISO 映像加载到tmpfs中。
+
+[IMPORTANT]
+====
+安装程序会自动检查硬件是否满足生产使用的xref:installation-setup/requirements.adoc#_hardware_requirements[最低要求]。如果任何检查失败，安装将停止。要覆盖此行为，请设置xref:installation-setup/config/configuration-file.adoc#_install_skipchecks[配置文件选项] `install.skipchecks=true`或<<Useful kernel parameters,内核参数>> `harvester.install.skipchecks=true`。
+====
+
+== 准备HTTP服务器
+
+需要一个HTTP服务器来提供引导文件。
+假设NGINX HTTP服务器的IP是`10.100.0.10`，并且它提供路径为`/usr/share/nginx/html/`的`http://10.100.0.10/`目录。
+
+== 准备引导文件
+
+* 从 https://github.com/harvester/harvester/releases[发布]页面下载所需的文件。
+ ** ISO 映像: `harvester-<version>-amd64.iso`
+ ** 内核: `harvester-<version>-vmlinuz-amd64`
+ ** initrd: `harvester-<version>-initrd-amd64`
+ ** rootfs squashfs镜像: `harvester-<version>-rootfs-amd64.squashfs`
+* 提供文件。
++
+将下载的文件复制或移动到适当的位置，以便通过 HTTP 服务器下载。例如：
++
+----
+  sudo mkdir -p /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-amd64.iso /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-vmlinuz-amd64 /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-initrd-amd64 /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-rootfs-amd64.squashfs /usr/share/nginx/html/harvester/
+----
+
+== 准备 iPXE 启动脚本
+
+在执行自动安装时，有两种模式：
+
+* `CREATE`：我们正在安装一个节点以构建初始集群。
+* `JOIN`：我们正在安装一个节点以加入现有集群。
+
+您可以为节点分配角色以支持不同的场景。有关更多信息，请参见 xref:installation-setup/config/configuration-file.adoc#_install_role[配置文件]。
+
+=== 创建模式
+
+[CAUTION]
+====
+*安全风险*：下面的配置文件包含应保密的凭据。请不要使配置文件公开可访问。
+====
+
+为 `CREATE` 模式创建一个名为 `config-create.yaml` 的 xref:installation-setup/config/configuration-file.adoc[配置文件]。根据需要修改值：
+
+[,YAML]
+----
+# cat /usr/share/nginx/html/harvester/config-create.yaml
+scheme_version: 1
+token: token # Replace with a desired token
+os:
+  hostname: node1 # Set a hostname. This can be omitted if DHCP server offers hostnames
+  ssh_authorized_keys:
+  - ssh-rsa ... # Replace with your public key
+  password: p@ssword     # Replace with your password
+  ntp_servers:
+  - 0.suse.pool.ntp.org
+  - 1.suse.pool.ntp.org
+install:
+  mode: create
+  management_interface: # available as of v1.1.0
+    interfaces:
+      - name: ens5
+    default_route: true
+    method: dhcp
+    bond_options:
+      mode: balance-tlb
+      miimon: 100
+  device: /dev/sda # The target disk to install
+#  data_disk: /dev/sdb # It is recommended to use a separate disk to store VM data
+  iso_url: http://10.100.0.10/harvester/harvester-<version>-amd64.iso
+#  tty: ttyS1,115200n8   # For machines without a VGA console
+
+  vip: 10.100.0.99        # The VIP to access the UI. Make sure the IP is free to use
+  vip_mode: static        # Or dhcp, check configuration file for more information
+#  vip_hw_addr: 52:54:00:ec:0e:0b   # Leave empty when vip_mode is static
+----
+
+对于需要使用 `CREATE` 模式安装的机器，以下是一个使用上述配置启动内核的 iPXE 脚本：
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+这假设 iPXE 脚本存储在 `/usr/share/nginx/html/harvester/ipxe-create` 中。
+
+[NOTE]
+====
+如果您有多个网络接口，可以利用 dracut 的 `ip=` 参数来指定启动网络接口以及 dracut 支持的任何其他网络配置（例如，`ip=eth1:dhcp`）。
+有关更多信息，请参见 https://man7.org/linux/man-pages/man7/dracut.cmdline.7.html[`man dracut.cmdline`]。
+
+仅使用 `ip=` 参数来指定启动接口，因为我们只支持 *一个单一的 `ip=` 参数*。
+====
+
+=== 加入模式
+
+[CAUTION]
+====
+*安全风险*：下面的配置文件包含应保密的凭据。请不要使配置文件公开可访问。
+====
+
+
+为 `JOIN` 模式创建一个名为 `config-join.yaml` 的 xref:installation-setup/config/configuration-file.adoc[配置文件]。根据需要修改值：
+
+[,YAML]
+----
+# cat /usr/share/nginx/html/harvester/config-join.yaml
+scheme_version: 1
+server_url: https://10.100.0.99:443  # Should be the VIP set up in "CREATE" config
+token: token
+os:
+  hostname: node2
+  ssh_authorized_keys:
+    - ssh-rsa ... # Replace with your public key
+  password: p@ssword     # Replace with your password
+  dns_nameservers:
+  - 1.1.1.1
+  - 8.8.8.8
+install:
+  mode: join
+  management_interface: # available as of v1.1.0
+    interfaces:
+      - name: ens5
+    default_route: true
+    method: dhcp
+    bond_options:
+      mode: balance-tlb
+      miimon: 100
+  device: /dev/sda # The target disk to install
+#  data_disk: /dev/sdb # It is recommended to use a separate disk to store VM data
+  iso_url: http://10.100.0.10/harvester/harvester-<version>-amd64.iso
+#  tty: ttyS1,115200n8   # For machines without a VGA console
+----
+
+请注意，`mode` 是 `join`，并且需要提供 `server_url`。
+
+对于需要以 `JOIN` 模式安装的机器，以下是一个 iPXE 脚本，用于以上述配置启动内核：
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-join.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+这假设 iPXE 脚本存储在 `/usr/share/nginx/html/harvester/ipxe-join` 中。
+
+== DHCP 服务器配置
+
+[NOTE]
+====
+在 PXE 安装场景中，配置 DHCP 服务器时需要添加 _routers_ 选项 (`option routers`)。此选项用于在主机上添加默认路由。没有默认路由，节点将无法启动。
+
+在 ISO 安装场景中，当管理网络接口处于 DHCP 模式时，配置 DHCP 服务器时也需要添加 _routers_ 选项 (`option routers`)。
+
+例如：
+
+----
+    Harvester Host:~ # ip route
+    default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+有关更多信息，请参见 http://www.ipamworldwide.com/ipam/isc-dhcpv4-options.html[ISC DHCPv4 选项配置]。
+====
+
+以下是如何配置 ISC DHCP 服务器以提供 iPXE 脚本的示例：
+
+[,sh]
+----
+option architecture-type code 93 = unsigned integer 16;
+
+subnet 10.100.0.0 netmask 255.255.255.0 {
+    option routers 10.100.0.10;
+        option domain-name-servers 192.168.2.1;
+    range 10.100.0.100 10.100.0.253;
+}
+
+group {
+  # create group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-create-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-create";
+    }
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node1 { hardware ethernet 52:54:00:6b:13:e2; }
+}
+
+group {
+  # join group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-join-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-join";
+    }
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node2 { hardware ethernet 52:54:00:69:d5:92; }
+}
+----
+
+配置文件声明了一个子网和两个组。第一个组用于使用 `CREATE` 模式启动的主机，另一个组用于 `JOIN` 模式。默认情况下，选择 iPXE 路径，但如果检测到 PXE 客户端，则根据客户端架构提供 iPXE 镜像。请先准备好这些镜像和 TFTP 服务器。
+
+互联网系统联盟（ISC）于2022年宣布 ISC DHCP 的最终 https://www.isc.org/blogs/isc-dhcp-eol/[终止服务（EOL）]。ISC DHCP 用户被鼓励迁移到 ISC 为更现代的网络环境设计的更新、功能丰富的 https://www.isc.org/kea/[Kea DHCP]。如果您已经在使用 Kea DHCPv4 服务器，请查看以下配置示例。有关更多信息，请参见 https://kea.readthedocs.io/en/kea-1.6.2/arm/dhcp4-srv.html#dhcpv4-server-configuration[Kea DHCPv4 配置]。
+
+[,json]
+----
+"client-classes": [
+  {
+    "name": "iPXE UEFI/CREATE",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-create-efi",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE non-UEFI/CREATE",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and not option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-create",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE UEFI/JOIN",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-join-efi",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE non-UEFI/JOIN",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and not option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-join",
+    "only-if-required": true
+  },
+  {
+    "name": "PXE UEFI",
+    "test": "option[user-class].exists and not substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "next-server": "10.100.0.20",
+    "boot-file-name": "ipxe.efi"
+  },
+  {
+    "name": "PXE non-UEFI",
+    "test": "option[user-class].exists and not substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "next-server": "10.100.0.20",
+    "boot-file-name": "undionly.kpxe"
+  }
+]
+
+"subnet4": [
+  {
+    "subnet": "10.100.0.0/24",
+    "pools": [
+      {
+        "pool": "10.100.0.100 - 10.100.0.199",
+        "require-client-classes" : [ "iPXE UEFI/CREATE", "iPXE non-UEFI/CREATE" ]
+      }.
+      {
+        "pool": "10.100.0.200 - 10.100.0.253",
+        "require-client-classes" : [ "iPXE UEFI/JOIN", "iPXE non-UEFI/JOIN" ]
+      }
+    ],
+    "option-data": [
+      {
+        "name": "routers",
+        "data": "10.100.0.10"
+      }
+    ],
+    "reservations": [
+      // assign ip address to the host for booting in CREATE mode
+      {
+        "hw-address": "52:54:00:6b:13:e2",
+        "ip-address": "10.100.0.101"
+      },
+      // assign ip address to the host for booting in JOIN mode
+      {
+        "hw-address": "52:54:00:69:d5:92",
+        "ip-address": "10.100.0.201"
+      }
+    ]
+  }
+]
+----
+
+== 配置文件
+
+有关更多信息，请参见 xref:installation-setup/config/configuration-file.adoc[配置文件]。
+
+默认情况下，第一个节点将是集群的管理节点。当有 3 个节点时，首先添加的其他 2 个节点会自动提升为管理节点，以形成 HA 集群。
+
+如果您想从不同区域提升管理节点，可以在 xref:installation-setup/config/configuration-file.adoc#_os_labels[os.labels] 配置中添加节点标签 `topology.kubernetes.io/zone`。在这种情况下，至少需要三个不同的区域。
+
+用户还可以通过内核参数提供配置。例如，要指定`CREATE`安装模式，用户可以在启动时传递`harvester.install.mode=create`内核参数。通过内核参数传递的值优先级高于配置文件中指定的值。
+
+== UEFI HTTP启动支持
+
+UEFI固件支持从HTTP服务器加载启动映像。本节演示如何使用UEFI HTTP启动加载iPXE程序并执行自动安装。
+
+=== 提供iPXE程序
+
+从 http://boot.ipxe.org/ipxe.efi下载iPXE UEFI程序，并确保`ipxe.efi`可以从HTTP服务器下载。例如：
+
+[,bash]
+----
+cd /usr/share/nginx/html/harvester/
+wget http://boot.ipxe.org/ipxe.efi
+----
+
+该文件现在可以从本地的`http://10.100.0.10/harvester/ipxe.efi`下载。
+
+=== DHCP服务器配置
+
+如果用户计划通过先获取动态IP来使用UEFI HTTP启动功能，DHCP服务器需要在看到这样的请求时提供iPXE程序的URL。以下是更新的ISC DHCP服务器组示例：
+
+[,sh]
+----
+group {
+  # create group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-create-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-create";
+    }
+  } elsif substring (option vendor-class-identifier, 0, 10) = "HTTPClient" {
+    # UEFI HTTP Boot
+    option vendor-class-identifier "HTTPClient";
+    filename "http://10.100.0.10/harvester/ipxe.efi";
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node1 { hardware ethernet 52:54:00:6b:13:e2; }
+}
+----
+
+`elsif substring`语句是新的，当它看到UEFI HTTP启动DHCP请求时提供`http://10.100.0.10/harvester/ipxe.efi`。客户端获取iPXE程序并运行后，iPXE程序将再次发送DHCP请求，并从URL `http://10.100.0.10/harvester/ipxe-create-efi`加载iPXE脚本。
+
+如果您想在Kea DHCPv4服务器上启用UEFI HTTP启动，必须在`client-classes`的末尾添加一个新的`client-class`。
+
+示例：
+
+[,json]
+----
+{
+  "name": "HTTP",
+  "test": "substring(option[vendor-class-identifier].hex,0,10) == 'HTTPClient'",
+  "option-data": [
+    {
+      "name": "vendor-class-identifier",
+      "data": "HTTPClient"
+    }
+  ],
+  "boot-file-name": "http://10.100.0.10/harvester/ipxe.efi"
+}
+----
+
+=== UEFI启动的iPXE脚本
+
+在内核参数中指定UEFI启动的initrd映像是强制性的。以下是`CREATE`模式的iPXE脚本的更新版本。
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz initrd=harvester-<version>-initrd ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+参数`initrd=harvester-<version>-initrd`是必需的。
+
+== 标记的VLAN网络启动
+
+要在标记的VLAN网络上执行PXE启动，{harvester-product-name}主机必须配置以下BIOS/UEFI设置：
+
+* VLAN ID 被设置为网络标识。
+* 启动协议被设置为 `PXE`。
+* 已启用DHCP。
+
+[IMPORTANT]
+====
+成功的网络启动可能需要根据主机的规格进行额外的配置更改。进行这些更改的方法也可能有所不同。例如，在HPE ProLiant DL360 Gen9服务器上，您只能通过NIC固件更改启动协议和VLAN ID。
+
+有关更多信息，请参阅您的服务器文档。
+====
+
+为了确保在启动时使用正确的网络接口，请使用以下dracut参数更新iPXE `kernel`命令：
+
+* `BOOTIF=<mac_address>`：使用名为`<interface_name>`的网络接口
+* `ifname=<interface_name>:<mac_address>`：将地址为`<mac_address>`的网络接口命名为`<interface_name>`
+* `vlan=<vlan_id>:<interface_name>`：在`<interface_name>`上设置名为`<vlan_id>`的VLAN设备
+
+示例iPXE脚本：
+
+[,shell]
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml BOOTIF=<mac_address> ifname=<interface_name>:<mac_address> vlan=<vlan_id>:<interface_name>
+initrd harvester-<version>-initrd
+boot
+----
+
+== 有用的内核参数
+
+除了配置，您还可以指定在不同场景中有用的其他内核参数。
+另请参见 https://man7.org/linux/man-pages/man7/dracut.cmdline.7.html[dracut.cmdline(7)]。
+
+=== `ip=dhcp`
+
+如果您有多个网络接口，可以添加`ip=dhcp`参数以从所有接口获取DHCP服务器的IP。
+
+=== `rd.net.dhcp.retry=<cnt>`
+
+未能从DHCP服务器获取IP将导致iPXE启动失败。您可以添加参数 `rd.net.dhcp.retry=<cnt>` 以重试 DHCP 请求 `<cnt>` 次。
+
+=== `harvester.install.skipchecks=true`
+
+如果硬件检查失败（因为未满足生产使用的最低要求），安装将停止。要覆盖此行为，请设置内核参数 `harvester.install.skipchecks=true`。当设置为`true`时，警告消息仍然会保存到`/var/log/console.log`，但即使未满足生产使用的硬件要求，安装仍会继续。
+
+=== `harvester.install.with_net_images=true`
+
+安装程序在安装过程中不会预加载图像，而是在安装完成后从互联网拉取所有所需的图像。在大多数情况下，不建议使用此参数。有关更多信息，请参见xref:installation-setup/media/net-install.adoc[网络安装.iso映像]。
+
+=== `harvester.install.mode=install` 
+
+在启动时自动以安装模式启动安装程序。
+
+=== `console=tty1` 
+
+指定在启动时激活的控制台电传打字机。
+
+=== `harvester.install.tty=tty1`
+
+指定在何种电传打字机控制台上启动安装程序。
+
+=== `net.ifnames=1`
+
+在安装程序中启用可预测的网络接口名称，这将在安装{harvester-product-name}后与系统默认值匹配。这允许系统利用正确的接口。

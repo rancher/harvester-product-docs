@@ -1,0 +1,189 @@
+= Gerenciamento da virtualização
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Com as capacidades de gerenciamento de virtualização do {rancher-short-name}, você pode importar e gerenciar múltiplos clusters {harvester-product-name}. Ele fornece uma solução que unifica o gerenciamento de virtualização e de contêineres a partir de uma única interface.
+
+Além disso, {harvester-product-name} aproveita as capacidades existentes do {rancher-short-name}, como https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/authn-and-authz.html[autenticação] e https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/manage-role-based-access-control-rbac.html[controle RBAC] para suporte a xref:./virtualization-management.adoc#_multi_tenancy[multi-inquilino].
+
+Para informações sobre como implantar {rancher-short-name} e provisionar clusters Kubernetes usando vários provedores de nuvem, veja https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/quick-start/deploy-rancher/deploy-rancher.html[Implantando {rancher-product-name} o Servidor].
+
+== Importando {harvester-product-name} cluster
+
+[tabs]
+======
+UI::
++
+--
+. Verifique e prepare a imagem do contêiner.
++
+Para facilitar a tarefa de importação, um novo pod chamado `cattle-cluster-agent-***` será criado no cluster {harvester-product-name}. A imagem do contêiner usada para este pod depende da versão do seu servidor {rancher-short-name} (por exemplo, a imagem `rancher/rancher-agent:v2.7.9` é usada se você estiver executando {rancher-short-name} v2.7.9). Além disso, esta imagem dinâmica não está embalada no ISO {harvester-product-name} e é puxada do repositório durante a importação.
++
+Se o seu cluster {harvester-product-name} não for acessível diretamente da internet, execute uma das seguintes ações:
+
+ ** Configure um xref:/installation-setup/config/settings.adoc#_containerd_registry[registro privado] para o cluster e adicione a imagem. O Harvester puxará automaticamente a imagem deste registro.
+ ** Se você configurou um xref:/installation-setup/airgap.adoc#_configure_an_http_proxy_during_installation[proxy HTTP] para acessar serviços externos, verifique se está funcionando conforme o esperado. Os xref:/installation-setup/config/update-configuration.adoc#_dns_servers[servidores DNS] que você especificou na configuração do Harvester devem ser capazes de resolver o nome de domínio `docker.io`.
+ ** Baixe a imagem usando o comando `docker pull rancher/rancher-agent:v2.7.9 && docker save -o rancher-agent.tar rancher/rancher-agent:v2.7.9`. Em seguida, crie uma cópia da imagem baixada em cada nó do cluster e, em seguida, importe a imagem para o containerd usando o comando `sudo -i ctr --namespace k8s.io image import rancher-agent.tar`. Por fim, execute `sudo -i crictl image ls | grep "rancher-agent"` em cada nó para garantir que a imagem esteja pronta.
+
+. Uma vez que o servidor {rancher-short-name} esteja em funcionamento, faça login e clique no menu de hambúrguer e escolha a aba *Gerenciamento de Virtualização*. Selecione *Importar Existente* para importar o {harvester-product-name} cluster downstream para o servidor {rancher-short-name}.
+image:rancher/vm-menu.png[]
+. Especifique o `Cluster Name` e clique em *Criar*. Você verá então o guia de registro; por favor, abra o painel do {harvester-product-name} cluster de destino e siga o guia de acordo.
+image:rancher/harv-importing.png[]
+. Uma vez que o nó do agente esteja pronto, você deve ser capaz de visualizar e acessar o cluster {harvester-product-name} importado a partir do servidor {rancher-short-name} e gerenciar suas VMs de acordo.
+image:rancher/harv-cluster-view.png[]
++
+Sempre que o nó do agente ficar preso, execute o comando `kubectl get pod cattle-cluster-agent-*** -n cattle-system -oyaml` no cluster {harvester-product-name}. Se a seguinte mensagem for exibida, verifique as informações na etapa 1, mate este pod e então um novo pod será criado automaticamente para reiniciar o processo de importação.
++
+[,yaml]
+----
+  ...
+  state:
+    waiting:
+      message: Back-off pulling image "rancher/rancher-agent:v2.7.9"
+      reason: ImagePullBackOff
+  ...
+----
++
+. Na interface do {harvester-product-name}, você pode clicar no menu hambúrguer para navegar de volta à página de gerenciamento de múltiplos clusters {rancher-short-name}.
++
+image:rancher/harv-go-back.png[]
+--
+
+API::
++
+--
+. No cluster Kubernetes {rancher-short-name}, crie um novo recurso `Cluster`.
++
+Exemplo:
++
+[,yaml]
+----
+  apiVersion: provisioning.cattle.io/v1
+  kind: Cluster
+  metadata:
+    name: harvester-cluster-name
+    namespace: fleet-default
+    labels:
+      provider.cattle.io: harvester
+    annotations:
+      field.cattle.io/description: Human readable cluster description
+  spec:
+    agentEnvVars: []
+----
++
+. Uma vez que o status do recurso `Cluster` seja atualizado, obtenha o ID do cluster (formato: `c-m-foobar`) da propriedade `.status.clusterName`.
+. Crie um `ClusterRegistrationToken` usando o ID do cluster no namespace com o mesmo nome que o ID do cluster. Você deve especificar o ID do cluster no campo `.spec.clusterName` do token.
++
+Exemplo:
++
+[,yaml]
+----
+  apiVersion: management.cattle.io/v3
+  kind: ClusterRegistrationToken
+  metadata:
+    name: default-token
+    namespace: c-m-foobar
+  spec:
+    clusterName: c-m-foobar
+----
++
+. Uma vez que o status do `ClusterRegistrationToken` seja atualizado, obtenha o valor da propriedade `.status.manifestUrl` do token.
+. No cluster {harvester-product-name}, aplique o patch da configuração `cluster-registration-url` e especifique a URL obtida da propriedade `.status.manifestUrl` do token de registro do cluster no campo `value`.
++
+Exemplo:
++
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: cluster-registration-url
+  value: https://rancher.example.com/v3/import/abcdefghijkl1234567890-c-m-foobar.yaml
+----
+--
+======
+
+=== Upgrades
+
+Para fazer upgrade de um cluster {harvester-product-name} importado, você deve fazer upgrade de {rancher-short-name}, da extensão da UI do Harvester e de {harvester-product-name} em uma ordem específica. A xref:./harvester-ui-extension.adoc[Extensão da UI do Harvester] é necessária para acessar a UI do {harvester-product-name} nas versões {rancher-short-name} v2.10.x e posteriores.
+
+. Verifique a xref:./harvester-ui-extension.adoc#_support_matrix[matriz de suporte] para determinar as versões do {rancher-short-name} e da Extensão da UI do Harvester que correspondem ao cluster {harvester-product-name}.
+
+. Atualize https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/upgrades.html[{rancher-short-name}].
+
+. Atualize a xref:./harvester-ui-extension.adoc#_upgrades[Extensão da UI do Harvester].
++
+Para informações sobre como atualizar a extensão em um ambiente air-gapped, veja xref://installation-setup/airgap.adoc#_harvester_ui_extension_with_rancher_integration[Extensão da UI do Harvester com {rancher-short-name} Integração].
+
+. Atualize xref://upgrades/upgrades.adoc[{harvester-product-name}].
++
+[CAUTION]
+====
+Recursos na versão {harvester-product-name} v1.5.0 e versões posteriores são implementados na Extensão da UI do Harvester. Se você não fizer upgrade de {rancher-short-name} e da Extensão da UI do Harvester, esses recursos podem não estar disponíveis.
+====
+
+=== Solução de problemas
+
+Veja xref:/troubleshooting/rancher.adoc#_importing_of_harvester_clusters_into_rancher[Importação de Clusters do Harvester para o Rancher].
+
+== Multi-Inquilino
+
+{harvester-product-name} aproveita a {rancher-short-name} existente https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/manage-role-based-access-control-rbac.html[autorização RBAC] de forma que os usuários possam visualizar e gerenciar um conjunto de recursos com base em suas permissões de função de cluster e projeto.
+
+Dentro de {rancher-short-name}, cada pessoa se autentica como um usuário, que é um login que concede acesso a {rancher-short-name}. Conforme mencionado em https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/authn-and-authz.html[Autenticação], os usuários podem ser locais ou externos.
+
+Uma vez que o usuário faça login em {rancher-short-name}, sua autorização, também conhecida como direitos de acesso, é determinada por permissões globais e funções de cluster e projeto.
+
+* https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/global-permissions.html[*Permissões Globais*]: Defina a autorização do usuário fora do escopo de qualquer cluster específico.
+* https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/cluster-and-project-roles.html[*Funções de Cluster e Projeto*]: Defina a autorização do usuário dentro do cluster ou projeto específico onde os usuários são atribuídos à função.
+
+Tanto as permissões globais quanto as funções de cluster e projeto são implementadas sobre https://kubernetes.io/docs/reference/access-authn-authz/rbac/[Kubernetes RBAC]. Portanto, a aplicação de permissões e funções é realizada pelo Kubernetes.
+
+* Um proprietário de cluster tem controle total sobre o cluster e todos os recursos dentro dele, por exemplo, hosts, VMs, volumes, imagens, redes, backups e configurações.
+* Um usuário de projeto pode ser atribuído a um projeto específico com permissão para gerenciar os recursos dentro do projeto.
+
+[IMPORTANT]
+====
+Gerenciar o acesso do usuário usando os modelos de função incorporados e RBAC com escopo de projeto é altamente recomendado.
+
+{harvester-product-name} implementa seu próprio modelo de RBAC sobre o Kubernetes e KubeVirt, integrando-se com Projetos no estilo {rancher-short-name} e lógica de multi-inquilino. Durante atualizações ou reconfigurações, `RoleBindings` personalizado que referencia apenas funções `kubevirt.io` pode ser perdido, redefinido ou se tornar inconsistente com o estado interno de {harvester-product-name}.
+====
+
+=== Exemplo de multi-inquilino
+
+O seguinte exemplo fornece uma boa explicação de como o recurso multi-inquilino funciona:
+
+. Primeiro, adicione novos usuários na página {rancher-short-name} `Users & Authentication`. Em seguida, clique em `Create` para adicionar dois novos usuários separados, como `project-owner` e `project-readonly`, respectivamente.
+ ** Um `project-owner` é um usuário com permissão para gerenciar uma lista de recursos de um projeto específico, por exemplo, o projeto padrão.
+ ** Um `project-readonly` é um usuário com permissão somente leitura de um projeto específico, por exemplo, o projeto padrão.
+ image:rancher/create-user.png[]
+. Clique em um dos clusters {harvester-product-name} importados após navegar para a interface do usuário {harvester-product-name}.
+ ** Clique na aba `Projects/Namespaces`.
+ ** Selecione um projeto como `default` e clique no menu `Edit Config` para atribuir os usuários a este projeto com as permissões apropriadas. Por exemplo, o usuário `project-owner` será atribuído à função de proprietário do projeto.
+image:rancher/add-member.png[]
+. Continue adicionando o usuário `project-readonly` ao mesmo projeto com permissões somente leitura e clique em *Salvar*.
+image:rancher/added-user.png[]
+. Abra um navegador em modo incógnito e faça login como `project-owner`.
+. Após fazer login como o usuário `project-owner`, clique na aba *Gerenciamento de Virtualização*. Lá você deve conseguir visualizar o cluster e o projeto ao qual foi atribuído.
+. Clique na aba *Imagens* para visualizar uma lista de imagens previamente carregadas no namespace `harvester-public`. Você também pode carregar sua própria imagem, se necessário.
+. Crie uma VM com uma das imagens que você carregou.
+. Faça login com outro usuário, por exemplo, `project-readonly`, e este usuário terá apenas a permissão de leitura do projeto atribuído.
+
+[NOTE]
+====
+O namespace `harvester-public` é um namespace predefinido acessível a todos os usuários atribuídos a este cluster.
+====
+
+== Excluir {harvester-product-name} Cluster Importado
+
+Os usuários podem excluir o cluster {harvester-product-name} importado da tela de Gerenciamento de Virtualização da interface do usuário {rancher-short-name}. Selecione o cluster que deseja remover e clique no botão *Excluir* para excluir o {harvester-product-name} cluster importado.
+
+Você também precisará redefinir a configuração `cluster-registration-url` no cluster {harvester-product-name} associado para limpar o agente do cluster {rancher-short-name}.
+
+image::rancher/delete-harvester-cluster.png[delete-cluster]
+
+[CAUTION]
+====
+Por favor, não execute o comando `kubectl delete -f ...` para excluir o {harvester-product-name} cluster importado, pois isso removerá todo o namespace `cattle-system`, que é necessário para o {harvester-product-name} cluster.
+====
+

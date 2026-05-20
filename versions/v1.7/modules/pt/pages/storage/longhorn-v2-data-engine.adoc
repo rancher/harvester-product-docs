@@ -1,0 +1,108 @@
+= Longhorn V2 Data Engine
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+O Longhorn V2 Data Engine aproveita o poder do Storage Performance Development Kit (SPDK) para reduzir significativamente a latência de E/S enquanto aumenta IOPS e throughput. O resultado é uma solução de armazenamento de alto desempenho capaz de atender a diversas demandas de carga de trabalho.
+
+[IMPORTANT]
+====
+O Longhorn V2 Data Engine é um *Experimental* recurso e não deve ser utilizado em um ambiente de produção.
+====
+
+== Pré-requisitos
+
+Cada nó com um Longhorn V2 Data Engine ativo requer os seguintes recursos dedicados:
+
+* 1 núcleo de CPU para uso pelo pod do gerenciador de instâncias Longhorn
+* 2 GiB de RAM (alocada como 1024 × 2 GiB de páginas grandes)
+* Pelo menos um disco NVMe local para armazenamento de dados
+
+== Limitações
+
+O Longhorn V2 Data Engine atualmente não suporta as seguintes operações:
+
+* Criação e uso de imagem de base
+* Criptografia de volume
+
+SSDs e outros discos não NVMe são gerenciados usando o driver SPDK AIO bdev, que não suporta a operação de unmap. Se você estiver usando discos não NVMe, evite realizar o trim no sistema de arquivos, pois isso resulta em erros de E/S e máquinas virtuais pausadas. Por exemplo, ao criar um sistema de arquivos ext4 em uma máquina virtual Linux, use `mkfs.ext4 -E nodiscard /dev/vdb` (assumindo que `/dev/vdb` é o caminho do seu dispositivo). Em máquinas virtuais Windows, você pode desativar o trim para NTFS executando o comando `fsutil behavior set disabledeletenotify NTFS 1`.
+
+== Uso
+
+O Longhorn V2 Data Engine está disponível apenas para volumes e imagens recém-criados. Volumes existentes, imagens de máquinas virtuais e volumes raiz de máquinas virtuais continuarão a usar o V1 Data Engine.
+
+. Na interface {harvester-product-name}, vá para *Configurações -> Avançadas*.
+
+. Defina `longhorn-v2-data-engine-enabled` como `true`.
++
+{harvester-product-name} carrega automaticamente os módulos do kernel necessários pelo Longhorn V2 Data Engine e tenta alocar 1024 × 2 MiB de páginas grandes (por exemplo, 2 GiB de RAM) em todos os nós. 
++
+Alterar esta configuração reinicia automaticamente o RKE2 em todos os nós, mas não afeta as cargas de trabalho de máquinas virtuais em execução.
++
+[TIP]
+====
+Se você encontrar mensagens de erro que incluem a frase "capacidade de hugepages-2Mi insuficiente", aguarde um tempo para que o erro seja resolvido. Se o erro persistir, reinicie os nós afetados.
+
+Para desativar o Longhorn V2 Data Engine em nós específicos (por exemplo, nós com menos recursos de processamento e memória), vá para a tela *Hosts* e adicione o seguinte rótulo aos nós-alvo:
+
+* rótulo: `node.longhorn.io/disable-v2-data-engine`
+* valor: `true`
+====
+
+. Vá para a tela *Hosts* e, em seguida, adicione discos extras a cada nó conforme descrito em xref:/hosts/hosts.adoc#_multi_disk_management[Gerenciamento de Múltiplos Discos].
++
+Defina o `Provisioner` de cada disco extra como `Longhorn V2 (CSI)`.
++
+[NOTE]
+====
+{harvester-product-name} define o https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Driver de Disco Longhorn] como `auto` para que os discos NVMe usem o driver SPDK NVMe bdev, que oferece o melhor desempenho e também suporta operações avançadas, como trim (também conhecido como descarte).
+
+SSDs e outros discos não-NVMe são gerenciados usando o driver SPDK AIO bdev, que requer um tamanho de disco que seja um _múltiplo par de 4096 bytes_. Discos não-NVMe que não atendem a esse requisito de tamanho não podem ser adicionados. Além disso, o driver SPDK AIO bdev não suporta a operação de unmap. Se você estiver usando discos não NVMe, evite realizar o trim no sistema de arquivos, pois isso resulta em erros de E/S e máquinas virtuais pausadas.
+====
+
+. Vá para *Classes de -> Armazenamento Avançadas* e, em seguida, adicione uma nova StorageClass conforme descrito em xref:./storageclass.adoc#_creating_a_storageclass[Criando uma StorageClass]. 
++
+Defina o `Provisioner` como `Longhorn V2 (CSI)`.
+
+. Use a nova StorageClass ao criar o seguinte:
++
+* Volumes (seja na tela *Volumes* ou durante a criação de máquinas virtuais)
+* Imagens (na tela *Imagens*)
++
+Volumes e imagens criados usando a nova StorageClass são suportados pelo Longhorn V2 Data Engine.
+
+== Atualizando de {harvester-product-name} v1.4.x
+
+{harvester-product-name} v1.4.x, que usa {longhorn-product-name} v1.7.x, não consegue migrar máquinas virtuais com volumes V2 anexados. Além disso, o V2 Data Engine não pode ser usado para imagens de máquinas virtuais e volumes de inicialização. Essas limitações não existem na versão {harvester-product-name} v1.5.0 e versões posteriores, que usam a versão {longhorn-product-name} v1.8.1 e posteriores. No entanto, isso se aplica apenas a volumes e imagens que são criados _após_ a atualização do {harvester-product-name}.
+
+Em StorageClasses V2 criadas usando {harvester-product-name} v1.4.x, a opção `migratable` é definida como `false`. Como todas as outras propriedades de StorageClass, isso não pode ser alterado uma vez definido. Da mesma forma, volumes V2 criados usando {harvester-product-name} v1.4.x permanecem não migráveis após a atualização. Se você usou o V2 Data Engine na versão {harvester-product-name} v1.4.x e depois atualizar para {harvester-product-name} v1.5, você deve criar uma nova StorageClass V2. A opção `migratable` é definida como `true` por padrão, então volumes e imagens criados usando essa nova StorageClass V2 podem ser migrados ao vivo.
+
+[IMPORTANT]
+====
+* Se você estiver usando o driver SPDK AIO bdev (especificamente, se os discos foram adicionados usando `/dev/sd*` caminhos de dispositivo), _os volumes V2 criados antes da atualização se tornam inutilizáveis e não podem ser recuperados após a atualização_. Para mais informações, veja https://github.com/longhorn/longhorn/issues/10461[problema #10461].
+
+* Se você estiver usando o driver SPDK NVMe bdev (especificamente, se os discos foram adicionados usando `/dev/nvme*` caminhos de dispositivo), os volumes V2 criados antes da atualização ainda funcionarão. No entanto, esses volumes continuarão a usar o motor {longhorn-product-name} v1.7.x e permanecerão não migráveis. Você pode exportar os dados e criar novos volumes migráveis, se necessário.
+
+* Todas as máquinas virtuais com volumes V2 anexados devem ser paradas antes de iniciar o upgrade. Volumes V2 ativos farão com que o processo de upgrade trave durante a fase "atualizando os serviços do sistema". Os logs do pod `apply-manifests` mostrarão mensagens repetidas semelhantes às seguintes:
++
+[,shell]
+----
+instance-manager (aio)(v2) (image=longhornio/longhorn-instance-manager:v1.8.1) state is not running on node harvester-node-0, will retry...
+----
++
+Parar todas as Máquinas Virtuais que estão usando volumes V2 permitirá que o upgrade prossiga.
+====
+
+Se você estiver usando o driver SPDK NVMe bdev (especificamente, se os discos foram adicionados usando caminhos de dispositivo `/dev/nvme*`) e volumes V2 não migráveis estão anexados a máquinas virtuais existentes, você pode transitar para volumes migráveis ao vivo realizando os seguintes passos:
+
+. Pare as máquinas virtuais.
+
+. Exporte cada volume V2 anexado para uma imagem que usa a nova StorageClass V2 (com a opção `migratable` definida como `true`).
+
+. Uma vez que os volumes são exportados para imagens, edite a máquina virtual e execute as seguintes ações na aba *Volumes*:
++
+* Remova os volumes V2 existentes.
+* Adicione as imagens que foram criadas a partir dos volumes exportados.
+
+. Inicie as máquinas virtuais.
++
+Esta etapa pode demorar um pouco, dependendo da quantidade de dados a serem copiados.

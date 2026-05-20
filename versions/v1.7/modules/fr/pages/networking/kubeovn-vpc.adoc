@@ -1,0 +1,737 @@
+= Cloud privé virtuel
+:revdate: 2025-09-15
+:page-revdate: {revdate}
+
+[NOTE]
+====
+Toutes les fonctionnalités utilisant Kube-OVN sont considérées comme expérimentales. Pour plus d'informations sur les fonctionnalités expérimentales, consultez xref:introduction/document-conventions.adoc#_feature_labels[Étiquettes de fonctionnalités].
+====
+
+Un cloud privé virtuel (VPC) est un réseau logiquement isolé qui offre un contrôle total sur les adresses IP, les sous-réseaux, les tables de routage, les passerelles de périmètre de sécurité et les passerelles au sein d'une infrastructure cloud. Les VPC permettent le déploiement sécurisé et évolutif de ressources virtualisées telles que le calcul, le stockage et les services de conteneurs.
+
+Le tableau suivant présente les composants clés d'un VPC{nbsp}:
+
+|===
+| Composant | Description
+
+| VPC
+| Espace réseau de niveau supérieur avec une plage CIDR IP définie par l'utilisateur
+
+| sous-réseau
+| Subdivision de l'espace IP du VPC{nbsp}; peut être public ou privé
+
+| table de routage
+| Définit les règles de routage du trafic à l'intérieur et à l'extérieur du VPC
+
+| passerelle Internet
+| Permet l'accès Internet sortant pour les sous-réseaux publics
+
+| passerelle NAT
+| Permet aux sous-réseaux privés d'accéder à Internet (sortie uniquement)
+
+| groupe de sécurité
+| Pare-feu virtuel qui contrôle le trafic entrant et sortant par instance
+
+| peering VPC
+| Connexions de peering ou hybrides optionnelles entre différents VPC ou réseaux sur site
+|===
+
+== {harvester-product-name} et architecture d'intégration Kube-OVN
+
+Le diagramme suivant illustre comment les VPC, les sous-réseaux, les réseaux superposés et les machines virtuelles sont logiquement connectés dans {harvester-product-name} avec Kube-OVN. Cette architecture comprend des sous-réseaux publics et privés, permettant de séparer le trafic exposé à Internet des ressources internes. De plus, cette architecture permet des structures réseau L3 et L2 évolutives et isolées à travers le cluster.
+
+----
+                                 [ VPC: vpc-1 ]
+                                        │
+                  ┌─────────────────────┴─────────────────────┐
+                  │                                           │
+     [ Subnet: vswitch1-subnet ]                 [ Subnet: vswitch2-subnet ]
+       CIDR: 172.20.10.0/24                          CIDR: 172.20.20.0/24
+       Gateway: 172.20.10.1                          Gateway: 172.20.20.1
+                  │                                           │
+     [ Overlay Network: vswitch1 ]               [ Overlay Network: vswitch2 ]
+                  │                                           │
+         ┌────────┴────────┐                         ┌────────┴────────┐
+         │                 │                         │                 │
+[VM: vm1-vswitch1] [VM: vm2-vswitch1]                [VM: vm1-vswitch2]
+IP: 172.20.10.X     IP: 172.20.10.Y                    IP: 172.20.20.Z
+----
+
+|===
+| Composant | Plate-forme | Responsabilité logique
+
+| <<VPC settings,VPC>>
+| Kube-OVN
+| Domaine L3 de niveau supérieur, gère les regroupements de sous-réseaux
+
+| <<Subnet settings,sous-réseau>>
+| Kube-OVN
+| Attribution CIDR, routage, passerelle, règles de pare-feu
+
+| xref:networking/vm-network.adoc#_overlay_network_experimental[réseau superposé]
+| {harvester-product-name}
+| Commutateur virtuel L2 (pont OVS), mappé au sous-réseau
+
+| xref:virtual-machines/virtual-machines.adoc[machine virtuelle]
+| {harvester-product-name}
+| Exécute des charges de travail de calcul, connecté au réseau superposé
+|===
+
+Cette architecture présente les caractéristiques clés suivantes{nbsp}:
+
+* Kube-OVN crée le VPC et ses sous-réseaux.
++
+Chaque sous-réseau comprend un CIDR et une adresse IP de passerelle, et se lie à un réseau superposé (en tant que fournisseur). Kube-OVN impose une correspondance un-à-un entre le sous-réseau et le réseau superposé pour éviter les routages ambigus, les collisions de trafic et les problèmes d'isolation.
+
+* {harvester-product-name} définit les réseaux superposés.
++
+Chaque réseau superposé est considéré comme un fournisseur dans Kube-OVN. Lorsque vous créez un sous-réseau sur l'interface utilisateur {harvester-product-name}, vous pouvez sélectionner ces réseaux superposés dans la liste *Fournisseur* (type{nbsp}: `OverlayNetwork`) sur l'écran *Sous-réseau{nbsp}: Créer*.
+
+* {harvester-product-name} provisionne des machines virtuelles qui sont connectées à un réseau superposé.
++
+Chaque machine virtuelle utilise le Kube-OVN IPAM pour demander une adresse IP après le démarrage. La machine virtuelle reçoit son adresse IP, sa passerelle et les informations de routage du sous-réseau associé.
+
+* Kube-OVN gère toute la logique L3 (routage, NAT, peering VPC et isolation).
++
+{harvester-product-name} se concentre uniquement sur le calcul et l'attachement réseau. L'application des stratégies réseau, les sous-réseaux privés et la sortie NAT sont gérées par Kube-OVN.
+
+Cette architecture offre les avantages suivants{nbsp}:
+
+* Séparation claire des préoccupations{nbsp}: {harvester-product-name} gère la virtualisation{nbsp}; Kube-OVN gère le SDN
+* Évolutivité{nbsp}: Les nouveaux VPC, sous-réseaux et peering ne nécessitent pas de modifications dans le noyau de {harvester-product-name}
+* Réseautage natif Kubernetes{nbsp}: Kube-OVN s'intègre étroitement avec Kubernetes, prenant en charge les CRD, les stratégies, etc.
+* Isolation et observabilité{nbsp}: Contrôle centralisé sur les IP, les ACL et le routage via Kube-OVN
+
+== Configuration de VPC et de sous-réseau
+
+=== Paramètres du VPC
+
+Dans {harvester-product-name}, un cloud privé virtuel (VPC) est un conteneur de réseau logique qui aide à gérer et à isoler les sous-réseaux et le trafic. Il définit le routage, le NAT et la segmentation du réseau.
+
+{harvester-product-name} fournit un VPC par défaut nommé `ovn-cluster`, et deux sous-réseaux associés nommés `ovn-default` et `join` pour les opérations internes de Kube-OVN. Vous pouvez créer des VPC supplémentaires en cliquant sur *Create* sur l'écran *Cloud Privé Virtuel*.
+
+image::networking/default_vpc_and_subnet.png[VPC et sous-réseau par défaut]
+
+Lors de la création de VPC personnalisés, vous devez configurer les paramètres liés aux routes définies pour diriger le trafic et les connexions qui permettent la communication entre les VPC locaux et distants. Le tableau suivant décrit les paramètres sur l'écran des détails du *Cloud Privé Virtuel*{nbsp}:
+
+|===
+| Section | Paramètre | Description
+
+| informations générales
+| *Nom*
+| Nom du VPC
+
+| informations générales
+| *Description*
+| Description du VPC
+
+| Onglet *Routes statiques*
+| *CIDR*
+| Plage d'adresses IP de destination pour la route (par exemple, `192.168.1.0/24`)
+
+| Onglet *Routes statiques*
+| *Prochain saut IP*
+| Adresse IP à laquelle le trafic pour le CIDR doit être redirigé (par exemple, l'adresse IP de la passerelle ou du routeur)
+
+| Onglet *Peering VPC*
+| *IP de connexion locale*
+| Adresse IP sur le VPC local à utiliser pour la connexion de peering
+
+| Onglet *Peering VPC*
+| *VPC distant*
+| VPC distant cible qui est mis en peering avec le VPC local
+|===
+
+image::networking/create_vpc.png[Création d'un VPC]
+
+=== Paramètres de sous-réseau
+
+Chaque sous-réseau définit un bloc CIDR et une passerelle, et est mappé à un {harvester-product-name} xref:networking/vm-network.adoc#_overlay_network_experimental[réseau superposé] (commutateur virtuel). Il inclut également des contrôles pour le NAT et les xref:networking/vm-isolation.adoc#_subnet_acls[règles d'accès].
+
+Lors de la création de sous-réseaux, vous devez configurer des paramètres pertinents pour votre cas d'utilisation. Dans la plupart des cas, vous pouvez commencer par configurer le *Bloc CIDR*, la *Passerelle* et le *Fournisseur*. Le tableau suivant décrit les paramètres de l'écran des détails du *Sous-réseau*{nbsp}:
+
+|===
+| Section | Paramètre | Description
+
+| informations générales
+| *Nom*
+| Nom du sous-réseau
+
+| informations générales
+| *Description*
+| Description du sous-réseau
+
+| *De base*
+| *Bloc CIDR*
+| Plage d'adresses IP attribuée au sous-réseau (par exemple, `172.20.10.0/24`)
+
+| Onglet *De base*
+| *Protocole*
+| Version du protocole réseau utilisée pour ce sous-réseau (IPv4 ou IPv6)
+
+| Onglet *De base*
+| *Provider*
+| Réseau superposé (commutateur virtuel) auquel le sous-réseau est lié
+
+| Onglet *De base*
+| *Cloud privé virtuel*
+| Cloud privé virtuel auquel appartient le sous-réseau
+
+| Onglet *De base*
+| *Passerelle*
+| Adresse IP qui sert de passerelle par défaut pour les machines virtuelles dans le sous-réseau
+
+| Onglet *De base*
+| *Sous-réseau privé*
+| Paramètre qui restreint l'accès au sous-réseau et garantit l'isolement du réseau
+
+| Onglet *De base*
+| *Autoriser les Sous-réseaux*
+| CIDR autorisés à accéder au sous-réseau lorsque *Sous-réseau privé* est activé
+
+| Onglet *De base*
+| *Exclure les IP*
+| Liste des adresses IP qui ne doivent pas être automatiquement attribuées aux machines virtuelles
+|===
+
+image::networking/create_subnet.png[Création d'un sous-réseau]
+
+Chaque sous-réseau créé a un paramètre appelé <<`natOutgoing` setting,`natOutgoing`>>, qui active la traduction d'adresses réseau (NAT) pour le trafic quittant le sous-réseau et se dirigeant vers des destinations en dehors du VPC. Ce paramètre est désactivé par défaut. Pour l'activer, vous devez modifier la configuration YAML du sous-réseau et définir la valeur sur `natOutgoing: true`.
+
+image::networking/customize_nat_outgoing.png[paramètre natOutgoing activé]
+
+Par défaut, les sous-réseaux dans différents VPC ne peuvent pas communiquer directement. Pour permettre une communication sécurisée et contrôlée entre eux, vous devez établir une connexion <<VPC peering,peering VPC>>. Sans cela, le trafic des sous-réseaux dans chaque VPC reste complètement isolé.
+
+[NOTE]
+====
+Les connexions de peering VPC ne peuvent être établies qu'entre des VPC personnalisés.
+====
+
+image::networking/vpcpeer.png[peering VPC]
+
+=== Création d'un VPC
+
+Effectuez les étapes suivantes pour créer et configurer un VPC.
+
+. Activez xref:add-ons/kubeovn-operator.adoc[kubeovn-operator].
++
+Le produit complémentaire kubeovn-operator déploie Kube-OVN dans le cluster {harvester-product-name}.
++
+image::networking/kubeovn-operator.png[Produit complémentaire Kube-OVN Operator]
+
+. xref:networking/vm-network.adoc#_creating_an_overlay_network[Créer des réseaux superposés].
++
+Vous devez créer un réseau superposé distinct pour chaque sous-réseau que vous prévoyez de créer.
+
+. Créer un VPC.
++
+.. Allez à *Réseaux -> Cloud privé virtuel*, puis cliquez sur *Créer*.
++
+.. Sur l'écran *Cloud privé virtuel:Créer*, spécifiez un nom unique pour le VPC.
++
+.. Cliquez sur *Create*.
+
+. Créer des sous-réseaux.
++
+.. Allez à *Réseaux -> Cloud privé virtuel*.
++
+.. Localisez le VPC que vous avez créé, puis cliquez sur *Créer un Sous-réseau*.
++
+.. Sur l'écran *Sous-réseau:Créer*, configurez les <<Subnet settings,paramètres>> qui sont pertinents pour votre environnement.
++
+[NOTE]
+====
+Vous devez lier chaque sous-réseau à un réseau superposé dédié. Dans le champ *Fournisseur*, l'interface {harvester-product-name} n'affiche que les réseaux superposés qui ne sont pas liés à d'autres sous-réseaux, appliquant automatiquement la correspondance un à un.
+====
+.. Cliquez sur *Modifier en YAML*.
++
+.. Sous `spec`, ajoutez `enableDHCP: true`. 
++
+Cela garantit que les machines virtuelles connectées au sous-réseau peuvent obtenir les bonnes options de route par défaut.
++
+.. Cliquez sur *Create*.
+
+. Créer des machines virtuelles.
++
+.. Configurez les paramètres pertinents pour chaque machine virtuelle.
++
+[IMPORTANT]
+====
+Dans l'onglet *Réseaux*, vous devez sélectionner le bon réseau superposé dans le champ *Réseau*.
+====
+.. Cliquez sur *Create*.
++
+La machine virtuelle obtient son adresse IP du sous-réseau auquel elle est connectée.
++
+.. Sélectionnez *⋮ -> Modifier YAML*.
++
+.. Changez la valeur de `spec.domain.devices.interface.binding.name` en `managedtap`.
++
+Cela garantit que la machine virtuelle obtient les bonnes options DHCP du sous-réseau au lieu d'utiliser le serveur DHCP par défaut de KubeVirt.
++
+[CAUTION]
+====
+Si vous ne réalisez pas cette étape, la machine virtuelle n'aura pas de route par défaut. Jusqu'à ce que la route par défaut soit correctement configurée sur le système d'exploitation invité, les tentatives d'accès à des destinations externes et à des machines virtuelles sur différents sous-réseaux échoueront.
+
+Pour plus d'informations, voir xref:networking/vm-network.adoc#_overlay_network_limitations[Limitations du réseau superposé].
+====
++
+.. Redémarrez chaque machine virtuelle.
+
+=== Configuration et vérification d'un VPC exemple
+
+. xref:networking/vm-network.adoc#_creating_an_overlay_network[Créer des réseaux superposés] avec les paramètres suivants{nbsp}:
++
+** *Nom*{nbsp}: `vswitch1` et `vswitch2`
+** *Type*{nbsp}: `OverlayNetwork`
+
+. Créez un VPC nommé `vpc-1`.
+
+. Créez deux sous-réseaux dans `vpc-1` avec les paramètres suivants{nbsp}:
++
+|===
+| Nom | CIDR | Provider | IP de passerelle
+
+| `vswitch1-subnet`
+| `172.20.10.0/24`
+| `default/vswitch1`
+| `172.20.10.1`
+
+| `vswitch2-subnet`
+| `172.20.20.0/24`
+| `default/vswitch2`
+| `172.20.20.1`
+|===
+
+. Créez trois machines virtuelles avec les paramètres suivants{nbsp}:
++
+** *Nom*{nbsp}: `vm1-vswitch1`, `vm2-vswitch1` et `vm1-vswitch2`
++
+** Onglet *Bases*
+*** *UC*{nbsp}: `1`
+*** *Mémoire*{nbsp}: `2`
++
+** Onglet *Volumes*
+*** *Volume d'image*{nbsp}: Une image cloud (par exemple, `noble-server-cloudimg-amd64`)
++
+** Onglet *Réseaux*
+*** *Réseau*{nbsp}: `default/vswitch1`
++
+** Onglet *Options avancées*
++
+----
+users:
+`  `- name: ubuntu
+`    `groups: [ sudo ]
+`    `shell: /bin/bash
+`    `sudo: ALL=(ALL) NOPASSWD:ALL
+`    `lock\_passwd: false
+----
++
+[NOTE]
+====
+Une fois que les machines virtuelles commencent à fonctionner, le nœud affiche le serveur NTP `0.suse.pool.ntp.org` et l'adresse IP.
+====
+
+. Ouvrez les consoles série de `vm1-vswitch1` et `vm1-vswitch2`, puis ajoutez une route par défaut sur chacune (s'il n'en existe pas) en utilisant les commandes suivantes{nbsp}:
++
+** `vm1-vswitch1` (`172.20.10.6`){nbsp}:
++
+----
+#sudo ip route add default via 172.20.10.1 dev enp1s0
+---- 
++
+** `vm1-vswitch2` (`172.20.20.3`) :
++
+----
+#sudo ip route add default via 172.20.20.1 dev enp1s0
+----
++
+Si une machine virtuelle souhaite envoyer du trafic vers un réseau inconnu (non dans le sous-réseau local), le trafic doit être redirigé vers l'adresse IP de passerelle spécifiée configurée pour le sous-réseau connecté en utilisant l'interface réseau spécifiée. Dans cet exemple, `vm1-vswitch1` doit rediriger le trafic via `172.20.10.1`, tandis que `vm1-vswitch2` doit rediriger le trafic via `172.20.20.1`. Les deux machines virtuelles utilisent l'interface réseau `enp1s0`.
+
+. Vérifiez la connectivité en utilisant la commande `ping`.
++
+** Utilisez `vm1-vswitch1` (`172.20.10.6`) pour envoyer une requête ping à `vm1-vswitch2` (`172.20.20.3`).
+** Utilisez `vm1-vswitch2` (`172.20.20.3`) pour envoyer une requête ping à `vm1-vswitch1` (`172.20.10.6`).
++
+Puisque `vm1-vswitch1` et `vm1-vswitch2` sont sur le même sous-réseau, ils peuvent communiquer entre eux sans aucun paramètre de route par défaut.
++
+Si aucune route par défaut n'existe sur la machine virtuelle avant d'exécuter la commande ping, la console affiche le message `ping : connect : Le réseau est hors d'atteinte`.
+
+=== Paramètre de sous-réseau privé
+
+Lorsque le paramètre *Sous-réseau privé* est activé sur un sous-réseau, il ne peut pas communiquer avec d'autres sous-réseaux dans le même VPC par défaut. Le trafic inter-sous-réseaux est autorisé uniquement si vous ajoutez les blocs CIDR des autres sous-réseaux à la liste *Autoriser les sous-réseaux* du sous-réseau privé.
+
+Le paramètre *Sous-réseau privé* offre les avantages suivants :
+
+* Segmentation réseau fine (micro-segmentation)
+* Isolation réseau renforcée au sein du VPC et réduction de la surface d'attaque potentielle
+* Prévention de l'accès non autorisé aux ressources sensibles ou critiques à l'intérieur du VPC
+* Communication inter-sous-réseaux contrôlée et sélective via la liste *Autoriser les sous-réseaux*
+
+==== Vérification d'un sous-réseau privé
+
+. Allez à *Réseaux -> Cloud Privé Virtuel*.
+
+. Localisez `vswitch1-sous-réseau`, puis sélectionnez *⋮ -> Modifier la configuration*.
+
+. Activez le paramètre *Sous-réseau privé*.
+
+. Ouvrez la console série de `vm1-vswitch1` (`172.20.10.6`), puis envoyez une requête ping à `vm1-vswitch2` (`172.20.20.3`).
++
+La tentative de ping échoue car `vm1-vswitch1` est isolé. L'activation du paramètre **Sous-réseau privé** sur `vswitch1-sous-réseau` interdit à `vm1-vswitch1` de communiquer avec des machines virtuelles dans d'autres sous-réseaux.
+
+. Retournez à l'écran *Cloud Privé Virtuel*, localisez `vswitch1-sous-réseau`, puis sélectionnez *⋮ -> Modifier la configuration*.
+
+. Ajoutez `172.20.20.0/24` au champ *Autoriser les sous-réseaux* :
+
+. Ouvrez la console série de `vm1-vswitch1` (`172.20.10.6`), puis envoyez une requête ping à `vm1-vswitch2` (`172.20.20.3`).
++
+La tentative de ping est réussie.
+
+=== Paramètre `natOutgoing`
+
+Le paramètre `natOutgoing` active la traduction d'adresses réseau (NAT) pour le trafic quittant le sous-réseau et se dirigeant vers des destinations en dehors du VPC. Ce paramètre est désactivé par défaut. Pour l'activer, vous devez modifier la configuration YAML du sous-réseau et définir la valeur sur `natOutgoing: true`.
+
+==== Exemple de configuration et de vérification `natOutgoing`
+
+. xref:networking/vm-network.adoc#_creating_an_overlay_network[Créer un réseau superposé] avec les paramètres suivants :
++
+** *Nom* : `vswitch-external`
+** *Type* : `OverlayNetwork`
+
+. Dans le VPC `ovn-cluster`, créez un sous-réseau avec les paramètres suivants :
++
+** *Nom* : `external-subnet`
+** *Bloc CIDR* : `172.20.30.0/24`
+** *Fournisseur* : `default/vswitch-external`
+** *IP de passerelle* : `172.20.30.1`
+
+. Créez une machine virtuelle avec les paramètres suivants :
++
+** *Nom* : `vm-external`
++
+** Onglet *Bases*
+*** *UC* : `1`
+*** *Mémoire* : `2`
++
+** Onglet *Volumes*
+*** *Volume d'image* : Une image cloud (par exemple, `noble-server-cloudimg-amd64`)
++
+** Onglet *Réseaux*
+*** *Réseau* : `default/vswitch-external`
++
+** Onglet *Options avancées*
++
+----
+users:
+`  `- name: ubuntu
+`    `groups: [ sudo ]
+`    `shell: /bin/bash
+`    `sudo: ALL=(ALL) NOPASSWD:ALL
+`    `lock\_passwd: false
+----
+
+. Ouvrez la console série de `vm-external` (`172.20.30.2`), puis envoyez une requête ping à `8.8.8.8`.
++
+La console affiche le message `ping : connect : Le réseau est hors d'atteinte`.
+
+. Ajoutez une route par défaut en utilisant la commande suivante :
++
+----
+#sudo ip route add default via 172.20.30.1 dev enp1s0
+----
++
+Encore une fois, la tentative de ping échoue.
+
+. Allez à l'écran *Cloud Privé Virtuel*.
+
+. Localisez `external-subnet`, puis sélectionnez *⋮ -> Modifier la configuration*.
+
+. Cliquez sur *Modifier en YAML*.
+
+. Localisez le champ `natOutgoing`, puis changez la valeur en `true`.
+
+. Cliquez sur *Enregistrer*.
+
+. Ouvrez la console série de `vm-external` (`172.20.30.2`), puis pinguez `8.8.8.8`.
++
+La tentative de ping est réussie.
+
+=== VPC Peering
+
+Le peering VPC est une connexion réseau qui permet aux machines virtuelles dans différents VPC de communiquer en utilisant _adresses IP privées_.
+
+Chaque VPC est un espace de noms réseau séparé avec son propre bloc CIDR, sa table de routage et sa frontière d'isolation. Sans VPC Peering, les machines virtuelles sont isolées même lorsqu'elles sont hébergées dans le même {harvester-product-name} cluster. Une fois qu'une connexion de peering est établie, les règles de routage sont automatiquement mises à jour pour permettre aux machines virtuelles de communiquer de manière privée.
+
+Le VPC Peering offre les avantages suivants :
+
+* Les VPC restent logiquement et administrativement isolés. C'est idéal pour les configurations multi-locataires qui nécessitent une forte isolation réseau avec une connectivité optionnelle. Vous pouvez organiser les charges de travail par équipe, fonction ou environnement (par exemple, développement vs production).
+
+* Le trafic entre les VPC ne traverse pas l'internet public, réduisant ainsi l'exposition. Vous pouvez également utiliser des tables de routage et des règles de passerelle de périmètre de sécurité pour contrôler strictement l'accès au réseau.
+
+* Maintenir le trafic au sein du réseau interne du cloud améliore non seulement les performances mais réduit également les coûts, offrant un avantage significatif par rapport à l'utilisation de l'internet public ou des VPN.
+
+Le diagramme suivant montre comment les VPC et les sous-réseaux dans Kube-OVN se mappent aux réseaux superposés et aux machines virtuelles dans {harvester-product-name}. Cette architecture vous permet de créer des structures réseau L3 et L2 évolutives et isolées à travers le cluster.
+
+----
+                                          ┌───────────────────────────────────────────┐
+                                          │                 Kube-OVN                  │
+                                          │          (SDN Controller / IPAM)          │
+                                          └───────────────────────────────────────────┘
+                                                                │
+         ┌──────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┐
+         │                                                      │                                                          │
+ ┌──────────────┐                                       ┌──────────────┐                                           ┌──────────────┐
+ │  VPC: vpc-1  │                                       │VPC: vpcpeer-1│      ◀────────── peering ──────────▶      │VPC: vpcpeer-2│
+ └──────────────┘                                       └──────────────┘                                           └──────────────┘
+        │                                                       │                                                         │
+        ▼                                                       ▼                                                         ▼
+┌──────────────────────────────┐                 ┌──────────────────────────────┐                    ┌──────────────────────────────┐
+│ Subnet: vswitch1-subnet      │                 │ Subnet: vswitch3-subnet      │                    │ Subnet: vswitch4-subnet      │
+│ CIDR: 172.20.10.0/24         │                 │ CIDR: 10.0.0.0/24            │                    │ CIDR: 20.0.0.0/24            │
+│ Gateway: 172.20.10.1         │                 │ Gateway: 10.0.0.1            │                    │ Gateway: 20.0.0.1            │
+└──────────────────────────────┘                 └──────────────────────────────┘                    └──────────────────────────────┘
+            │  (1:1 mapping - Provider binding)                 │                                                    │
+            ▼                                                   ▼                                                    ▼
+┌──────────────────────────────┐                 ┌──────────────────────────────┐                    ┌──────────────────────────────┐
+│ Overlay: vswitch1            │                 │ Overlay: vswitch3            │                    │ Overlay: vswitch4            │
+│ Type: OverlayNetwork         │                 │ Type: OverlayNetwork         │                    │ Type: OverlayNetwork         │
+└──────────────────────────────┘                 └──────────────────────────────┘                    └──────────────────────────────┘
+            │                                                   │                                                    │
+            ▼                                                   ▼                                                    ▼
+┌──────────────────────┐                            ┌──────────────────────┐                              ┌──────────────────────┐
+│   VM: vm1-vswitch1   │                            │   VM: vm1-vswitch3   │                              │   VM: vm1-vswitch4   │
+│   IP: 172.20.10.5    │   ◀ ──────── X ──────── ▶  │   IP: 10.0.0.2       │     ◀── Connected via ──▶    │   IP: 20.0.0.2       │
+└──────────────────────┘                            └──────────────────────┘       vswitch (overlay)      └──────────────────────┘
+            ▲
+            │
+VM launched and managed by {harvester-product-name}
+----
+
+==== Exemples de configuration de VPC Peering
+
+* Exemple 1 : Communication réussie entre VPC
++
+|===
+| Nom du VPC | VPC CIDR | Sous-réseau | Route statique
+
+| `vpcpeer-1`
+| `10.0.0.0/16`
+| `10.0.0.0/24`
+| `20.0.0.0/16 → 169.254.0.2`
+
+| `vpcpeer-2`
+| `20.0.0.0/16`
+| `20.0.0.0/24`
+| `10.0.0.0/16 → 169.254.0.1`
+|===
++
+Étant donné que les deux sous-réseaux se trouvent dans leurs CIDR VPC respectifs, le routage fonctionne correctement et la communication inter-VPC est réussie.
+
+* Exemple 2 : Communication inter-VPC infructueuse en raison d'un problème de configuration de routage
++
+|===
+| Nom du VPC | VPC CIDR | Sous-réseau | Route statique
+
+| `vpcpeer-1`
+| `10.0.0.0/16`
+| `10.1.0.0/24`
+| `20.0.0.0/16 → 169.254.0.2`
+
+| `vpcpeer-2`
+| `20.0.0.0/16`
+| `20.1.0.0/24`
+| `10.0.0.0/16 → 169.254.0.1`
+|===
++
+Les adresses IP de sous-réseau cibles (par exemple, `10.1.0.2` et `20.1.0.2`) ne sont _pas couvertes_ par la configuration de routage, ce qui entraîne un échec de la communication inter-VPC.
+
+[IMPORTANT]
+====
+Vérifiez ce qui suit :
+
+* Le CIDR du VPC inclut tous les sous-réseaux au sein du VPC.
+* Les routes statiques pointent vers le *bloc CIDR principal du VPC distant*.
+
+Si un sous-réseau utilise une plage spécifique qui n'est pas couverte par le CIDR du VPC, la route statique associée ne peut pas atteindre ce sous-réseau.
+====
+
+Pour plus d'informations sur les prérequis et la configuration du peering VPC, voir https://kubeovn.github.io/docs/v1.13.x/en/vpc/vpc-peering[VPC Peering] dans la documentation Kube-OVN.
+
+==== Exemple de configuration de VPC Peering et vérification
+
+. xref:networking/vm-network.adoc#_creating_an_overlay_network[Créer deux réseaux superposés] avec les paramètres suivants :
++
+** *Nom* : `vswitch3` et `vswitch4`
+** *Type* : `OverlayNetwork`
+
+. <<Creating a VPC,Créer deux VPC>> nommés `vpcpeer-1` et `vpcpeer-2`.
++
+{harvester-product-name} crée deux espaces réseau isolés prêts pour la création de sous-réseaux.
+
+. Créez un sous-réseau dans chaque VPC avec les paramètres suivants :
++
+|===
+| Nom du VPC | Nom du sous-réseau | Bloc CIDR | Provider | Passerelle IP
+
+| `vpcpeer-1`
+| `subnet1`
+| `10.0.0.0/24`
+| `default/vswitch3`
+| `10.0.0.1`
+
+| `vpcpeer-2`
+| `subnet2`
+| `20.0.0.0/24`
+| `default/vswitch4`
+| `20.0.0.1`
+|===
+
+. Modifiez la configuration des deux VPC.
++
+** `vpcpeer-1`
++
+|===
+| Section | Paramètre | Valeur
+
+| onglet *VPC Peering*
+| *IP de connexion locale*
+| `169.254.0.1/30`
+
+| onglet *VPC Peering*
+| *VPC distant*
+| `vpcpeer-2`
+
+| onglet *Routes statiques*
+| *CIDR*
+| `20.0.0.0/16`
+
+| onglet *Routes statiques* 
+| *Prochain saut IP*
+| `169.254.0.2`
+|===
+
+** `vpcpeer-2`
++
+|===
+| Section | Paramètre | Valeur
+
+| onglet *VPC Peering*
+| *IP de connexion locale*
+| `169.254.0.2/30`
+
+| onglet *VPC Peering*
+| *VPC distant*
+| `vpcpeer-1`
+
+| onglet *Routes statiques*
+| *CIDR*
+| `10.0.0.0/16`
+
+| onglet *Routes statiques*
+| *Prochain saut IP*
+| `169.254.0.1`
+|===
+
+. Créer des machines virtuelles.
++
+Une erreur `Unschedulable` indique généralement une mémoire insuffisante. Arrêtez d'autres machines virtuelles avant d'essayer d'en créer de nouvelles.
+
+. Ouvrez les consoles série de `vm1-vpcpeer1` et `vm1-vpcpeer2`, puis ajoutez une route par défaut sur chacune (s'il n'en existe pas) en utilisant les commandes suivantes :
++
+** `vm1-vpcpeer1` (`10.0.0.2`)
++
+----
+#sudo ip route add default via 10.0.0.1 dev enp1s0
+----
++
+** `vm1-vpcpeer2` (`20.0.0.2`)
++
+----
+#sudo ip route add default via 20.0.0.1 dev enp1s0
+----
+
+. Testez la communication inter-VPC en utilisant la commande `ping`.
++
+** Utilisez `vm1-vpcpeer1` (`10.0.0.2`) pour pinger `vm1-vpcpeer2` (`20.0.0.2`).
+** Utilisez `vm1-vpcpeer2` (`20.0.0.2`) pour pinger `vm1-vpcpeer1` (`10.0.0.2`).
++
+[IMPORTANT]
+====
+La communication entre les machines virtuelles dans différents VPC repose sur des routes statiques qui définissent comment le trafic est acheminé vers le VPC distant. Pour que ces routes fonctionnent correctement, la destination de la route statique CIDR doit se situer dans la plage CIDR principale du VPC distant.
+====
+
+==== Configuration de l'IP de connexion locale et du CIDR
+
+|===
+| Question | Réponse
+
+| La valeur **Local Connect IP** est-elle un bloc CIDR{nbsp}?
+| Oui (par exemple, `169.254.0.1/30`)
+
+| Quelle est la taille de sous-réseau recommandée{nbsp}?
+| `/30` (deux IP utilisables)
+
+| Les adresses privées (RFC 1918) peuvent-elles être utilisées pour des liens de peering{nbsp}?
+| Non recommandé
+
+| Pourquoi utiliser `169.254.x.x`{nbsp}?
+| Liens locaux, sûrs, non routables sur Internet, largement utilisés
+|===
+
+** Questionnbsp;: La valeur *Local Connect IP* est-elle un bloc CIDR{nbsp}?
++
+Réponse : Oui. Vous devez spécifier un bloc CIDR (par exemple, `169.254.0.1/30`) au lieu d'une seule adresse IP. Le CIDR définit un *réseau point à point* où une adresse IP est utilisée par le VPC local et l'autre est utilisée par le VPC distant.
++
+Exemple{nbsp}: bloc `/30` (`169.254.0.0/30`)
++
+|===
+| Adresse IP | Fonction
+
+| 169.254.0.0
+| Adresse réseau
+
+| 169.254.0.1
+| Utilisé par le VPC A
+
+| 169.254.0.2
+| Utilisé par le VPC B
+
+| 169.254.0.3
+| Diffusion (optionnel)
+|===
+
+** Questionnbsp;: Quelle est la taille de sous-réseau recommandée{nbsp}?
++
+Réponse{nbsp}: `/30` fournit *exactement deux adresses IP utilisables*, ce qui répond à l'exigence du VPC Peering point à point. Utiliser des blocs plus grands (par exemple, `/28` et `/29`) n'est pas nécessaire et peut même être considéré comme un gaspillage.
++
+|===
+| CIDR | IPs utilisables | Recommandé{nbsp}?
+
+| `/30`
+| 2
+| Oui
+
+| `/29`
+| 6
+| Non
+
+| `/28`
+| 14
+| Non
+|===
+
+** Questionnbsp;: Pourquoi utiliser `169.254.x.x/30` au lieu d'adresses privées{nbsp}?
++
+Réponse{nbsp}: `169.254.0.0/16` ne fait *pas partie* de l'espace d'adresses privées RFC 1918 (`10.0.0.0/8`, `172.16.0.0/12` et `192.168.0.0/16`). La RFC 3927 définit `169.254.0.0/16` comme l'*espace d'adresses link-local*, qui est destiné à la communication interne, à la configuration IP automatique et au routage point à point.
++
+`169.254.x.x/30` présente les avantages suivants:
++
+*** Non routable vers Internet public
+*** Sûr pour un usage interne
+*** Couramment utilisé par les plateformes cloud (y compris AWS et Alibaba Cloud) à des fins de mise en réseau interne telles que le VPC Peering et l'accès aux métadonnées;
+
+==== Limitation du peering VPC
+
+Le peering ne fonctionne qu'entre des VPC personnalisés. Toute tentative d'établir une connexion de peering entre le VPC par défaut (`ovn-cluster`) et un VPC personnalisé échouera.

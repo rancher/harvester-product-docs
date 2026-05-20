@@ -1,0 +1,146 @@
+= 创建 RKE2 Kubernetes 集群
+:revdate: 2025-06-09
+:page-revdate: {revdate}
+
+您现在可以在 {rke2-product-name} 的 {harvester-product-name} 集群上使用内置的 Harvester 节点驱动程序来配置 {rancher-product-name} 个 Kubernetes 集群。
+
+image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+
+[NOTE]
+====
+
+* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN 网络] 是 Harvester 节点驱动程序所需的。
+* 配置 RKE2 Kubernetes 集群涉及设置底层虚拟机的 IP 地址。您可以使用连接到 VLAN 网络的虚拟机上的 DHCP 服务器来完成此操作。如果网络上不存在这样的服务器，您可以使用 xref:../../../add-ons/vm-dhcp-controller.adoc[托管 DHCP] 功能来配置 IP 地址。
+* Harvester 节点驱动程序仅支持云镜像。
+* 有关在 {harvester-product-name} 内部署的客户集群的端口要求，请参阅文档 xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[此处]。
+* 有关支持 RKE2 的 Harvester 云提供程序的支持矩阵，请参阅网站 https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[此处]。
+====
+
+== 向后兼容性通知
+
+[NOTE]
+====
+如果您使用的是 Harvester 云提供程序版本 *v0.2.2* 或更高版本，请注意已知的向后兼容性问题。 如果您的 {harvester-product-name} 版本低于 *v1.2.0*，并且您打算使用更新的 RKE2 版本（即 >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`），则在继续升级客户 Kubernetes 集群或 Harvester 云提供程序之前，务必将您的 {harvester-product-name} 集群升级到 v1.2.0 或更高版本。
+
+有关详细的支持矩阵，请参阅官方 https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[网站] 中的 *Harvester CCM & CSI 驱动程序与 RKE2 发布* 部分。
+====
+
+== 创建您的云凭据
+
+. 点击 *☰ > 集群管理*。
+. 点击 *云凭据*。
+. 单击*创建*。
+. 点击 *Harvester*。
+. 输入您的云凭据名称
+. 选择 "导入的 Harvester 集群"。
+. 单击*创建*。
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== 创建 RKE2 Kubernetes 集群
+
+用户可以通过 RKE2 节点驱动程序在 *集群管理* 页面创建 RKE2 Kubernetes 集群。
+
+. 选择 *集群* 菜单。
+. 点击 *创建* 按钮。
+. 切换开关到 *RKE2/K3s*。
+. 选择 Harvester 节点驱动程序。
+. 选择一个 *云凭据*。
+. 输入 *集群名称*（必填）。
+. 输入 *命名空间*（必填）。
+. 输入 *镜像*（必填）。
+. 输入 *网络名称*（必填）。
+. 输入 *SSH 用户*（必填）。
+. （可选）配置 menu:显示高级选项[用户数据] 以安装虚拟机所需的软件包。
++
+[,yaml]
+----
+#cloud-config
+packages:
+  - iptables
+----
++
+[NOTE]
+====
+Calico 和 Canal 网络要求在节点上安装 `iptables` 或 `xtables-nft` 软件包。有关更多信息，请参见 RKE2 文档中的 https://documentation.suse.com/cloudnative/rke2/latest/en/known_issues.html#_canal_and_ip_exhaustion[Canal 和 IP 耗尽]。
+====
+
+. 单击*创建*。
++
+image:rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+image:rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+image:rancher/create-rke2-harvester-cluster-3.png[create-rke2-harvester-cluster-3]
++
+[NOTE]
+====
+* RKE2 v1.21.5+rke2r2 或更高版本提供内置的 Harvester 云提供程序和来宾 CSI 驱动程序集成。
+* 仅支持 Harvester 节点驱动程序导入的 {harvester-product-name} 集群。
+====
+
+=== 添加节点亲和性
+
+Harvester 节点驱动程序现在支持通过节点亲和性规则将一组机器调度到特定节点，这可以提供高可用性和更好的资源利用率。
+
+在集群创建期间，可以将节点亲和性添加到机器池：
+
+. 点击 `Show Advanced` 按钮，然后点击 `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. 如果希望调度程序仅在规则满足时调度机器，请将优先级设置为 `Required`。
+. 点击 `Add Rule` 指定节点亲和性规则，例如，对于 xref:./node-driver.adoc#_topology_spread_constraints[拓扑扩展约束] 的用例，您可以添加 `region` 和 `zone` 标签，如下所示：
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+=== 添加工作负载亲和性
+
+工作负载亲和性规则允许您根据这些节点上已运行的工作负载（虚拟机和 Pod）的标签来限制机器可以调度到哪些节点，而不是节点标签。
+
+在集群创建期间，可以将工作负载亲和性规则添加到机器池：
+
+. 选择 *显示高级选项* 并选择 *添加工作负载选择器*。
+image:rancher/affinity-rke2-add-workload-selector.png[affinity-add-workload-selector]
+. 选择 *类型*、*亲和性* 或 *反亲和性*。
+. 选择 *优先级*。*可选* 表示这是一个可选规则，而 *必需* 表示这是一个强制规则。
+. 选择目标工作负载的命名空间。
+. 选择 *添加规则* 以指定工作负载亲和性规则。
+. 设置 *拓扑键* 以指定将 {harvester-product-name} 主机划分为不同拓扑的标签键。
+
+有关更多详细信息，请参见 https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod 亲和性和反亲和性文档]。
+
+== 更新 RKE2 Kubernetes 集群
+
+RKE2 机器池中突出显示的字段表示 {harvester-product-name} 虚拟机的配置。对这些字段的任何修改将触发节点重新配置。
+
+image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+== 在隔离环境中使用 Harvester RKE2 节点驱动程序
+
+RKE2 部署依赖于 `qemu-guest-agent` 软件包来获取虚拟机的 IP 地址。
+
+Calico 和 Canal 需要在节点上安装 `iptables` 或 `xtables-nft` 软件包。
+
+然而，在隔离环境中安装软件包可能不可行。
+
+您可以通过以下选项来解决安装限制：
+
+* 选项 1。使用预配置所需软件包的虚拟机镜像（例如，`iptables`、`qemu-guest-agent`）。
+* 选项 2。前往 *显示高级* > *用户数据*，以允许虚拟机通过 HTTP(S) 代理安装所需的软件包。
+
+在 {harvester-product-name} 节点模板中的示例用户数据：
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

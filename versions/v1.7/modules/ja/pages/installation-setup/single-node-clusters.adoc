@@ -1,0 +1,46 @@
+= シングルノードクラスター
+:revdate: 2025-07-16
+:page-revdate: {revdate}
+
+{harvester-product-name}は、耐障害性が低いか、最小限の初期展開リソースを必要とする実装のためにシングルノードクラスターをサポートしています。標準のインストール方法（xref:/installation-setup/methods/iso-install.adoc[ISO]、xref:/installation-setup/methods/usb-install.adoc[USB]、およびxref:/installation-setup/methods/pxe-boot-install.adoc[PXEブート]）を使用してシングルノードクラスターを作成できます。
+
+シングルノードクラスターは、RKE2クラスターの作成やノードのアップグレード（いくつかの制限があります）を含む、ほとんどの{harvester-product-name}機能をサポートしています。ただし、この展開タイプには以下の主要な欠点があります：
+
+* 高可用性なし：ノードの再起動を必要とするエラーや更新は、実行中の仮想マシンにダウンタイムを引き起こします。
+* アップグレード中のライブマイグレーションおよびゼロダウンタイムサポートはありません。
+
+== 前提条件
+
+シングルノードクラスターの展開を開始する前に、以下の要件が満たされていることを確認してください。
+
+* ハードウェア:xref:/installation-setup/requirements.adoc#_hardware_requirements[サーバークラスのハードウェア]を使用し、{harvester-product-name}と本番ワークロードを実行できる十分なリソースが備わっていること。ノートパソコンおよびネストされた仮想化はサポートされていません。
+* ネットワーク:xref:/installation-setup/requirements.adoc#_port_requirements_for_nodes[ポートを構成]し、仮想マシン間で送信されるトラフィックの種類に基づいて設定してください。
+
+== デフォルトのストレージクラスのレプリカ数
+
+{harvester-product-name}は、{longhorn-product-name}がボリュームをプロビジョニングする方法を説明するためにストレージクラスを使用します。各ストレージクラスには、各ボリュームのために作成されるレプリカの数を定義するパラメータがあります。
+
+デフォルトのストレージクラス`harvester-longhorn`は、高可用性のためにレプリカ数の値が*3*です。シングルノードクラスターで`harvester-longhorn`を使用する場合、{longhorn-product-name}はデフォルトのレプリカ数を作成できず、ボリュームはUIの*ボリューム*画面で_劣化_としてマークされます。
+
+この問題を回避するために、次のいずれかのアクションを実行できます：
+
+* xref:/installation-setup/config/configuration-file.adoc[設定ファイル]を使用して、`harvester-longhorn`のxref:/installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[レプリカ数]を*1*に変更します。
+* xref:/storage/storageclass.adoc#_creating_a_storageclass[新しいストレージクラスを作成]し、*レプリカ数*パラメータを*1*に設定します。作成後、新しいストレージクラスをリストで見つけ、次に*⋮* > *デフォルトに設定*を選択します。
+
+== 複数のディスクを持つノード上の複数のレプリカ
+
+{longhorn-product-name}は、ノードに複数のディスクがあっても各ボリュームに対して1つのレプリカのみを作成します。これは、デフォルトで*レプリカハードアンチアフィニティ*が有効になっているためです。ノードに健康なレプリカが既に存在する場合、スケジューラは同じボリュームの新しいレプリカをそのノードにスケジュールすることを防ぎます。
+
+高可用性クラスターでは、*レプリカハードアンチアフィニティ*がボリュームの冗長性を確保します。ただし、このメカニズムは、シングルノードクラスターでボリュームが劣化する原因となる可能性があります（新しいレプリカのスケジューリングに利用できる他のノードがないため）。
+
+ノードに複数のディスクがある場合に{longhorn-product-name}が複数のレプリカを作成するようにしたい場合は、次の手順を実行してください：
+
+. https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_node_level_soft_anti_affinity[`Replica Node Level Soft Anti-Affinity`]を有効にします：この設定が有効になると、{longhorn-product-name}は同じボリュームの既存の健康なレプリカがあるノードに新しいレプリカをスケジュールします。
+. https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_disk_level_soft_anti_affinity[`Replica Disk Level Soft Anti-Affinity`]を無効にします：この設定が無効になると、{longhorn-product-name}は同じボリュームの既存の健康なレプリカがあるディスクに新しいレプリカをスケジュールしません。この設定を無効にすると、シングルノードクラスターのディスクに対してエラー耐性が提供されます。
+. （オプション）xref:../storage/storageclass.adoc#_creating_a_storageclass[新しいストレージクラスを作成]し、ボリュームスケジューリング中に一致させる必要があるディスクタグを指定します。
+
+== アップグレードとメンテナンス
+
+シングルノードクラスターはxref:/virtual-machines/live-migration.adoc[ライブマイグレーション]をサポートしていないため、クラスターのアップグレード中に仮想マシンが利用できなくなります。{harvester-product-name}は、アップグレードプロセスを開始する前にすべての仮想マシンを強制的にシャットダウンします。{harvester-product-name}を構成して、xref:/installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`]設定の`restoreVM`オプションを使用して、実行中の仮想マシンを自動的に復元することができます。
+
+xref:/hosts/hosts.adoc#_node_maintenance[メンテナンスモード]を有効にすることもできません。この操作はライブマイグレーション機能に依存しており、{harvester-product-name}は唯一のコントロールプレーンをメンテナンスモードに置くことができません。

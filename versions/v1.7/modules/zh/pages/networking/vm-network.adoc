@@ -1,0 +1,203 @@
+= VM 网络
+:revdate: 2025-11-13
+:page-revdate: {revdate}
+
+{harvester-product-name}为虚拟机（VM）提供三种类型的网络，包括：
+
+* 管理网络
+* VLAN 网络
+* 未标记网络
+
+管理网络通常用于流量仅在集群内部流动的虚拟机。如果您的虚拟机需要连接到外部网络，请使用 VLAN 网络或未标记网络。
+
+{harvester-product-name}还引入了存储网络，以将存储流量与其他集群工作负载分开。有关更多详细信息，请参阅xref:./storage-network.adoc[存储网络文档]。
+
+== 管理网络
+
+{harvester-product-name}使用 https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal]作为其默认管理网络。这是一个内置网络，可以直接从集群中使用。
+默认情况下，虚拟机的管理网络IP只能在集群节点内访问，并且在虚拟机重启后，管理网络IP将会更改。这是非典型行为，需要注意，因为虚拟机IP在重启后应保持不变。
+
+但是，您可以利用Kubernetes https://kubevirt.io/user-guide/virtual_machines/service_objects/[服务对象]为您的虚拟机创建一个稳定的管理网络IP。
+
+=== 如何使用管理网络
+
+由于管理网络是内置的，不需要额外操作，您可以在配置虚拟机网络时直接添加它。
+
+image::networking/management-network.png[]
+
+[IMPORTANT]
+====
+如果您未指定除`mgmt`或`1500`以外的值，`0`将使用默认MTU值`1500`。但是，连接到`mgmt`的虚拟机的网络接口的MTU值为 https://docs.tigera.io/calico/latest/networking/configuring/mtu#determine-mtu-size[`1450`]。这是因为{harvester-product-name}使用*Calico和Flannel CNI*，每个数据包有50字节的开销，以承载集群内的覆盖网络。
+
+image::networking/management-network-mtu.png[]
+
+如果您的任何工作负载涉及网络流量的传输，您必须为受影响的虚拟机网络接口和桥接指定适当的MTU值。
+====
+
+== VLAN 网络
+
+网络控制器利用 https://github.com/k8snetworkplumbingwg/multus-cni[multus]和 https://www.cni.dev/plugins/current/main/bridge/[bridge] CNI插件来实现其自定义的L2桥接VLAN网络。它有助于将您的虚拟机连接到主机网络接口，并可以通过物理交换机从内部和外部网络访问。
+
+=== 创建虚拟机网络
+
+. 转到*网络->虚拟机网络*。
+
+. 选择*创建*。
+
+. 配置以下设置：
++
+** 名称空间
+** 名称
+** 描述（选填）
+
+. 在*基本*选项卡上，配置以下设置：
++
+** 类型:选择*L2VlanNetwork*。
+** 模式：选择*访问*。
+** VLAN ID
+** 集群网络
++
+[NOTE]
+====
+虚拟机网络继承关联集群网络的网络配置的MTU。这确保虚拟机获得最佳的硬件性能。您不能为虚拟机网络设置不同的MTU。
+
+当您更改集群网络上行链路的物理NIC的MTU时，新创建的虚拟机网络会自动继承新的MTU。现有的虚拟机网络也会自动更新。有关更多信息，请参见xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[更改附加存储网络的网络配置的MTU]和xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_no_attached_storage_network[更改没有附加存储网络的网络配置的MTU]。
+
+{harvester-product-name} webhook不允许您直接更改虚拟机网络上的MTU。
+====
+
+. 在路由选项卡上，选择一个选项，然后指定相关的IPv4地址。
+ ** 自动（DHCP）：网络控制器从DHCP服务器检索CIDR和网关地址。您可以指定DHCP服务器地址。
++
+image::networking/create-network-auto.png[]
+ ** 手动：指定CIDR和网关地址。
++
+image::networking/create-network-manual.png[]
++
+[IMPORTANT]
+====
+{harvester-product-name} 使用该信息验证所有节点是否可以访问您正在创建的虚拟机网络。如果是这种情况，_网络连接_ 列在 *虚拟机网络* 屏幕上指示网络处于活动状态。否则，屏幕指示发生了错误。
+====
+
+=== 创建一个带有VLAN网络的虚拟机
+
+您现在可以使用上面配置的VLAN网络创建新的虚拟机：
+
+* 在 *虚拟机* 页面上点击 *创建* 按钮。
+* 指定所需参数并点击 *网络* 选项卡。
+* 要么将默认网络配置为VLAN网络，要么选择一个额外的网络进行添加。
+
+== 未标记网络
+
+众所周知，VLAN网络下的流量具有VLAN ID标签，我们可以使用 `PVID`（默认值为1）与任何正常的未标记流量进行通信。然而，一些网络设备可能不期望接收到与上行链路所属交换机的本地VLAN匹配的显式标记VLAN ID。这就是我们提供未标记网络的原因。
+
+=== 如何使用未标记网络
+
+未标记网络的使用类似于 xref:./vm-network.adoc#_vlan_network[VLAN网络]。
+
+要创建一个新的未标记网络，请转到 *网络 > 虚拟机网络* 页面并点击 *创建* 按钮。您必须指定名称，选择类型 `Untagged Network` 并选择集群网络。
+
+image::networking/create-untagged-network.png[]
+
+[NOTE]
+====
+{harvester-product-name} 支持更新和删除虚拟机网络。在更新或删除虚拟机网络之前，请确保停止所有受影响的虚拟机。
+====
+
+== VLAN中继网络
+
+. 转到*网络->虚拟机网络*。
+
+. 选择*创建*。
+
+. 配置以下设置：
++
+** 名称空间
+** 名称
+** 描述（选填）
+
+. 在*基本*选项卡上，配置以下设置：
++
+** 类型:选择*L2VlanNetwork*。
+** 模式：选择 *中继*。
+** 最小VLAN ID：指定范围的起始 VLAN ID。
+** 最大VLAN ID：指定范围的结束 VLAN ID。
+** 集群网络：选择关联的集群网络。
++
+[NOTE]
+====
+您可以指定多个重叠的 VLAN ID 范围。
+====
+
+当虚拟机连接到 VLAN 中继网络时，来宾操作系统和应用程序可以发送和接收带有指定范围内任何 VLAN ID 的数据包。
+
+[NOTE]
+====
+只有在所有连接的虚拟机停止时，您才能更改网络类型。
+
+当您将网络类型从 `VLAN` 更改为 `VLAN Trunk` 或 `Untagged` 时，您在 `Route` 选项卡上配置的设置将被去除。如果您决定将网络类型更改回 `VLAN`，则必须重新配置这些设置。
+====
+
+== 覆盖网络（实验性）
+
+网络控制器利用 https://github.com/kubeovn/kube-ovn[Kube-OVN] 创建一个基于 OVN 的虚拟化网络，支持高级 SDN 功能，如 xref:networking/kubeovn-vpc.adoc[虚拟私有云 (VPC) 和子网]，以满足虚拟机工作负载的需求。
+
+覆盖网络代表一个虚拟的二层交换机，封装并转发虚拟机之间的流量。该网络可以与在 VPC 中创建的子网连接，以便虚拟机可以访问内部虚拟化网络，并且能够到达外部网络。然而，由于当前 VPC 的限制，外部网络（如 VLAN 和未标记网络）无法访问相同的虚拟机。
+
+image::networking/kubeovn-harvester-topology.png[Kube-OVN 集成架构]
+
+=== 创建覆盖网络
+
+. 转到 *网络 -> 虚拟机网络*，然后单击 *创建*。
++
+image::networking/create_vm_networks.png[创建覆盖网络]
+
+. 在 *虚拟机网络:创建* 屏幕上，为网络指定一个名称。
+
+. 在 *基本* 选项卡上，选择 `OverlayNetwork` 作为网络类型。
+
+. 单击*创建*。
+
+=== 覆盖网络的限制
+
+在 {harvester-product-name} v1.6 中，覆盖网络的实现具有以下限制：
+
+* 由 Kube-OVN 支持的覆盖网络只能在 `mgmt`（内置管理网络）上创建。
+
+* 默认情况下，`enableDHCP` 和 `dhcpV4Options` 设置未配置，因此附加到 Kube-OVN 覆盖子网的虚拟机上不存在默认路由。在来宾操作系统上正确配置默认路由之前，访问外部目标的尝试将失败。您可以执行以下任一解决方案：
++
+** 手动将子网的网关 IP 添加为虚拟机的默认路由。
++
+** 使用 `managedTap` 绑定：编辑附加子网的 YAML 配置，并验证字段 `.spec.enableDHCP` 是否设置为 `true`。接下来，编辑虚拟机的 YAML 配置，并修改接口定义以使用绑定。
++
+[,yaml]
+----
+interfaces:
+- binding:
+    name: managedtap
+    model: virtio
+    name: default
+----
+
+* Kube-OVN "原生" 负载均衡器尚未集成，因为这需要对上游代码库进行根本性更改。Kube-OVN 目前作为每个集群的主要 CNI 插件。
+
+* 下层网络仍然不可用。因此，您无法将子网直接映射到物理网络，外部主机无法访问位于覆盖子网上的虚拟机。
+
+* 在所有子网中，`natOutgoing` 字段默认设置为 `false`（在默认和自定义 VPC 中均是如此）。只有属于默认 VPC 的子网在您将值更改为 `true` 并配置默认路由后才能访问互联网。在自定义 VPC 中创建的子网在没有 `VpcNatGateway` 支持的情况下无法访问互联网。
+
+* cloud-init 中的静态 IP 对覆盖 NIC 似乎被忽略。在实际操作中，静态 IP 仅在_与 Kube-OVN 为虚拟机预留的确切地址匹配_时才能正常工作。任何其他值都会破坏连接。
+
+* 当多个 NIC 附加且覆盖 NIC 不是主要接口时，您必须在客户操作系统中手动初始化覆盖 NIC（IP 链接设置），并运行 DHCP 客户端（dhclient）命令以获取 NIC 的 IP 地址。
++
+** 对等连接仅在自定义 VPC 之间有效。尝试在默认 VPC 和自定义 VPC 之间建立对等连接将失败。
+** 由 {harvester-product-name} 负载均衡器提供的虚拟机负载均衡器与 Kube-OVN 覆盖网络不兼容。您只能将这些负载均衡器与 VLAN 网络一起使用。
+
+* 集群负载均衡器在 Kube-OVN 覆盖网络上的客户集群中无法正常工作。兼容性问题是由以下原因引起的：
++
+** `Pool` IPAM：Kube-OVN 并不知道负载均衡器的前端 IP 地址是从 {harvester-product-name} 负载均衡器管理的池中分配的。这可能导致 IP 地址冲突。
+** `DHCP` IPAM：即使为 Kube-OVN 子网启用了 DHCP 服务，动态 IP 地址分配也无法正常工作。租约记录由 Kube-OVN 在控制平面上管理。需要集成增强，以使受影响的组件能够正常协同工作。
+
+* Rancher 集成（特别是使用 Harvester 节点驱动程序创建下游集群）仅在默认 VPC 内的 Kube-OVN 覆盖网络上有效。为确保成功创建集群，您必须执行以下操作：
++
+** 为覆盖网络启用 DHCP 服务。您必须设置有效的默认网关。
+** 在集群提供期间，需手动更新底层虚拟机规格，以适配 `managedTap` 绑定接口用于下游集群。

@@ -1,0 +1,146 @@
+= IP-Pool
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+Der IP-Pool ist eine integrierte Lösung zur Verwaltung von IP-Adressen (IPAM), die ausschließlich für {harvester-product-name} Lastenausgleicher (LBs) verfügbar ist.
+
+== Funktionen
+
+* *Mehrere IP-Bereiche:* Jeder IP-Pool kann mehrere IP-Bereiche oder CIDRs enthalten.
+* *Zuweisungshistorie:* Der IP-Pool verfolgt die Zuweisungshistorie jeder IP-Adresse und priorisiert die Zuweisung zuvor zugewiesener Adressen nach dem Namen des Lastenausgleichers.
++
+[,yaml]
+----
+status:
+  allocatedHistory:
+    192.168.178.8: default/rke2-default-lb-pool-2fab9ac0
+----
+
+* *Einsatzbereich:* IP-Pools können auf ein bestimmtes Netzwerk, Projekt, Namespace oder Gast-Cluster beschränkt werden.
+
+== Einen IP-Pool erstellen
+
+. Gehen Sie im {harvester-product-name} UI zu *Netzwerke -> IP-Pools*.
+. Wählen Sie *Erstellen*.
+. Geben Sie einen Namen für den IP-Pool ein.
+. Geben Sie im *Bereich* Tab einen oder mehrere IP-Bereiche an.
++
+image::networking/multiple-ranges.png[Mehrere IP-Bereiche in einem IP-Pool]
+. Geben Sie im *Auswahl* Tab die Prioritätsstufe und den Geltungsbereich (Namespace) des IP-Pools an.
++
+image::networking/ippool-scope.png[Geltungsbereich des IP-Pools]
+
+=== Einen IP-Pool über die Rancher UI erstellen
+
+Wenn Sie den {harvester-product-name} Cluster in {rancher-short-name} importiert haben, können Sie einen IP-Pool über die {rancher-short-name} UI erstellen (*Virtualisierungsmanagement* -> IP-Pool: Erstellen*). Der *Geltungsbereich* Abschnitt im *Auswahl* Tab erfordert, dass Sie das Projekt und den Gast-Kubernetes-Cluster zusätzlich zum Namespace angeben. Für weitere Informationen siehe xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[Multi-Tenancy-Beispiel] und https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[Projekte und Kubernetes-Namensräume mit Rancher].
+
+Ein IP-Pool wird als globale Ressource bezeichnet, wenn der Abschnitt *Geltungsbereich* nur einen Eintrag mit den Feldern *Projekt*, *Namespace* und *Gast-Kubernetes-Cluster* hat, die auf *Alle* gesetzt sind.
+
+== Auswahlrichtlinie
+
+Jeder IP-Pool hat einen spezifischen Bereich, und Sie können die entsprechenden Anforderungen im LB `annotations` angeben. IP-Pools, die die angegebenen Anforderungen erfüllen, weisen automatisch IP-Adressen an LBs zu.
+
+* LBs nutzen die folgenden Annotationen, um Anforderungen auszudrücken (alle Annotationen sind optional):
+ ** `loadbalancer.harvesterhci.io/network` gibt das VM-Netzwerk an, das die Knoten des Gastclusters verwenden.
+ ** `loadbalancer.harvesterhci.io/project` und `loadbalancer.harvesterhci.io/namespace` identifizieren das Projekt und den Namespace der VMs, die den Gast-Cluster bilden.
+ ** `loadbalancer.harvesterhci.io/cluster` bezeichnet den Namen des Gast-Clusters.
+* Der IP-Pool hat einen Selektor, einschließlich Netzwerk und Geltungsbereich, um die Anforderungen des LBs zu erfüllen.
+ ** Netzwerk ist eine harte Bedingung. Der optionale IP-Pool muss mit dem Wert der LB-Annotation `loadbalancer.harvesterhci.io/network` übereinstimmen.
+ ** Jeder IP-Pool, außer dem globalen IP-Pool, hat einen einzigartigen Bereich, der sich von anderen unterscheidet, wenn seine Priorität `0` ist. Das Projekt, der Namespace oder der Clustername von LBs sollte im Geltungsbereich des IP-Pools liegen, wenn sie eine IP aus diesem Pool erhalten möchten.
+* `spec.selector.priority` gibt die Priorität des IP-Pools an. Je größer die Zahl, desto höher die Priorität. Wenn die Priorität nicht `0` ist, sollte der Wert unterschiedlich sein. Die Priorität hilft Ihnen, den alten IP-Pool in den neuen zu migrieren.
+* Wenn der IP-Pool einen Bereich hat, der mit allen Projekten, Namensräumen und Gastclustern übereinstimmt, wird er als globaler IP-Pool bezeichnet, und es ist nur ein globaler IP-Pool erlaubt. Wenn es keinen IP-Pool gibt, der den Anforderungen des LBs entspricht, wird das IPAM eine IP-Adresse aus dem globalen IP-Pool zuweisen, falls dieser existiert.
+
+=== Beispiele
+
+* *Beispiel 1:* Sie möchten einen IP-Pool im Bereich `192.168.100.0/24` für den Namespace `default` einrichten. In diesem Szenario erhalten alle Lastenausgleicher im Namespace `default` eine IP-Adresse aus diesem zugewiesenen IP-Pool:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: default-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.100.0/24
+  selector:
+    scope:
+      namespace: default
+----
+
+* *Beispiel 2:* Sie haben einen Gast-Cluster `rke2` im Netzwerk `default/vlan1` bereitgestellt, und sein `project/namespace` Name ist `product/default`. Wenn Sie einen exklusiven IP-Pool-Bereich `192.168.10.10-192.168.10.20` dafür konfigurieren möchten. Lesen Sie die folgende `YAML` Konfiguration:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: rke2-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.10.0/24
+    rangeStart: 192.168.10.10
+    rangeEnd: 192.168.10.20
+  selector:
+    network: default/vlan1
+    scope:
+    - project: product
+      namespace: default
+      guestCluster: rke2
+----
+
+* *Beispiel 3:* Wenn Sie den IP-Pool `default-ip-pool` für den Namespace `default` angegeben haben, möchten Sie den IP-Pool `default-ip-pool` in einen anderen IP-Pool `default-ip-pool-2` mit dem Bereich `192.168.200.0/24` migrieren. Es ist nicht erlaubt, mehr als einen IP-Pool für denselben Geltungsbereich anzugeben, aber Sie können dem IP-Pool `default-ip-pool-2` eine höhere Priorität als `default-ip-pool` geben. Lesen Sie die folgende `YAML` Konfiguration:
++
+[,yaml]
+----
+  apiVersion: networking.harvesterhci.io/v1beta1
+  kind: IPPool
+  metadata:
+    name: default-ip-pool-2
+  spec:
+    ranges:
+    - subnet: 192.168.200.0/24
+    selector:
+      priority: 1  # The priority is higher than default-ip-pool
+      scope:
+        namespace: default
+----
+
+* *Beispiel 4:* Sie möchten einen globalen IP-Pool mit einem CIDR-Bereich von `192.168.20.0/24` konfigurieren:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
+spec:
+  ranges:
+  - subnet: 192.168.20.0/24
+  selector:
+    scope:
+    - project: "*"
+      namespace: "*"
+      guestCluster: "*"
+----
+
+== Zuteilungsrichtlinie
+
+* Der IP-Pool priorisiert die Zuteilung zuvor zugewiesener IP-Adressen basierend auf ihrer Zuteilungshistorie.
+* IP-Adressen werden in aufsteigender Reihenfolge zugewiesen.
+
+== Best Practices
+
+=== IP-Pool für VM-Typ Lastenausgleicher
+
+* Erstellen Sie einen IP-Pool <<Creating an IP pool,unter Verwendung der {harvester-product-name} UI>>, der die Felder *Projekt* und *Gast-Kubernetes-Cluster* des Geltungsbereichs leer lässt.
+
+* Wenn Sie <<Creating an IP pool using the Rancher UI,die {rancher-short-name} UI>> verwenden müssen, setzen Sie die Felder *Projekt* und *Gast-Kubernetes-Cluster* auf entweder *Alle* oder *Keine*.
+
+=== IP-Pool für Gast-Cluster-Typ Lastenausgleicher
+
+* Erstellen Sie einen IP-Pool <<Creating an IP pool using the Rancher UI,unter Verwendung der {rancher-short-name} UI>>, der es Ihnen ermöglicht, das Zielprojekt und den Gast-Kubernetes-Cluster für eine bessere Ressourcenverwaltung und Isolation anzugeben.
+
+* Seien Sie vorsichtig beim Erstellen globaler IP-Pools. Ein einzelner Gast-Cluster kann den gesamten Pool erschöpfen, sodass andere Cluster keine Dienste bereitstellen können. Darüber hinaus können Sie einen Pool nicht löschen, wenn eine der Adressen noch in Verwendung ist.

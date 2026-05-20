@@ -1,0 +1,102 @@
+= Balanceador de Carga
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+O balanceador de carga Harvester (LB) é um balanceador de carga de camada 4 incorporado que distribui o tráfego de entrada entre as cargas de trabalho implantadas em máquinas virtuais (VMs) Harvester ou clusters Kubernetes convidados.
+
+== Balanceador de carga de VM
+
+=== Recursos
+
+O balanceador de carga de VM Harvester suporta os seguintes recursos:
+
+* *Atribuição de endereço:* Obtenha o endereço IP do LB de um servidor DHCP ou de um pool de IPs pré-definido.
+* *Suporte a protocolo:* Suporta os protocolos TCP e UDP para balanceamento de carga.
+* *Múltiplos escutadores:* Crie múltiplos escutadores para gerenciar o tráfego de entrada em diferentes portas ou com outros protocolos.
+* *Seletor de rótulo:* O LB usa seletores de rótulo para combinar os servidores de backend. Portanto, você deve configurar os rótulos correspondentes para as VMs de backend que deseja adicionar ao LB.
+* *Verificação de saúde:* Envie tráfego apenas para instâncias de backend saudáveis.
+
+=== Limitações
+
+O balanceador de carga de VM Harvester tem as seguintes limitações:
+
+* *Restrição de namespace:* Essa restrição facilita a gestão de permissões e garante que o LB utilize apenas VMs no mesmo namespace que os servidores de backend.
+* *Somente IPv4:* O LB é compatível apenas com endereços IPv4 para VMs.
+* *Instalação do agente convidado:* Instalar o agente convidado em cada VM de backend é necessário para obter endereços IP.
+* *Requisito de Conectividade:* A conectividade de rede deve ser estabelecida entre as VMs de backend e os hosts Harvester. Quando uma VM possui múltiplos endereços IP, o LB selecionará o primeiro como o endereço de backend.
+* *Restrição de Acesso:* O endereço LB da VM é exposto apenas dentro da mesma rede que os hosts Harvester. Para acessar o LB de fora da rede, você deve fornecer uma rota do exterior para o endereço LB.
+
+[NOTE]
+====
+O balanceador de carga da VM Harvester não suporta VMs Windows porque o agente convidado não está disponível para VMs Windows.
+====
+
+
+=== Como criar
+
+Para criar um novo balanceador de carga de VM Harvester:
+
+. Vá para a página **Redes > Balanceadores de Carga** e selecione *Criar*.
+. Selecione o *Namespace* e especifique o *Nome*.
+. Vá para a aba *Básico* para escolher o modo IPAM, que pode ser *DHCP* ou *Pool de IP*. Se você selecionar *Pool de IP*, prepare um pool de IP primeiro, especifique o nome do pool de IP ou escolha *automático*. Se você escolher *automático*, o LB seleciona automaticamente um pool de IP de acordo com xref:./ip-pool.adoc#_selection_policy[a política de seleção do pool de IP].
++
+image::networking/create-lb-01.png[]
+. Vá para a aba *Listeners* para adicionar escutadores. Você deve especificar a *Porta*, *Protocolo* e *Porta de Backend* para cada escutador.
++
+image::networking/create-lb-02.png[]
+. Vá para a aba *Seletor de Servidor de Backend* para adicionar seletores de rótulo. Para adicionar a VM ao LB, vá para a aba **Máquina Virtual > Rótulos da Instância** para adicionar os rótulos correspondentes à VM.
++
+image::networking/create-lb-03.png[]
+. Vá para a aba *Verificação de Saúde* para habilitar a verificação de saúde e especificar os parâmetros, incluindo a *Porta*, *Limite de Sucesso*, *Limite de Falha*, *Intervalo* e *Tempo Limite* se o serviço de backend suportar verificação de saúde. Consulte <<Health Checks>> para obter mais detalhes.
++
+image::networking/create-lb-04.png[]
+
+=== Verificações de saúde
+
+O balanceador de carga Harvester suporta verificações de saúde TCP. Você pode especificar os parâmetros na interface do Harvester se tiver habilitado a opção `Health Check`.
+
+image::networking/health-check.png[]
+
+|===
+| Nome | Tipo de Valor | Obrigatória | Default | Descrição
+
+| Porta de Verificação de Saúde
+| int
+| true
+| N/A
+| Especifica a porta. O verificador acessará o endereço composto pelo IP do servidor de backend e pela porta.
+
+| Limite de Sucesso da Verificação de Saúde
+| int
+| falso
+| 1
+| Especifica o limite de sucesso da verificação de saúde. Desabilitado por padrão. O servidor de backend começará a encaminhar tráfego se o número de vezes que o verificador detecta um endereço com sucesso continuamente atingir o limite.
+
+| Limite de Falha da Verificação de Saúde
+| int
+| falso
+| 3
+| Especifica o limite de falha da verificação de saúde. Desabilitado por padrão. O servidor de backend parará de encaminhar tráfego se o número de falhas na verificação de saúde atingir o limite.
+
+| Período de Verificação de Saúde
+| int
+| falso
+| 5
+| Especifica o período de verificação de saúde em segundos. Desabilitado por padrão.
+
+| Tempo Limite da Verificação de Saúde
+| int
+| falso
+| 3
+| Especifica o tempo limite de cada verificação de saúde em segundos. Desabilitado por padrão.
+|===
+
+== Balanceador de carga do cluster Kubernetes convidado
+
+Em conjunto com o Provedor de Nuvem Harvester, o balanceador de carga Harvester fornece balanceamento de carga para serviços LB no cluster convidado.
+
+image::networking/guest-kubernetes-cluster-lb.png[]
+
+Quando você cria, atualiza ou exclui um serviço LB em um cluster de convidados com o Provedor de Nuvem Harvester, o Provedor de Nuvem Harvester criará automaticamente um LB Harvester.
+
+Para mais detalhes, consulte xref:../integrations/rancher/cloud-provider.adoc[Provedor de Nuvem Harvester].

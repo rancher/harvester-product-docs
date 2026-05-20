@@ -1,0 +1,209 @@
+= VMマイグレーションネットワーク
+:revdate: 2025-09-16
+:page-revdate: {revdate}
+
+VMマイグレーションネットワークは、`mgmt`上のクラスターのトラフィックや他のクラスター全体のワークロードからマイグレーショントラフィックを分離するのに役立ちます。VMマイグレーションネットワークを使用すると、ネットワーク帯域幅とパフォーマンスが向上します。
+
+[NOTE]
+====
+KubeVirtの設定を直接構成することは避けてください。これにより、予期しないまたは望ましくないシステムの動作が発生する可能性があります。
+====
+
+== 前提条件
+
+VMマイグレーションネットワークの構成を開始する前に、以下の要件が満たされていることを確認してください：
+
+* ネットワークスイッチが正しく構成されており、VMマイグレーションネットワークに専用のVLAN IDが割り当てられています。
+
+* xref:networking/cluster-network.adoc[クラスターネットワーク]とxref:networking/vm-network.adoc[VLANネットワーク]が正しく構成されています。両方のネットワークがすべてのノードをカバーし、アクセス可能であることを確認してください。
+
+* マイグレーション中の仮想マシンはありません。
+
+* VMマイグレーションネットワークのIP範囲はIPv4 CIDR形式であり、Kubernetesクラスターのネットワークと衝突したり重複したりしてはいけません。以下のアドレスは予約されています：`10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16`と`10.53.0.0/16`。
+
+=== `vm-migration-network`設定
+
+xref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`]設定では、分離が必要な場合にクラスター内のVMマイグレーショントラフィックを分離するために使用されるネットワークを構成できます。
+
+UIまたはCLIを使用してVMマイグレーションネットワークを有効または無効にできます。設定が有効になっている場合、特定のフィールドを構成してMultus `NetworkAttachmentDefinition` CRDを構築する必要があります。
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+{harvester-product-name} UIを使用して`vm-migration-network`設定を構成することを強くお勧めします。
+====
+
+==== VMマイグレーションネットワークの有効化
+
+. *高度な -> 設定 -> vm-migration-network*に移動します。
+
+. *有効*を選択します。
+
+. Multus `NetworkAttachmentDefinition` CRDを構築するために、*VLAN ID*、*クラスターネットワーク*、*IP範囲*、および*除外*フィールドを構成します。
+
+. ［*保存*］をクリックします。
+
+image::networking/vm-migration-network-enabled.png[VMマイグレーションネットワークが有効]
+
+==== VMマイグレーションネットワークを無効にする
+
+. *高度な設定 > vm-migration-network*に移動します。
+
+. *無効*を選択します。
+
+. ［*保存*］をクリックします。
+
+VMマイグレーションネットワークが無効になると、KubeVirtはVMマイグレーション関連の操作に`mgmt`を使用し始めます。
+
+image::networking/vm-migration-network-disabled.png[VMマイグレーションネットワークが無効]
+--
+
+CLI::
++
+--
+次のコマンドを使用してxref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`]設定を構成できます。
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io vm-migration-network
+----
+
+値フィールドに有効なJSON文字列が含まれている場合、VMマイグレーションネットワークは自動的に有効になります。
+
+例:
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+value: '{"vlan":100,"clusterNetwork":"vm-migration","range":"192.168.1.0/24", "exclude":["192.168.1.100/32"]}'
+----
+
+次の状況ではVMマイグレーションネットワークが無効になります：
+
+* 値フィールドが空です。
++
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: vm-migration-network
+  value: ''
+----
+
+* 値フィールドが削除されました。
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+----
+
+[CAUTION]
+====
+{harvester-product-name}はJSON文字列内の余分な無視できる文字を異なる設定として考慮します。
+====
+--
+======
+
+`vm-migration-network`設定が適用されると、次のことが発生します：
+
+* {harvester-product-name}は新しい`NetworkAttachmentDefinition`を作成し、KubeVirtの設定を更新します。
+* KubeVirtは新しいネットワーク設定を適用するためにすべての`virt-handler`ポッドを再起動します。
+
+=== 設定後の手順
+
+. 次のコマンドを使用して、設定のステータスが`True`であり、タイプが`configured`であることを確認します：
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io vm-migration-network -o yaml
+----
++
+例:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  annotations:
+    vm-migration-network.settings.harvesterhci.io/hash: ec8322fb6b741f94739cbb904fc73c3fda864d6d
+    vm-migration-network.settings.harvesterhci.io/net-attach-def: harvester-system/vm-migration-network-6flk7
+  creationTimestamp: "2025-06-13T06:36:39Z"
+  generation: 51
+  name: vm-migration--network
+  resourceVersion: "154638"
+  uid: 2233ad63-ee52-45f6-a79c-147e48fc88db
+status:
+  conditions:
+  - lastUpdateTime: "2025-06-13T13:05:17Z"
+    reason: Completed
+    status: "True"
+    type: configured
+----
+
+. すべてのKubeVirt `virt-handler`ポッドが準備完了であり、それらのネットワークが正しく設定されていることを確認します。
++
+次のコマンドを使用してポッドの詳細を確認できます：
++
+[,bash]
+----
+kubectl -n harvester-system describe pod <pod-name>
+----
+
+. `k8s.v1.cni.cncf.io/network-status`のアノテーションを確認し、`migration0`という名前のインターフェースが存在することを確認します。このインターフェースのIPアドレスは、指定されたIP範囲内でなければなりません。
++
+次のコマンドを使用して、`virt-handler`ポッドのリストを取得できます。
++
+[,bash]
+----
+kubectl get pods -n harvester-system -l kubevirt.io=virt-handler -o yaml
+----
++
+例:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 004522bc8468ea707038b43813cce2fba144f0e97551d2d358808d57caf7b543
+    cni.projectcalico.org/podIP: 10.52.2.122/32
+    cni.projectcalico.org/podIPs: 10.52.2.122/32
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+        "name": "k8s-pod-network",
+        "ips": [
+            "10.52.2.122"
+        ],
+        "default": true,
+        "dns": {}
+      },{
+        "name": "harvester-system/vm-migration-network-6flk7",
+        "interface": "migration0",
+        "ips": [
+            "10.1.2.1"
+        ],
+        "mac": "c6:30:6f:02:52:3e",
+        "dns": {}
+      }]
+    k8s.v1.cni.cncf.io/networks: vm-migration-network-6flk7@migration0
+Omitted...
+----
+
+== ベストプラクティス
+
+* VMマイグレーションネットワークのために<<Prerequisites,IP範囲>>を設定する際には、割り当てられたIPアドレスがクラスターの将来のニーズに対応できることを確認してください。これは重要です。なぜなら、KubeVirtポッド（`virt-handler`）は、VMマイグレーションネットワークが設定された後に新しいノードがクラスターに追加されると停止し、必要なIPの数が割り当てられたIPを超えると停止するからです。問題を解決するには、正しいIP範囲でVMマイグレーションネットワークを再構成する必要があります。
+
+* VMマイグレーションネットワークを非`mgmt`クラスターのネットワーク上に設定して、KubernetesコントロールプレーンのトラフィックからVMマイグレーショントラフィックを完全に分離してください。`mgmt`を使用することは可能ですが、コントロールプレーンネットワークのパフォーマンスに対するリソースと帯域幅の競合という悪影響があるため、お勧めできません。クラスターにNIC関連の制約があり、トラフィックを完全に分離できる場合にのみ`mgmt`を使用してください。

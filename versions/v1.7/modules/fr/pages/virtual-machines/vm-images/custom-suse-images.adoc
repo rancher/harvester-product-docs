@@ -1,0 +1,117 @@
+= Images de machines virtuelles SUSE personnalisées
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+SUSE fournit https://www.suse.com/download/sles/[SUSE Linux Enterprise (SLE)] et https://get.opensuse.org/leap/[openSUSE Leap] des images de machines virtuelles adaptées à une utilisation dans {harvester-product-name}. Ces images sont construites sur le https://build.opensuse.org/[openSUSE Build Service] (OBS) en utilisant l'outil de création d'images https://osinside.github.io/kiwi/[Kiwi], et peuvent être utilisées immédiatement après le téléchargement.
+
+Dans la plupart des cas, vous pouvez utiliser les images qcow2 _Minimal VM Cloud_ car elles incluent l'outil cloud-init nécessaire à la configuration automatique de la machine virtuelle. D'autres variantes d'images nécessitent que vous vous connectiez à la console de la machine virtuelle et que vous effectuiez ensuite la configuration initiale.
+
+[IMPORTANT]
+====
+Les images _Minimal VM Cloud_ étaient nommées _Minimal VM OpenStack Cloud_ dans les versions antérieures à SLES 15 SP5 et openSUSE 15.5.
+====
+
+== Utilisation de l'openSUSE Build Service (OBS)
+
+Vous pouvez créer des images personnalisées en utilisant les https://build.opensuse.org/image_templates[modèles d'image] d'OBS de SUSE, qui sont des configurations d'image Kiwi préconfigurées. Par exemple, si vous souhaitez utiliser d'autres paquets avec SLE 15 SP7, vous pouvez créer une image en utilisant le modèle _SLE 17 SP5 Minimal_. OBS fournit une interface pour ajouter des paquets et construit automatiquement l'image, que vous pouvez télécharger puis téléverser sur {harvester-product-name}. Pour plus d'informations, consultez le https://openbuildservice.org/help/manuals/obs-user-guide/[Guide de l'utilisateur OBS].
+
+=== 1. Créez une image personnalisée basée sur un modèle existant.
+
+. Allez sur https://build.opensuse.org/image_templates.. Vous devez vous connecter à votre compte openSUSE pour accéder aux ressources.
+. Sélectionnez le modèle que vous souhaitez utiliser.
+. Spécifiez un nom pour l'image, puis sélectionnez *Créer une appliance*.
++
+image::advanced/custom-vm-01-select-template.png[]
++
+OBS construit automatiquement l'image. Par défaut, l'interface affiche l'onglet *Vue d'ensemble*, qui contient des informations telles que le nombre de paquets inclus et l'état de la construction.
++
+image::advanced/custom-vm-02-image-overview.png[]
+
+=== 2. Sélectionnez les profils d'image et ajoutez des paquets.
+
+. Allez à l'onglet *Logiciel*.
+. Sélectionnez les profils d'image que vous souhaitez que OBS construise.
++
+[IMPORTANT]
+====
+Dans la plupart des cas, vous pouvez utiliser les images qcow2 _Minimal VM Cloud_ car elles incluent l'outil cloud-init nécessaire à la configuration automatique de la machine virtuelle. D'autres variantes d'images nécessitent que vous vous connectiez à la console de la machine virtuelle et que vous effectuiez ensuite la configuration initiale.
+====
++
+image::advanced/custom-vm-03-image-software.png[]
+
+. (Optionnel) Ajouter et supprimer des paquets.
++
+image::advanced/custom-vm-04-image-software-packages.png[]
++
+image::advanced/custom-vm-05-image-software-add-package.png[]
+
+=== 3. (Optionnel) Passer en mode _Voir le paquet_.
+
+Le mode _Voir le paquet_ offre un contrôle plus granulaire sur la configuration. Pour basculer, cliquez sur l'icône _Voir le paquet_ dans la barre de navigation.
+
+image::advanced/custom-vm-06-view-package.png[]
+
+La section *Fichiers sources* de l'onglet *Vue d'ensemble* montre tous les fichiers qui composent votre modèle Kiwi. Vous pouvez modifier n'importe quel fichier en sélectionnant le nom de fichier correspondant.
+
+image::advanced/custom-vm-07-view-package-details.png[]
+
+=== 4. (Optionnel) Éditer le fichier de configuration `Minimal.kiwi`.
+
+Sélectionnez le nom de fichier pour ouvrir l'éditeur de texte. La section `<packages type="image">` liste les paquets à installer. Vous pouvez spécifier des paquets supplémentaires pour chaque profil d'image.
+
+Par défaut, le profil d'image _Cloud_ (`<package type="image" profiles="Cloud">`) installe le paquet _kernel-default-base_. Dans l'exemple suivant, ce paquet est remplacé par _kernel-default_, qui inclut les modules nécessaires pour le support iSCSI.
+
+image::advanced/custom-vm-08-edit-kiwi-config.png[]
+
+=== 5. Attendez qu'OBS termine la construction de l'image.
+
+Une fois le processus terminé, la section *Résultats de construction* de l'onglet *Vue d'ensemble* affiche le statut _réussi_.
+
+image::advanced/custom-vm-09-build-succeeded.png[]
+
+La section *Résultats de construction* contient également un lien de téléchargement pour la nouvelle image.
+
+image::advanced/custom-vm-10-binaries-link.png[]
+
+image::advanced/custom-vm-11-binaries-download.png[]
+
+=== 6. Activez la publication pour partager l'image.
+
+Pour permettre au public de télécharger votre image personnalisée, allez à l'onglet *Dépôts* de votre projet OBS et activez l'option _Publier_.
+
+image::advanced/custom-vm-12-project-publish-repositories.png[]
+
+Votre image est publiée à https://download.opensuse.org/ (sous `repositories/home:/YOUR_USER_NAME:/branches:/SUSE:/Templates:/Images:/`).
+
+image::advanced/custom-vm-13-download.openuse.org.png[]
+
+== Utilisation de l'outil de ligne de commande Kiwi
+
+En alternative au service de construction openSUSE, vous pouvez créer des images localement en utilisant l'outil de ligne de commande Kiwi. Pour plus d'informations sur l'outil, voir https://documentation.suse.com/appliance/kiwi-9/html/kiwi/index.html[Construire des appareils système Linux avec KIWI Next Generation (KIWI NG)].
+
+Pour créer des images personnalisées, vous devez d'abord télécharger le fichier `Minimal.kiwi`, ainsi que les scripts `config.sh` et `editbootinstall_rpi.sh` du projet correspondant sur OBS.
+
+|===
+| Système d'exploitation | Projet openSUSE Build Service
+
+| SLE 15 SP7
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP7:GA/kiwi-templates-Minimal
+
+| SLE 15 SP6
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP6:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.6
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.6/kiwi-templates-Minimal
+
+| SLE 15 SP5
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP5:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.5
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.5/kiwi-templates-Minimal
+
+| SLE 15 SP4
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP4:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.4
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.4/kiwi-templates-Minimal
+|===

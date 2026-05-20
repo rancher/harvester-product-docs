@@ -1,0 +1,102 @@
+= Lastenausgleich
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Der Harvester-Lastausgleich (LB) ist ein integrierter Layer-4-Lastausgleich, der den eingehenden Datenverkehr auf Arbeitslasten verteilt, die auf Harvester-virtuellen Maschinen (VMs) oder Gast-Kubernetes-Clustern bereitgestellt sind.
+
+== VM-Lastausgleich
+
+=== Funktionen
+
+Der Harvester-VM-Lastausgleich unterstützt die folgenden Funktionen:
+
+* *Adresszuweisung:* Erhalten Sie die LB-IP-Adresse von einem DHCP-Server oder einem vordefinierten IP-Pool.
+* *Protokollunterstützung:* Unterstützt sowohl TCP- als auch UDP-Protokolle für den Lastausgleich.
+* *Mehrere Listener:* Erstellen Sie mehrere Listener, um eingehenden Datenverkehr auf verschiedenen Ports oder mit anderen Protokollen zu verarbeiten.
+* *Label-Selector:* Der LB verwendet Label-Selector, um die Backend-Server zuzuordnen. Daher müssen Sie die entsprechenden Labels für die Backend-VMs konfigurieren, die Sie zum LB hinzufügen möchten.
+* *Zustandsprüfung:* Leiten Sie nur Datenverkehr an gesunde Backend-Instanzen weiter.
+
+=== Nutzungsbeschränkungen
+
+Der Harvester-VM-Lastausgleich hat die folgenden Einschränkungen:
+
+* *Namespace-Beschränkung:* Diese Einschränkung erleichtert das Berechtigungsmanagement und stellt sicher, dass der LB nur VMs im selben Namespace wie die Backend-Server verwendet.
+* *Nur IPv4:* Der LB ist nur mit IPv4-Adressen für VMs kompatibel.
+* *Installation des Gast-Agenten:* Die Installation des Gast-Agenten auf jeder Backend-VM ist erforderlich, um IP-Adressen zu erhalten.
+* *Anforderungen an die Konnektivität:* Die Netzwerkverbindung muss zwischen den Backend-VMs und den Harvester-Hosts hergestellt werden. Wenn eine VM mehrere IP-Adressen hat, wählt der LB die erste als Backend-Adresse aus.
+* *Zugriffsrestriktion:* Die VM-LB-Adresse ist nur innerhalb desselben Netzwerks wie die Harvester-Hosts sichtbar. Um von außerhalb des Netzwerks auf den LB zuzugreifen, müssen Sie eine Route von außen zur LB-Adresse bereitstellen.
+
+[NOTE]
+====
+Der Harvester-VM-Lastausgleich unterstützt keine Windows-VMs, da der Gast-Agent für Windows-VMs nicht verfügbar ist.
+====
+
+
+=== Anleitung
+
+Um einen neuen Harvester-VM-Lastausgleich zu erstellen:
+
+. Gehen Sie zur Seite **Netzwerke > Lastausgleich** und wählen Sie *Erstellen* aus.
+. Wählen Sie den *Namespace* aus und geben Sie den *Namen* an.
+. Gehen Sie zum Tab *Basis*, um den IPAM-Modus auszuwählen, der *DHCP* oder *IP-Pool* sein kann. Wenn Sie *IP-Pool* auswählen, bereiten Sie zuerst einen IP-Pool vor, geben Sie den Namen des IP-Pools an oder wählen Sie *auto* aus. Wenn Sie *auto* wählen, wählt der LB automatisch einen IP-Pool gemäß xref:./ip-pool.adoc#_selection_policy[der IP-Pool-Auswahlrichtlinie] aus.
++
+image::networking/create-lb-01.png[]
+. Gehen Sie zum Tab *Listener*, um Listener hinzuzufügen. Sie müssen den *Port*, *Protokoll* und *Backend-Port* für jeden Listener angeben.
++
+image::networking/create-lb-02.png[]
+. Gehen Sie zum Tab *Backend-Server-Auswahl*, um Label-Selektoren hinzuzufügen. Um die VM zum LB hinzuzufügen, gehen Sie zum **Virtuelle Maschine > Instanz-Labels** Tab, um die entsprechenden Labels zur VM hinzuzufügen.
++
+image::networking/create-lb-03.png[]
+. Gehen Sie zum *Zustandsprüfung* Tab, um die Zustandsprüfung zu aktivieren und die Parameter anzugeben, einschließlich des *Ports*, *Erfolgsgrenze*, *Fehlergrenze*, *Intervall* und *Zeitüberschreitung*, falls der Backend-Dienst die Zustandsprüfung unterstützt. Weitere Informationen finden Sie in <<Health Checks>>.
++
+image::networking/create-lb-04.png[]
+
+=== Zustandsprüfungen
+
+Der Harvester-Lastausgleich unterstützt TCP-Zustandsprüfungen. Sie können die Parameter in der Harvester-Benutzeroberfläche angeben, wenn Sie die `Health Check` Option aktiviert haben.
+
+image::networking/health-check.png[]
+
+|===
+| Name | Werttyp | required | Standard | Beschreibung
+
+| Zustandsprüfungsport
+| int
+| true
+| Nicht zutreffend
+| Gibt den Port an. Der Prüfer wird auf die Adresse zugreifen, die aus der IP des Backend-Servers und dem Port besteht.
+
+| Zustandsprüfungs-Erfolgsgrenze
+| int
+| false
+| 1
+| Gibt die Erfolgsgrenze der Zustandsprüfung an. Standardmäßig deaktiviert. Der Backend-Server beginnt, den Datenverkehr weiterzuleiten, wenn die Anzahl der erfolgreichen Erkennungen durch den Prüfer die Grenze erreicht.
+
+| Zustandsprüfungs-Fehlergrenze
+| int
+| false
+| 3
+| Gibt die Fehlergrenze der Zustandsprüfung an. Standardmäßig deaktiviert. Der Backend-Server wird den Datenverkehr beenden, wenn die Anzahl der Fehler bei der Zustandsprüfung die Grenze erreicht.
+
+| Zustandsprüfungszeitraum
+| int
+| false
+| 5
+| Gibt den Zeitraum der Zustandsprüfung in Sekunden an. Standardmäßig deaktiviert.
+
+| Zustandsprüfungs-Zeitüberschreitung
+| int
+| false
+| 3
+| Gibt die Zeitüberschreitung jeder Zustandsprüfung in Sekunden an. Standardmäßig deaktiviert.
+|===
+
+== Lastausgleich für den Gast-Kubernetes-Cluster
+
+In Verbindung mit dem Harvester-Cloud-Anbieter bietet der Harvester-Lastausgleich Lastausgleich für LB-Dienste im Gast-Cluster.
+
+image::networking/guest-kubernetes-cluster-lb.png[]
+
+Wenn Sie einen LB-Dienst in einem Gast-Cluster mit dem Harvester-Cloud-Anbieter erstellen, aktualisieren oder löschen, wird der Harvester-Cloud-Anbieter automatisch einen Harvester-LB erstellen.
+
+Für weitere Details siehe xref:../integrations/rancher/cloud-provider.adoc[Harvester Cloud Provider].

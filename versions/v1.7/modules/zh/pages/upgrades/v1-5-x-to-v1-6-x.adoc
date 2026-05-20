@@ -1,0 +1,285 @@
+= 从 v1.5.x 升级到 v1.6.x
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+== 一般信息
+
+每当有新的可升级版本 {harvester-product-name} 可用时，*升级* 按钮会出现在 *仪表板* 屏幕上。有关更多信息，请参见 xref:./upgrades.adoc#_start_an_upgrade[开始升级]。
+
+运行 v1.5.x 的集群可以直接升级到 v1.6.x，因为 {harvester-product-name} 允许对底层组件进行最多一次小版本升级。v1.5.0、v1.5.1 和 v1.5.2 使用相同的小版本 {rke2-short-name} (v1.32)，而 v1.6.0 和 v1.6.1 使用下一个小版本 (v1.33)。有关更多信息，请参见 xref:upgrades/upgrades.adoc#_upgrade_paths)[升级路径]。
+
+[NOTE]
+====
+只有受到 https://github.com/harvester/harvester/releases/tag/v1.5.2[发布说明] 中列出的 Bug 修复部分影响的客户必须安装 v1.5.2。
+====
+
+有关在隔离环境中升级 {harvester-product-name} 的信息，请参见 xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[准备隔离升级]。
+
+=== 在 {rancher-product-name} v2.12 上更新 Harvester UI 扩展。
+
+您必须使用兼容版本 (v1.6.x) 的 Harvester UI 扩展，以便在 {rancher-short-name} v2.12 上导入 {harvester-product-name} v1.6.x 集群。
+
+. 在 {rancher-short-name} UI 上，转到 *本地 -> 应用 -> 仓库*。
+
+. 找到名为 *harvester* 的储存库，然后选择 *⋮ -> 刷新*。
+
+. 转到 *扩展* 屏幕。
+
+. 找到名为 *Harvester* 的扩展，然后单击 *更新*。
+
+. 选择一个兼容版本，然后单击 *更新*。
+
+. 允许一些时间来更新扩展，然后刷新屏幕。
+
+== 已知问题
+
+=== 升级卡在 "预排水" 状态。
+
+在某些情况下，实例管理器可能无法清理引擎实例，即使引擎 CR 的状态已更改为 "已停止"。升级过程卡在 "预排水" 状态，因为实例管理器 pod 在相应的 PodDisruptionBudget (PDB) 仍然存在时无法被删除。
+
+解决方法是在确保所有卷都健康后删除实例管理器 PDB。
+
+相关问题： https://github.com/harvester/harvester/issues/8977[#8977] 和 https://github.com/longhorn/longhorn/issues/11605[#11605]
+
+=== 客户集群卡在“更新”状态
+
+在{harvester-product-name}升级后，{rke2-short-name}客户集群可能会卡在“更新”状态。在 {harvester-product-name} UI 上显示以下错误消息：
+
+[,shell]
+----
+Configuring etcd node(s) rke2-pool1-xdvfc-qf4vb: Node condition MemoryPressure is Unknown. Node condition DiskPressure is Unknown. Node condition PIDPressure is Unknown. Node condition Ready is Unknown, waiting for probes: calico, etcd, kube-apiserver, kube-controller-manager
+----
+
+当客户节点的IP地址在升级后发生变化时，会导致etcd故障，从而出现此问题。很可能底层虚拟机已重启多次，并从DHCP服务器获取了新的IP地址。
+
+为了解决此问题，请执行以下步骤：
+
+. 在 {rancher-short-name} UI 上，从客户集群中删除导致错误的节点。
+. 在 {harvester-product-name} UI 上，检查底层虚拟机的状态。
+. 如有必要，重启虚拟机。
+
+虚拟机被去除，客户集群尝试创建一个新节点。一旦节点创建，客户集群的状态将变为“活动”。
+
+相关问题： https://github.com/harvester/harvester/issues/8950[#8950]
+
+=== 停止的虚拟机卡在“启动”状态
+
+在实时迁移后，{longhorn-product-name}卷可能在“分离中”和“已分离”状态之间波动。由于卷未准备好，相关的虚拟机无法完全启动。
+
+解决方法是使用以下命令清除卷的`status.currentMigrationNodeID`：
+
+```
+kubectl patch -n longhorn-system volume <volume> \
+  --type=merge \
+  --subresource status \
+  -p '{"status":{"currentMigrationNodeID":""}}'
+```
+
+相关问题： https://github.com/harvester/harvester/issues/8949[#8949] 和 https://github.com/longhorn/longhorn/issues/11479[#11479]
+
+=== 由于网络设置错误，节点卡在“等待重启”状态
+
+如果满足以下条件，节点可能在升级过程中卡在 `Waiting Reboot` 状态：
+
+* 最初安装了 {harvester-product-name} v1.2.1 或更早版本，并且节点逐步升级。
+* 在 `vlan_id``install.management_interface` 设置中，字段要么设置为 `1`，要么为空。
+
+该问题是由于网络设置错误引起的，节点日志中的消息 `yaml: line did not find expected key` 表明了这一点。
+
+在升级过程中，`/oem/90_custom.yaml` 文件被更新以反映 v1.5.x 行为的变化，该版本将 VLAN 2–4094 添加到 `mgmt-br` 和 `mgmt-bo`。该文件中的两个脚本（`/etc/wicked/scripts/setup_bond.sh` 和 `/etc/wicked/scripts/setup_bridge.sh`）如果使用 `sed` 生成的格式，可能会被 `gopkg.in/yaml.v2` 操作截断，而该格式在 1.2.2 之前的 {harvester-product-name} 版本的安装程序中使用。`sed` 操作会删除行 `bridge vlan add vid 2-4094 dev $INTERFACE`。此截断问题不会影响使用 `gopkg.in/yaml.v3` 生成的格式的脚本。
+
+以下是 `/oem/90_custom.yaml` 文件中 `/etc/wicked/scripts/setup_bond.sh` 脚本的内容：
+
+* 从 `gopkg.in/yaml.v2` 生成：
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpost-up)\n\t\t#
+inherit MAC address\n\t\tip link set dev mgmt-br address $(ip -json link show
+dev $INTERFACE | jq -j '.[0][\"address\"]')\n\n\t\t# accept all vlan, PVID=1
+by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE\n\t\t;;\n\nesac\n"
+```
+----
+
+* 从 `gopkg.in/yaml.v3` 生成：
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        post-up)
+                # inherit MAC address
+                ip link set dev mgmt-br address $(ip -json link show dev $INTERFACE | jq -j '.[0]["address"]')
+                #accept all vlan,PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE
+                ;;
+esac
+----
+
+以下是 `/oem/90_custom.yaml` 文件中 `/etc/wicked/scripts/setup_bridge.sh` 脚本的内容：
+
+* 从 `gopkg.in/yaml.v2` 生成：
++
+[,shell]
+----
+"#!/bin/sh\n\nACTION=$1\nINTERFACE=$2\n\ncase $ACTION in\n\tpre-up)\n\t\t#
+enable vlan-aware\n\t\tip link set dev $INTERFACE type bridge vlan_filtering 1\n\t\t\t;;\n\n\tpost-up)\n\t\t#
+accept all vlan, PVID=1 by default\n\t\tbridge vlan add vid 2-4094 dev $INTERFACE
+self\n\t\tbridge vlan add vid 2-4094 dev mgmt-bo\n\t\t;;\n\nesac\n"
+----
+
+* 从 `gopkg.in/yaml.v3` 生成：
++
+[,shell]
+----
+#!/bin/sh
+ACTION=$1
+INTERFACE=$2
+case $ACTION in
+        pre-up)
+               #enable vlan-aware
+               ip link set $INTERFACE type bridge vlan_filtering 1
+               ;;
+        post-up)
+                #accept all vlan, PVID=1 by default
+                bridge vlan add vid 2-4094 dev $INTERFACE self
+                bridge vlan add vid 2-4094 dev mgmt-bo
+                ;;
+esac
+----
+
+解决方法是替换过时的脚本内容。使用从 `gopkg.in/yaml.v3` 生成的 `/oem/90_custom.yaml` 文件中的脚本。一旦脚本更新，升级将恢复。
+
+相关问题： https://github.com/harvester/harvester/issues/9033[#9033]
+
+=== 在 `mgmt` 集群网络的次级 VLAN 接口上丢失网络连接。
+
+{harvester-product-name} v1.6.0 引入了一项更改，以减少不必要的 VLAN 配置。之前，所有次级 VLAN 接口都连接到 `mgmt-br` 桥接和 `mgmt-bo` 接口。现在，仅连接所需的 VLAN 接口。因此，当集群升级到 v1.6.x 时，所有之前连接到 `mgmt-br` 和 `mgmt-bo` 的次级 VLAN 接口将从管理主机中移除。
+
+[WARNING]
+====
+依赖这些接口的工作负载将失去网络连接。
+
+有关更多信息，请参见 https://github.com/harvester/harvester/issues/7650[问题 #7650]。
+====
+
+在升级到 v1.6.x 后，请执行以下步骤：
+
+. 通过在管理主机上运行以下命令，验证附加到 `mgmt-br` 和 `mgmt-bo` 的 VLAN：
++
+[,shell]
+----
+bridge vlan show
+----
++
+此命令仅输出 `mgmt-br` 和 `mgmt-bo` 的主要 VLAN。
+
+. 通过将以下命令添加到 `/oem/90_custom.yaml` 文件，手动将所需的次级 VLAN 添加到 `mgmt-br` 桥接和 `mgmt-bo` 接口：
++
+** `/etc/wicked/scripts/setup_bond.sh` 部分
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE
+----
++
+** `/etc/wicked/scripts/setup_bridge.sh` 部分
++
+[,shell]
+----
+bridge vlan add vid <vlan-id> dev $INTERFACE self
+bridge vlan add vid <vlan-id> dev mgmt-bo
+----
++
+[IMPORTANT]
+====
+您必须为每个不同的 VLAN ID 包含一个单独的命令。确保将 `vlan-id` 占位符替换为实际 ID。
+====
+
+. 一旦更新了 `/oem/90_custom.yaml` 文件，请重启管理主机。
+
+. 通过在主机上运行以下命令，验证所有所需的 VLAN 是否已添加：
++
+[,shell]
+----
+bridge vlan show
+----
+
+==== 升级场景示例
+
+在以下示例中，v1.5.x 集群最初安装了一个 xref:installation-setup/config/configuration-file.adoc#_install_management_interface[主要 VLAN 接口]（VLAN ID: `2021`）。要添加一个次级 VLAN 接口（VLAN ID: `2113`），在管理主机上创建了 `/oem/99_vlan-ifcfg.yaml` 文件，内容如下：
+
+[,yaml]
+----
+stages:
+  initramfs:
+    - name: "Host VLAN interface mgmt-br.353"
+      files:
+        - path: /etc/sysconfig/network/ifcfg-mgmt-br.2113
+          owner: 0
+          group: 0
+          permissions: 384
+          content: |
+            STARTMODE='onboot'
+            BOOTPROTO='static'
+            IPADDR='10.255.113.150/24'
+            VLAN_ID='2113'
+            ETHERDEVICE='mgmt-br'
+            VLAN='yes'
+            DEFROUTE='no'
+----
+
+通常的期望是在 `mgmt` 接口（`mgmt-br.2113`）上创建一个额外的 VLAN 子接口，并分配一个 IPv4 地址。此外，预计在集群升级到 v1.6.x 后，此子接口和主要接口（`mgmt-br.2021`）都将用于 L3 连接。
+
+实际上，在升级到 v1.6.0 后，创建了 VLAN 子接口，但次级 VLAN（VLAN ID: `2113`）从 `mgmt-br` 桥接和 `mgmt-bo` 接口中移除。重启后，只有主要 VLAN ID 被分配给 `mgmt-br` 桥接和 `mgmt-bo` 接口（使用 `/oem/90_custom.yaml` 文件）。
+
+为了减轻此更改的影响，您必须执行 <<Network connectivity lost on secondary VLAN interfaces on the `mgmt` cluster network,前一部分>> 中描述的解决方法。这涉及识别次级 VLAN 接口，然后将必要的接口添加到 `mgmt-br` 桥接和 `mgmt-bo` 接口。
+
+=== 运行的虚拟机显示 `Restart action is required` 消息
+
+在以下情况下，{harvester-product-name} UI 可能会为某些正在运行的虚拟机显示消息 `Restart action is required for the virtual machine configuration change to take effect`：
+
+* {harvester-product-name} 从 v1.5.x 升级到 v1.6.x。
+* Harvester UI 扩展已更新至 v1.6.x。
+* {harvester-product-name} 集群已导入到 {rancher-short-name} v2.12.x。
+
+您必须重启虚拟机以应用配置更改并清除消息。
+
+该消息出现是因为 {harvester-product-name} v1.6.0 及更高版本的 UI 展示了 `RestartRequired` 条件，而此前该条件仅在虚拟机的 YAML 配置中可见。这种可见性对于例如处理器和内存热插拔等功能至关重要，这些功能涉及的配置更改仅在虚拟机重启后生效。
+
+引入 `RestartRequired` 条件是为了处理由传统 MAC 地址同步方法引起的状态不匹配。在 v1.6.0 之前的版本中，KubeVirt 控制器在创建过程中会自动将虚拟机实例的 MAC 地址回写到规范中。这确保了 MAC 地址在重启时保持一致。然而，由于在虚拟机处于活动状态时修改了规范，控制器添加了`RestartRequired`条件以表明需要手动重启以同步状态。
+
+=== 虚拟机无法实时迁移到目标节点。
+
+在升级到v1.6.x后，一些虚拟机可能会保持在_待重启_状态。这些虚拟机在重启之前无法实时迁移到指定的目标节点。
+
+解决方法是重启虚拟机。一旦重启，后续的节点特定实时迁移将正常工作。
+
+相关问题： https://github.com/harvester/harvester/issues/9739[#9739]
+
+=== `cpu-feature.node.kubevirt.io/ipred-ctrl=true`功能在升级期间出现。
+
+Harvester实时迁移虚拟机以确保节点升级期间零停机时间。如果您的集群使用以下任何处理器型号，您可能会注意到在升级进行时出现临时功能标志（`cpu-feature.node.kubevirt.io/ipred-ctrl=true`）。
+
+* Intel(R) Xeon(R) Gold 5418Y
+* Intel(R) Xeon(R) Silver 4509Y
+
+虽然此功能标志在升级后会自动从节点中移除，但相应的节点选择器仍保留在虚拟机配置中。虚拟机的需求与节点的标签之间的不匹配导致后续的实时迁移失败。
+
+为了解决此问题，请在_升级开始之前_执行以下任一操作：
+
+* *选项 1：* https://harvesterhci.io/kb/setup_common_cpu_model_for_vm_live_migration[为虚拟机配置一个通用的处理器型号]。
+
+* *选项 2：*通过 https://kubevirt.io/user-guide/compute/virtual_hardware/#labeling-nodes-with-cpu-models-cpu-features-and-machine-types[向节点添加`node-labeller.kubevirt.io/skip-node`注释]来停止 KubeVirt 标签器，然后在升级后去除该注释。虽然更复杂，但如果虚拟机无法重启，此选项是有用的。有关更多信息，请参见 https://harvesterhci.io/kb/troubleshooting_vm_scheduling_issues_nodeselector[Troubleshooting VM Live Migration Issues Caused by Node Selectors]。
+
+=== 次级 Pod 接口的默认 VLAN 行为发生变化。
+
+在 v1.6.0 及更早版本中，具有次级网络接口（如 VM 网络和存储网络）的 Pod 会自动分配到 VLAN ID 1 和 VLAN 网络中配置的 VLAN ID。这种双 VLAN ID 配置允许{harvester-product-name}网络桥将未标记的流量转发到这些 Pod 的 veth 接口。
+
+这种行为在 v1.6.1 中发生了变化，该版本使用了 v1.8.0 的 CNI 桥接插件。次级 Pod 接口现在仅与分配给 VM 网络的 VLAN ID 相关联。由于不再添加 VLAN ID 1，网络桥无法将未标记的流量转发到这些接口。
+
+如果外部交换机端口配置为发送未标记帧的接入端口，则此更改会影响从 v1.5.x 升级到 v1.6.1 的集群。更新外部交换机配置以使用干线端口可以解决此问题。与未标记网络连接或与 VLAN ID 1 相关联的次级接口的 Pod 不受影响。
+
+相关问题： https://github.com/harvester/harvester/issues/8816[#8816]

@@ -1,0 +1,46 @@
+= Clústeres de un solo nodo
+:revdate: 16/07/2025
+:page-revdate: {revdate}
+
+{harvester-product-name} admite clústeres de un solo nodo para implementaciones que pueden tolerar menor resiliencia o requieren recursos mínimos de despliegue inicial. Puedes crear clústeres de un solo nodo utilizando los métodos de instalación estándar (xref:/installation-setup/methods/iso-install.adoc[ISO], xref:/installation-setup/methods/usb-install.adoc[USB] y xref:/installation-setup/methods/pxe-boot-install.adoc[arranque PXE]).
+
+Los clústeres de un solo nodo admiten la mayoría de las características de {harvester-product-name}, incluida la creación de clústeres RKE2 y actualizaciones de nodos (con algunas limitaciones). Sin embargo, este tipo de despliegue tiene las siguientes desventajas clave:
+
+* Sin alta disponibilidad: Los errores y actualizaciones que requieren reiniciar el nodo causan tiempo de inactividad a las máquinas virtuales en ejecución.
+* Sin migración en vivo y soporte de cero tiempo de inactividad durante las actualizaciones.
+
+== Requisitos previos
+
+Antes de comenzar a desplegar tu clúster de un solo nodo, asegúrate de que se cumplan los siguientes requisitos.
+
+* Hardware: xref:/installation-setup/requirements.adoc#_hardware_requirements[Utiliza hardware de clase servidor] con recursos suficientes para ejecutar {harvester-product-name} y una carga de trabajo de producción. No se admiten portátiles ni virtualización anidada.
+* Red: xref:/installation-setup/requirements.adoc#_port_requirements_for_nodes[Configura los puertos] según el tipo de tráfico que se transmitirá entre las máquinas virtuales.
+
+== Número de réplicas de la StorageClass por defecto
+
+{harvester-product-name} utiliza StorageClasses para describir cómo {longhorn-product-name} debe aprovisionar volúmenes. Cada StorageClass tiene un parámetro que define el número de réplicas que se crearán para cada volumen.
+
+La StorageClass por defecto `harvester-longhorn` tiene un valor de número de réplicas de *3* para alta disponibilidad. Si utilizas `harvester-longhorn` en tu clúster de un solo nodo, {longhorn-product-name} no puede crear el número por defecto de réplicas, y los volúmenes se marcan como _Degradados_ en la pantalla de *Volúmenes* de la interfaz de usuario.
+
+Para evitar este problema, puedes realizar cualquiera de las siguientes acciones:
+
+* Cambia el xref:/installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[número de réplicas] de `harvester-longhorn` a *1* utilizando un xref:/installation-setup/config/configuration-file.adoc[archivo de configuración].
+* xref:/storage/storageclass.adoc#_creating_a_storageclass[Crea una nueva StorageClass] con el parámetro *Número de réplicas* establecido en *1*. Una vez creado, localiza la nueva StorageClass en la lista y luego selecciona *⋮* > *Establecer como predeterminado*.
+
+== Múltiples réplicas en un nodo con múltiples discos
+
+{longhorn-product-name} crea solo una réplica para cada volumen, incluso si el nodo tiene múltiples discos, porque *Replica Hard Anti-Affinity* está habilitado por defecto. Cuando ya existe una réplica saludable en un nodo, se impide que el planificador asigne nuevas réplicas del mismo volumen en dicho nodo.
+
+En clústeres de alta disponibilidad, *Replica Hard Anti-Affinity* asegura la redundancia del volumen. Sin embargo, este mismo mecanismo puede causar que los volúmenes se degraden en clústeres de un solo nodo (ya que no hay otros nodos disponibles para la programación de nuevas réplicas).
+
+Si deseas que {longhorn-product-name} cree múltiples réplicas en un nodo con múltiples discos, realiza los siguientes pasos:
+
+. Habilitar https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_node_level_soft_anti_affinity[`Replica Node Level Soft Anti-Affinity`]: Cuando esta configuración está habilitada, {longhorn-product-name} planifica nuevas réplicas en nodos con réplicas saludables existentes del mismo volumen.
+. Deshabilitar https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_disk_level_soft_anti_affinity[`Replica Disk Level Soft Anti-Affinity`]: Cuando esta configuración está deshabilitada, {longhorn-product-name} no planifica nuevas réplicas en discos con réplicas saludables existentes del mismo volumen. Deshabilitar esta configuración proporciona tolerancia a fallos para discos en clústeres de un solo nodo.
+. (Opcional) xref:../storage/storageclass.adoc#_creating_a_storageclass[Crear una nueva StorageClass] y especificar las etiquetas de disco que deben coincidir durante la programación de volúmenes.
+
+== Actualizaciones y Mantenimiento
+
+Los clústeres de un solo nodo no admiten xref:/virtual-machines/live-migration.adoc[Live Migration], por lo que las máquinas virtuales quedan indisponibles durante las actualizaciones del clúster. {harvester-product-name} apaga de forma forzada todas las máquinas virtuales antes de iniciar el proceso de actualización. Puedes configurar {harvester-product-name} para restaurar automáticamente las máquinas virtuales en ejecución utilizando la opción `restoreVM` de la configuración xref:/installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`].
+
+Habilitar el xref:/hosts/hosts.adoc#_node_maintenance[modo de mantenimiento] tampoco es posible porque esa operación depende de la funcionalidad de Live Migration, y {harvester-product-name} no puede colocar el único plano de control en modo de mantenimiento.

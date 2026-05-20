@@ -1,0 +1,83 @@
+= Problemas de Rancher
+:revdate: 2025-05-15
+:page-revdate: {revdate}
+
+== Recopilación de registros del clúster de invitados
+
+Puedes recopilar registros del clúster de invitados y archivos de configuración. Realiza los siguientes pasos en cada nodo del clúster de invitados:
+
+. Inicia sesión en el nodo.
+
+. Descarga el script de recopilación de registros de Rancher v2.x para Linux y genera un paquete de registros utilizando los siguientes comandos:
++
+----
+curl -OLs https://raw.githubusercontent.com/rancherlabs/support-tools/master/collection/rancher/v2.x/logs-collector/rancher2_logs_collector.sh
+sudo bash rancher2_logs_collector.sh
+----
++
+La salida del script indica la ubicación del tarball generado.
+
+Para más información, consulta https://www.suse.com/support/kb/doc/?id=000020191[El script de recopilación de registros de Rancher v2.x para Linux].
+
+== Importación de clústeres de Harvester en Rancher
+
+Después de que se configure el `cluster-registration-url` en Harvester, se crea una ampliación llamada `cattle-system/cattle-cluster-agent` para la importación del clúster de Harvester en Rancher.
+
+=== Importación pendiente debido a error de `unable to read CA file`
+
+Los siguientes mensajes de error en los registros del pod `cattle-cluster-agent-*` indican que el clúster de Harvester no puede ser importado en Rancher.
+
+[,console]
+----
+2025-02-13T17:25:22.520593546Z time="2025-02-13T17:25:22Z" level=info msg="Rancher agent version v2.10.2 is starting"
+2025-02-13T17:25:22.529886868Z time="2025-02-13T17:25:22Z" level=error msg="unable to read CA file from /etc/kubernetes/ssl/certs/serverca: open /etc/kubernetes/ssl/certs/serverca: no such file or directory"
+2025-02-13T17:25:22.529924542Z time="2025-02-13T17:25:22Z" level=error msg="Strict CA verification is enabled but encountered error finding root CA"
+----
+
+La causa raíz es la configuración ineficaz de la opción `agent-tls-mode` de Rancher, que controla cómo los agentes de Rancher (`cluster-agent`, `fleet-agent` y `system-agent`) validan el certificado de Rancher al establecer una conexión. El valor predeterminado de esta opción depende de la versión de Rancher y del tipo de instalación.
+
+|===
+| Tipo | Versiones | Valor por defecto
+
+| instalación nueva.
+| v2.8
+| `system-store`
+
+| instalación nueva.
+| v2.9 y posteriores
+| `strict`
+
+| Actualización
+| v2.8 a v2.9
+| `system-store`
+|===
+
+Puedes configurar esta opción para que se ajuste a tus requisitos realizando los siguientes pasos:
+
+. Inicia sesión en la interfaz de usuario de Rancher.
+
+. Vaya a *Configuración Global -> Ajustes*.
+
+. Seleccione *modo-tls-agente*, y luego seleccione *⋮ -> Editar opción* para acceder a las opciones de configuración.
++
+image::troubleshooting/rancher-global-setting-agent-tls-mode.png[]
+
+. Seleccione uno de los siguientes valores:
++
+* *Estricto*: Los agentes de Rancher solo confían en los certificados generados por la Autoridad de Certificación (CA) especificada en la configuración `cacerts`. Esta es la opción TLS predeterminada recomendada.
++
+La opción *Estricto* habilita un nivel más alto de seguridad al requerir que Rancher tenga acceso a la CA que generó el certificado visible para los agentes. En el caso de ciertas configuraciones de certificados (notablemente, certificados externos), esto no es automático, y *se requiere configuración adicional*. Para más información sobre escenarios que requieren configuración adicional, consulte https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/install-rancher.html#_3_choose_your_ssl_configuration[Elija su Configuración SSL] en la documentación de Rancher.
++
+* *Almacén del sistema*: Los agentes de Rancher confían en cualquier certificado generado por una CA pública especificada en el almacén de confianza del sistema operativo. Utilice esta opción si su instalación utiliza una autoridad de confianza externa y no tiene propiedad sobre la Autoridad de Certificación.
++
+[IMPORTANT]
+====
+Usar la opción *Almacén del sistema* implica que el agente confía en todas las autoridades externas encontradas en el almacén de confianza del sistema operativo, incluidas aquellas fuera del control del usuario.
+====
+
+. Haga clic en *Guardar*.
+
+Problemas relacionados:
+
+- Harvester: https://github.com/harvester/harvester/issues/7105[#7105] y https://github.com/harvester/harvester/issues/7284[#7284]
+- Rancher: https://github.com/rancher/rancher/issues/45628[#45628] (Vea https://github.com/rancher/rancher/issues/45628#issuecomment-2246152604[este comentario].)

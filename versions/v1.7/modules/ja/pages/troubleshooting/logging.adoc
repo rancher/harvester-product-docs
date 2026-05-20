@@ -1,0 +1,104 @@
+= ログの問題
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== `rancher-logging` アドオンの有効化に失敗しました
+
+=== 問題の説明
+
+`rancher-logging`アドオンを有効にしようとすると、{harvester-product-name} UI にエラーメッセージが表示されます。
+
+image::troubleshooting/failed-to-enable-rancher-logging-addon.png[rancher-logging アドオンの有効化に失敗しました]
+
+`cattle-logging-system/helm-install-rancher-logging` ポッドからのログメッセージは、エラーが発生したことを確認しています。
+
+例:
+
+[,shell]
+----
+...
+ echo 'Installing helm chart'
+...
++ helm install --version ... rancher-logging rancher-logging/rancher-logging ...
+...
+Error: INSTALLATION FAILED: Unable to continue with install: ClusterRole "logging-admin" in namespace "" exists
+and cannot be imported into the current release: invalid ownership metadata;
+annotation validation error: key "meta.helm.sh/release-name" must equal "rancher-logging":
+current value is "hvst-upgrade-md54b-upgradelog-operator"
+----
+
+image::troubleshooting/logging-installation-failure-due-to-conflict.png[競合による rancher-logging インストールエラー]
+
+=== 根本原因
+
+`rancher-logging` アドオンを有効にすると、{harvester-product-name} が https://kube-logging.dev/docs/#overview[Logging Operator] をインストールしようとします。クラスターにオペレーターが既に存在する場合、インストールに失敗します。これは、以前のアップグレード試行から残ったリソース、または現在進行中のアップグレードによって作成されたものである可能性があります。
+
+*ソフトウェアのアップグレード* 画面には、*ログの有効化* オプションが含まれており、{harvester-product-name} がアップグレードイベントを記録するために選択する必要があります。ただし、バックグラウンドプロセスは `rancher-logging` アドオンが有効になっているかどうかに依存します。
+
+image::troubleshooting/upgrade-with-enable-logging.png[アップグレード中にログが有効になりました]
+
+アドオンが無効になっている場合、Upgrade Controllerは次の `logging` および `managedchart` オブジェクトを作成します。
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-hpfnw   36s
+
+$ kubectl get logging -A
+NAME                                          LOGGINGREF             CONTROLNAMESPACE
+hvst-upgrade-hpfnw-upgradelog-infra           harvester-upgradelog   harvester-system        // newly created by upgrade controller
+hvst-upgrade-hpfnw-upgradelog-operator-root                          cattle-logging-system   // newly created by upgrade controller, acts as logging-operator
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                                     AGE
+fleet-local   hvst-upgrade-hpfnw-upgradelog-operator   18s  // newly created by upgrade controller
+----
+
+アドオンが有効になっている場合、Upgrade Controllerは次の `logging` オブジェクトを作成します。
+
+[,shell]
+----
+$ kubectl get upgrade.harvesterhci -A
+NAMESPACE          NAME                 AGE
+harvester-system   hvst-upgrade-9sn4x   14s
+
+$ kubectl get managedchart -A
+NAMESPACE     NAME                     AGE
+
+$ kubectl get logging -A
+NAME                                  LOGGINGREF                     CONTROLNAMESPACE
+hvst-upgrade-9sn4x-upgradelog-infra   harvester-upgradelog           harvester-system        // newly created by upgrade controller
+rancher-logging-kube-audit            harvester-kube-audit-log-ref   cattle-logging-system   // originally created by rancher-logging addon
+rancher-logging-root                                                 cattle-logging-system   // originally created by rancher-logging addon, acts as logging-operator
+----
+
+次の状況で問題が発生する可能性があります：
+
+* `rancher-logging` アドオンは最初は無効になっています。*ログの有効化* オプションを選択してアップグレードを開始します。アップグレードが完了するのを待たずに、`rancher-logging` アドオンを有効にします。{harvester-product-name} UI にエラーメッセージを表示します。
+
+* `rancher-logging` アドオンは最初は無効になっています。アップグレードは *ログの有効化* オプションが選択された状態で開始し、アップグレードが完了するまで待ちます。`managedchart` および `logging` オブジェクトは https://github.com/harvester/harvester/issues/7654[既知の問題] のために削除されません。次に、`rancher-logging` アドオンを有効にします。{harvester-product-name} UI にエラーメッセージを表示します。
+
+=== 解決策
+
+. アップグレードが進行中の場合は、成功裏に完了するか削除されるまで待ちます。
++
+[IMPORTANT]
+====
+ログ記録の競合を避けるために、アップグレードが進行中の間は `rancher-logging` アドオンを有効または無効にしないでください。このアクションは {harvester-product-name} v1.7.0 以降のバージョンでブロックされています。
+====
+
+. `rancher-logging` アドオンが有効で失敗状態の場合は、それを無効にしてください。
+
+. `logging` および `managedchart` オブジェクトを確認してください。これらのオブジェクトの名前が `hvst-upgrade-` で始まる場合は、手動で削除してください。
+
+. `rancher-logging` アドオンを有効にしてください。
+
+[NOTE]
+====
+すべてのアドオンは、アップグレードを開始する前に正常な状態でなければなりません。この前提条件は {harvester-product-name} v1.7.0 以降のバージョンで自動的に検証されます。
+====
+
+=== 関連する問題
+
+https://github.com/harvester/harvester/issues/9289[#9289]および https://github.com/harvester/harvester/issues/9644[#9644]

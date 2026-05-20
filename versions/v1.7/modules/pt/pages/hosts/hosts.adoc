@@ -1,0 +1,714 @@
+= Gerenciamento de Host
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+Os usuários podem visualizar e gerenciar nós {harvester-product-name} a partir da página do host. O primeiro nó sempre é definido como um nó de gerenciamento do cluster. Quando há três ou mais nós, os dois outros nós que se juntaram primeiro são automaticamente promovidos a nós de gerenciamento para formar um cluster HA.
+
+[NOTE]
+====
+Como {harvester-product-name} é construído sobre Kubernetes e usa etcd como seu banco de dados, a tolerância máxima a falhas de nó é um quando há três nós de gerenciamento.
+====
+
+image::host/host.png[host.png]
+
+{harvester-product-name} reserva recursos de CPU para operações em nível de sistema, razão pela qual o número total de cores indicado na coluna *CPU* é ligeiramente menor do que o número real de cores em cada host. Para mais informações, consulte xref:virtual-machines/cpu-pinning.adoc#_calculation_of_shared_cpu_pool[Cálculo do pool de CPU compartilhado].
+
+== Manutenção de Nó
+
+Os usuários administradores podem habilitar o Modo de Manutenção (selecione *⋮ > Habilitar Modo de Manutenção*) para expulsar automaticamente todas as máquinas virtuais de um nó. Este modo utiliza xref:virtual-machines/live-migration.adoc#_automatically_triggered_batch_migration[migração em lote] para mover as xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[máquinas virtuais migráveis ao vivo] para outros nós, o que é útil quando você precisa reiniciar, atualizar o firmware ou substituir componentes de hardware. São necessários pelo menos dois nós ativos para usar este recurso.
+
+xref:../virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[Máquinas virtuais não migráveis] podem impedir que o nó ative o Modo de Manutenção. Quando isso ocorre, você deve identificar e desligar manualmente essas máquinas virtuais. Para mais informações, consulte xref:../virtual-machines/live-migration.adoc[Migração ao Vivo].
+
+Para forçar VMs individuais a desligar em vez de migrar para outros nós, adicione o rótulo `harvesterhci.io/maintain-mode-strategy` e um dos seguintes valores a essas VMs:
+
+* `Migrate`: Migra a VM ao vivo para outro nó no cluster. Este é o comportamento padrão se o rótulo `harvesterhci.io/maintain-mode-strategy` não estiver definido.
+* `ShutdownAndRestartAfterEnable`: Reinicia a VM após o nó mudar para o modo de manutenção. A VM é agendada em um nó diferente.
+* `ShutdownAndRestartAfterDisable`: Desliga a VM quando o modo de manutenção está habilitado e reinicia a VM quando o modo de manutenção está desabilitado. A VM permanece no mesmo nó.
+* `Shutdown`: Desliga a VM quando o modo de manutenção está habilitado. A VM permanece desligada em vez de reiniciar.
+
+Você pode forçar um desligamento coletivo de todas as VMs em um nó na tela *Habilitar Modo de Manutenção*. Isso desabilita configurações individuais usando o rótulo `harvesterhci.io/maintain-mode-strategy`.
+
+Para executar um comando especial antes de desligar uma VM, considere usar o https://kubernetes.io/docs/concepts/containers/container-lifecycle-hooks/#container-hooks[gancho de ciclo de vida do contêiner] `PreStop`.
+
+image::host/node-maintenance.png[node-maintenance.png]
+
+== Isolando um Nó
+
+Nós isolados são marcados como não agendáveis. Isolar é útil quando você deseja impedir que novas cargas de trabalho sejam agendadas em um nó. Você pode desisolar um nó para torná-lo agendável novamente.
+
+image::host/cordon-nodes.png[cordon-node.png]
+
+== Removendo um Nó
+
+[CAUTION]
+====
+Antes de remover um nó de um {harvester-product-name} cluster, determine se os nós restantes têm recursos computacionais e de armazenamento suficientes para assumir a carga de trabalho do nó a ser removido. Verifique o seguinte:
+
+* Uso atual de recursos no cluster (na tela *Hosts* da interface {harvester-product-name})
+* Capacidade dos nós restantes de manter réplicas suficientes para todos os volumes
+
+Se os nós restantes não tiverem recursos suficientes, as VMs podem falhar ao migrar e os volumes podem se degradar quando você remover um nó.
+====
+
+=== 1. Verifique se o nó pode ser removido do cluster.
+
+Você pode remover com segurança um nó de plano de controle dependendo da quantidade e disponibilidade de outros nós no cluster.
+
+* O cluster tem três nós de plano de controle e um ou mais nós de trabalho.
++
+Quando você remove um nó de plano de controle, um nó de trabalho será promovido a nó de plano de controle. {harvester-product-name} permite que você atribua um papel a cada nó que ingressa em um cluster. Em versões anteriores, nós de trabalho eram selecionados aleatoriamente para promoção. Se você preferir promover nós específicos, consulte <<Role Management,Gerenciamento de Papéis>> e xref:../installation-setup/config/configuration-file.adoc#_install_role[Arquivo de Configuração] para mais informações.
++
+[NOTE]
+====
+A promoção automática de nós ocorre apenas quando um nó do plano de controle é removido do cluster. Isso não inclui situações em que um nó se torna indisponível devido a falhas nas verificações de saúde. O nó não saudável mantém seu papel.
+====
+
+* O cluster tem três nós do plano de controle e nenhum nó de trabalho.
++
+Você deve adicionar um novo nó ao cluster antes de remover um nó do plano de controle. Isso garante que o cluster sempre tenha três nós do plano de controle e que um quórum possa ser formado mesmo que um nó do plano de controle falhe.
+
+* O cluster tem apenas dois nós do plano de controle e nenhum nó de trabalho.
++
+Remover um nó do plano de controle nesta situação não é recomendado porque os dados do etcd não são replicados em um cluster de nó único. A falha de um único nó pode fazer com que o etcd perca seu quórum e desligue o cluster.
+
+=== 2. Verifique o status dos volumes.
+
+. Acesse a xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[interface {longhorn-product-name} incorporada].
+. Vá para a tela *Volume*.
+. Verifique se o estado de todos os volumes é *Saudável*.
+
+=== 3. Expulse as réplicas do nó a ser removido.
+
+. Acesse a xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[interface {longhorn-product-name} incorporada].
+. Vá para a tela *Nó*.
+. Selecione o nó que você deseja remover, clique no ícone na coluna *Operação* e, em seguida, selecione *Editar nó e discos*.
+. Defina as seguintes configurações:
+ ** *Agendamento de Nós*: Selecione *Desativar*.
+ ** *Expulsão Solicitada*: Selecione *Verdadeiro*.
+. Clique em *Salvar*.
+. Volte para a tela *Nó* e verifique se o valor de *Réplicas* para o nó a ser removido é *0*.
+
+[IMPORTANT]
+====
+A expulsão não pode ser concluída se os nós restantes não puderem aceitar réplicas do nó a ser removido. Nesse caso, alguns volumes permanecerão no estado *Degradado* até que você adicione mais nós ao cluster.
+====
+
+=== 4. Gerenciar Máquinas Virtuais não migráveis
+
+Verifique se há alguma xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[máquina virtual não migrável].
+
+[TIP]
+====
+* Crie um backup ou instantâneo para cada máquina virtual não migrável.
+* Você pode remover os volumes/dispositivos específicos do nó e os seletores de nó para permitir que as máquinas virtuais sejam agendadas em outros nós. 
++
+NOTE: Como o nó atual será removido, as máquinas virtuais não salvas/não migradas serão perdidas.
+* Pare manualmente as máquinas virtuais não migráveis restantes.
+====
+
+=== 5. Expulse as cargas de trabalho do nó a ser removido.
+
+Você pode habilitar o <<Node Maintenance,Modo de Manutenção>> no nó para migrar automaticamente VMs e cargas de trabalho ao vivo. Você também pode xref:../virtual-machines/live-migration.adoc#_starting_a_migration[migrar ao vivo manualmente] VMs para outros nós.
+
+Todas as cargas de trabalho foram expelidas com sucesso se o estado do nó for *Manutenção*.
+
+image::host/node-maintain-completed.png[node-maintain-completed.png]
+
+[IMPORTANT]
+====
+Se um cluster tiver apenas dois nós do plano de controle, {harvester-product-name} não permite que você habilite o Modo de Manutenção em nenhum nó. Você pode drenar manualmente o nó a ser removido usando o seguinte comando:
+
+----
+kubectl drain <node_name> --force --ignore-daemonsets --delete-local-data --pod-selector='app!=csi-attacher,app!=csi-provisioner'
+----
+
+Novamente, remover um nó do plano de controle nesta situação é *não recomendado* porque os dados do etcd não são replicados. A falha de um único nó pode fazer com que o etcd perca seu quórum e desligue o cluster.
+====
+
+=== 6. Exclua os serviços RKE2 e desligue o nó.
+
+. Faça login no nó usando a conta root.
++
+. Execute o script `/opt/rke2/bin/rke2-uninstall.sh` para excluir os serviços RKE2 em execução no nó.
++
+. Desligue o nó.
+
+=== 7. Remova o nó.
+
+. Na interface, vá para a tela **Hosts**.
++
+. Localize o nó que você deseja remover e clique em **⋮ -> Remover**.
++
+image::host/delete-node.png[]
+
+[NOTE]
+====
+Há um https://github.com/harvester/harvester/issues/1497[problema conhecido] sobre a exclusão forçada de nós.
+Uma vez resolvido, você pode pular esta etapa.
+====
+
+== Gerenciamento de Função
+
+Problemas de hardware podem forçá-lo a substituir o nó de gerenciamento. {harvester-product-name} melhora o processo ao introduzir os seguintes papéis:
+
+* *Gerenciamento*: Permite que um nó seja priorizado quando {harvester-product-name} promove nós a nós de gerenciamento.
+* *Testemunha*: Restringe um nó a ser um nó testemunha (funciona apenas como um nó etcd) em um cluster específico.
+* *Trabalhador*: Restringe um nó a ser um nó de trabalho (nunca promovido a nó de gerenciamento) em um cluster específico.
+
+[CAUTION]
+====
+{harvester-product-name} atualmente permite apenas um nó testemunha no cluster.
+====
+
+Para mais informações sobre a atribuição de papéis a nós, veja xref:../installation-setup/methods/iso-install.adoc[Instalação ISO].
+
+== Gerenciamento de múltiplos discos
+
+=== Adicionar Discos Adicionais
+
+Os usuários podem visualizar e adicionar vários discos como volumes de dados adicionais na página de edição do host.
+
+. Vá para a página *Hosts*.
+. No nó que você deseja modificar, clique em *⋮ -> Editar Configuração*.
++
+image::host/multidisk-mgmt-01.png[Editar Configuração]
+
+. Selecione a aba *Armazenamento* e clique em *Adicionar Disco*.
++
+image::host/multidisk-mgmt-02.png[Adicionar Discos]
++
+[CAUTION]
+====
+{harvester-product-name} não suporta a adição de partições como discos adicionais. Se você quiser adicioná-lo como um disco adicional, certifique-se de excluir todas as partições primeiro (por exemplo, usando `fdisk`).
+====
+
+. Selecione um provisionador para o disco.
++
+** *LonghornV1 (CSI)*: Este é o provisionador padrão.
++
+image::host/multidisk-mgmt-03.png[Provisioner LonghornV1]
++
+Você deve definir *Forçar Formatação* como *Sim* se o dispositivo de bloco nunca foi formatado forçadamente.
++
+image::host/multidisk-mgmt-08.png[Forçar Formatação]
++
+** *LVM*: Selecione este provisionador se você quiser usar xref:../add-ons/lvm-local-storage.adoc[] para criar volumes persistentes para suas cargas de trabalho.
++
+image::host/multidisk-mgmt-05.png[Provisionador LVM]
+
+. Clique em *Salvar*.
+
+. Na tela de detalhes do host, verifique se os discos foram adicionados e se o provisionador correto foi definido.
++
+Você também pode adicionar <<Storage Tags,tags de armazenamento>> se quiser que os dados do volume {longhorn-product-name} sejam armazenados em nós ou discos específicos. As tags de armazenamento só podem ser usadas com os provisionadores *LonghornV1 (CSI)* e *LonghornV2 (CSI)*.
++
+image::host/multidisk-mgmt-06.png[Tag de disco 01]
++
+image::host/multidisk-mgmt-07.png[Tag de disco 02]
+
+[NOTE]
+====
+Para que {harvester-product-name} identifique os discos, cada disco precisa ter um https://en.wikipedia.org/wiki/World_Wide_Name[WWN] único. Caso contrário, {harvester-product-name} se recusará a adicionar o disco.
+Se o seu disco não tiver um WWN, você pode formatá-lo com o sistema de arquivos `EXT4` para ajudar {harvester-product-name} a reconhecer o disco.
+====
++
+[NOTE]
+====
+Se você estiver testando {harvester-product-name} em um ambiente QEMU, precisará usar o QEMU v6.0 ou posterior. Versões anteriores do QEMU sempre gerarão o mesmo WWN para emulação de discos NVMe. Isso fará com que {harvester-product-name} não adicione os discos adicionais, conforme explicado acima. No entanto, você ainda pode adicionar um disco virtual com o controlador SCSI. As informações do WWN podem ser adicionadas manualmente junto com a operação de anexação do disco. Para mais detalhes, consulte o https://github.com/harvester/vagrant-rancherd/blob/2782981b6017754d016f5b72d630dff4895f7ad6/scripts/attach-disk.sh#L75[script].
+====
+
+=== Tags de Armazenamento
+
+O recurso de tags de armazenamento permite que apenas certos nós ou discos sejam usados para armazenar dados do volume {longhorn-product-name}. Por exemplo, dados sensíveis a desempenho podem usar apenas os discos de alto desempenho que podem ser marcados como `fast`, `ssd` ou `nvme`, ou apenas os nós de alto desempenho marcados como `baremetal`.
+
+Este recurso suporta tanto discos quanto nós.
+
+==== Configuração
+
+As tags podem ser configuradas através da interface {harvester-product-name} na página do host:
+
+. Clique em `Hosts` \-> `Edit Config` \-> `Storage`
+. Clique em `Add Host/Disk Tags` para começar a digitar e pressione enter para adicionar novas tags.
+. Clique em `Save` para atualizar as tags.
+. Na página xref:../storage/storageclass.adoc[StorageClasses], crie uma nova classe de armazenamento e selecione aquelas tags definidas nos campos `Node Selector` e `Disk Selector`.
+
+Todos os volumes agendados existentes no nó ou disco não serão afetados pelas novas tags.
+
+[NOTE]
+====
+Quando várias tags são especificadas para um volume, o disco e os nós (a que o disco pertence) devem ter todas as tags especificadas para se tornarem utilizáveis.
+====
+
+=== Remover discos
+
+Antes de remover um disco, você deve primeiro expulsar as réplicas {longhorn-product-name} no disco.
+
+[NOTE]
+====
+Os dados da réplica seriam reconstruídos em outro disco automaticamente para manter a alta disponibilidade.
+====
+
+==== Identifique o disco a ser removido
+
+. Vá para a página *Hosts*.
+. No nó contendo o disco, selecione o nome do nó e vá para a aba *Storage*.
+. Encontre o disco que você deseja remover. Vamos supor que queremos remover `/dev/sdb`, e o ponto de montagem do disco é `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04`.
+
+image::host/remove-disks-harvester-find-disk.png[Encontre o disco para remover]
+
+==== Expulsar réplicas ({longhorn-product-name} painel)
+
+. Por favor, siga xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[esta sessão] para habilitar o painel {longhorn-product-name} incorporado.
+. Visite o painel {longhorn-product-name} e vá para a página *Nó*.
+. Expanda o nó que contém o disco. Confirme que o ponto de montagem `/var/lib/harvester/extra-disks/1b805b97eb5aa724e6be30cbdb373d04` está na lista de discos.
++
+image::host/remove-disks-longhorn-nodes.png[Verifique o disco a ser removido]
+
+. Selecione *Editar nó e discos*.
++
+image::host/remove-disks-longhorn-nodes-edit.png[Editar nó e discos]
+
+. Role até o disco que você deseja remover.
+ ** Defina `Scheduling` como `Disable`.
+ ** Defina `Eviction Requested` como `True`.
+ ** Selecione *Salvar*. Não selecione o ícone de excluir.
++
+image::host/remove-disks-longhorn-nodes-evict-disk.png[Expulsar disco]
+
+. O disco será desativado. Por favor, aguarde até que a contagem de réplicas do disco se torne `0` para prosseguir com a remoção do disco.
++
+image::host/remove-disks-longhorn-wait-replicas.png[Aguarde as réplicas]
+
+==== Remover disco.
+
+. Vá para a página *Hosts*.
+. No nó contendo o disco, selecione *⋮ -> Editar Config*.
+. Vá para a aba *Storage* e selecione *x* para remover o disco.
++
+image::host/remove-disks-harvester-remove.png[Remover disco]
+
+. Selecione *Salvar* para remover o disco.
+
+== Restrições de Distribuição de Topologia
+
+https://kubernetes.io/docs/concepts/scheduling-eviction/topology-spread-constraints/#node-labels[Rótulos de nó] são usados para identificar os domínios de topologia em que cada nó está. Você pode configurar rótulos como https://kubernetes.io/docs/reference/labels-annotations-taints/#topologykubernetesiozone[`topology.kubernetes.io/zone`] na interface {harvester-product-name}.
+
+. Vá para *Hosts*.
++
+. Selecione o nó de destino e, em seguida, selecione *⋮ -> Editar Config*.
++
+. Na aba *Rótulos*, clique em *Adicionar Rótulo* e, em seguida, especifique o rótulo `topology.kubernetes.io/zone` e um valor.
++
+. Clique em *Salvar*.
+
+O rótulo é sincronizado automaticamente com o nó correspondente {longhorn-product-name}.
+
+== Hugepages
+
+Hugepages melhoram a gestão de memória no Linux ao permitir que o kernel aloque memória em blocos significativamente maiores do que o padrão de 4 KB. Tamanhos de página maiores melhoram a eficiência ao reduzir o tempo de CPU necessário para o kernel Linux processar alocações de memória. Isso, por sua vez, pode aumentar o desempenho geral do sistema.
+
+Existem dois tipos de hugepages:
+
+* Persistente ou estática: Pré-alocada com base em parâmetros de inicialização do kernel relevantes ou configurações de {harvester-product-name}.
+* Anônima ou transparente: Alocada e desalocada automaticamente pelo kernel Linux.
+
+Você pode visualizar informações sobre a alocação atual de hugepages para cada nó.
+
+. Na interface {harvester-product-name}, vá para a tela *Hosts*.
+
+. Clique no nó alvo e, em seguida, selecione a aba *Hugepages*.
+
+As informações na aba *Hugepages* estão divididas em duas seções:
+
+* *Meminfo*: Mostra a quantidade total de memória em uso para hugepages anônimas (transparentes), o tamanho padrão de hugepage e detalhes sobre hugepages persistentes (estáticas).
++
+O campo *Anonymous Hugepages (bytes)* geralmente mostra um valor grande, refletindo a RAM utilizada automaticamente pelo kernel Linux para hugepages transparentes.
++
+Por outro lado, o campo *Total Hugepages*, que representa hugepages alocadas estaticamente, geralmente permanece em `0`. No entanto, se o Longhorn V2 Data Engine estiver habilitado, esse valor muda para `1024`.
+
+* *Transparent Hugepages*: Mostra as configurações atuais de hugepages transparentes.
++
+A tabela a seguir descreve as opções e valores padrão para cada configuração:
++
+|===
+| Opção | Valores Suportados | Valor Padrão
+
+| *Habilitado*
+| `Always`, `Madvise`, `Never`
+| `Always`
+
+| *Shared Memory Enabled*
+| `Always`, `Within Size`, `Advise`, `Never`, `Deny`, `Force`
+| `Never`
+
+| *Defragmentation*
+| `Always`, `Defer`, `Defer+Madvise`, `Madvise`, `Never`
+| `Madvise`
+|===
++
+Você pode modificar essas configurações para cada nó selecionando *⋮ -> Editar Config* e, em seguida, clicando na aba *Hugepages*.
++
+Para mais informações sobre as opções, consulte https://docs.kernel.org/admin-guide/mm/transhuge.html[Suporte a Hugepage Transparente] na documentação do kernel Linux.
+
+== Modo Ksmtuned
+
+Ksmtuned é uma ferramenta de automação KSM implantada como um DaemonSet para executar Ksmtuned em cada nó. Ele iniciará ou parará o KSM monitorando a proporção percentual de memória disponível (*ou seja, Coeficiente de Limite*). Por padrão, você precisa habilitar manualmente o Ksmtuned em cada interface de usuário do nó. Você poderá ver as estatísticas do KSM na interface de usuário do nó após 1-2 minutos. (verifique https://www.kernel.org/doc/html/latest/admin-guide/mm/ksm.html#ksm-daemon-sysfs-interface[KSM] para mais detalhes).
+
+=== Execução Rápida
+
+. Vá para a página *Hosts*.
+. No nó que você deseja modificar, clique em *⋮ -> Editar Config*.
+. Selecione a aba *Ksmtuned* e selecione *Executar* em *Estratégia de Execução*.
+. (Opcional) Você pode modificar *Coeficiente de Limite* conforme necessário.
++
+image::host/edit-ksmtuned.png[Editar Ksmtuned]
+
+. Clique em *Salvar* para atualizar.
+. Aguarde cerca de 1-2 minutos e você pode verificar suas *Estatísticas* clicando na aba *Seu Nó -> Ksmtuned*.
++
+image::host/view-ksmtuned-statistics.png[Ver Estatísticas do Ksmtuned]
+
+=== Parâmetros
+
+*Estratégia de Execução:*
+
+* *Parar:* Parar o Ksmtuned e o KSM. As VMs ainda podem usar páginas de memória compartilhada.
+* *Execute:* Executar o Ksmtuned.
+* *Podar:* Parar o Ksmtuned e podar páginas de memória do KSM.
+
+*Coeficiente de Limite*: configura a proporção percentual de memória disponível. Se a memória disponível for menor que o Coeficiente de Limite, o KSM será iniciado; caso contrário, o KSM será parado.
+
+*Mesclar Entre Nós:* especifica se páginas de diferentes nós NUMA podem ser mescladas.
+
+*Modo:*
+
+* *Normal:* O modo padrão. O nó de controle ksmd usa cerca de 20% de uma única CPU. Ele usa os seguintes parâmetros:
+
+[,yaml]
+----
+Boost: 0
+Decay: 0
+Maximum Pages: 100
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Alto desempenho:* O nó ksmd usa de 20% a 100% de uma única CPU e tem maior eficiência de varredura e mesclagem. Ele usa os seguintes parâmetros:
+
+[,yaml]
+----
+Boost: 200
+Decay: 50
+Maximum Pages: 10000
+Minimum Pages: 100
+Sleep Time: 20
+----
+
+* *Personalizado:* Você pode personalizar a configuração para alcançar o desempenho que deseja.
+
+Ksmtuned usa os seguintes parâmetros para controlar a eficiência do KSM:
+
+|===
+| Parâmetros | Descrição
+
+| Aumentar a
+| O número de páginas escaneadas é incrementado a cada vez se a memória disponível for menor que o *Coeficiente de Limite*.
+
+| Decaimento
+| O número de páginas escaneadas é decrementado a cada vez se a memória disponível for maior que o *Coeficiente de Limite*.
+
+| Páginas Máximas
+| Número máximo de páginas por varredura.
+
+| Páginas Mínimas
+| O número mínimo de páginas por varredura, também a configuração para a primeira execução.
+
+| Tempo de Espera (ms)
+| O intervalo entre duas varreduras, que é calculado com a fórmula (*Tempo de Espera* * 16*1024*1024 / Memória Total). Mínimo: 10ms.
+|===
+
+*Por exemplo, suponha que você tenha um nó de memória de 512GiB que usa os seguintes parâmetros:*
+
+[,yaml]
+----
+Boost: 300
+Decay: 100
+Maximum Pages: 5000
+Minimum Pages: 1000
+Sleep Time: 50
+----
+
+Quando o Ksmtuned inicia, inicializa `pages_to_scan` no KSM para 1000 (*Páginas Mínimas*) e define `sleep_millisecs` para 10 (50 * 16 * 1024 * 1024 / 536870912 KiB < 10).
+
+O KSM começa quando a memória disponível cai abaixo do *Coeficiente de Limite*. Se detectar que está em execução, `pages_to_scan` incrementa em 300 (*Impulso*) a cada minuto até atingir 5000 (*Páginas Máximas*).
+
+O KSM irá parar quando a memória disponível estiver acima do *Coeficiente de Limite*. Se detectar que está parado, `pages_to_scan` decrementa em 100 (*Decaimento*) a cada minuto até atingir 1000 (*Páginas Mínimas*).
+
+== Configuração do NTP
+
+A sincronização de tempo é um aspecto importante da arquitetura de cluster distribuído. Por causa disso, {harvester-product-name} fornece uma maneira mais simples de configurar as definições do NTP.
+
+{harvester-product-name} suporta a configuração do NTP na tela de Configurações da UI {harvester-product-name} (*Avançado* > *Configurações*). Você pode configurar as definições do NTP para todo o cluster {harvester-product-name} a qualquer momento, e as configurações são aplicadas a todos os nós do cluster.
+
+image::host/harvester-ntp-settings.png[]
+
+Você pode configurar múltiplos servidores NTP ao mesmo tempo.
+
+image::host/harvester-ntp-settings-multiple.png[]
+
+Você pode verificar as configurações na anotação `node.harvesterhci.io/ntp-service` nos nós do Kubernetes:
+
+* `ntpSyncStatus`: Status da conexão com os servidores NTP (valores possíveis: `disabled`, `synced` e `unsynced`)
+* `currentNtpServers`: Lista de servidores NTP existentes
+
+ $ kubectl get nodes harvester-node-0 -o yaml |yq -e '.metadata.annotations.["node.harvesterhci.io/ntp-service"]'
+ {"ntpSyncStatus":"synced","currentNtpServers":"0.suse.pool.ntp.org 1.suse.pool.ntp.org"}
+
+[NOTE]
+====
+
+
+. Não modifique o arquivo de configuração do NTP em cada nó. {harvester-product-name} irá sincronizar automaticamente as configurações que você configurou na UI {harvester-product-name} para os nós.
+. Se você atualizou {harvester-product-name} de uma versão anterior, a lista *ntp-servers* na tela de Configurações estará vazia (veja a captura de tela). Você deve configurar manualmente as definições do NTP porque {harvester-product-name} não está ciente das configurações anteriores e não consegue detectar conflitos.
+====
+
+image::host/harvester-ntp-settings-empty.png[]
+
+== Configuração do Nó Nativo de Nuvem
+
+Você pode precisar personalizar um ou mais nós após instalar {harvester-product-name}. Esse processo geralmente envolve atualizar a xref:../installation-setup/config/update-configuration.adoc[configuração do runtime] e modificar arquivos no diretório `/oem` de cada nó para que as alterações persistam após a reinicialização.
+
+Essas personalizações podem ser descritas em um manifesto do Kubernetes e, em seguida, aplicadas ao cluster subjacente usando kubectl ou outras ferramentas centradas em GitOps, como https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}].
+
+[WARNING]
+====
+Configurações incorretas podem comprometer a capacidade de um nó {harvester-product-name} de inicializar ou até mesmo danificar a estabilidade geral do cluster. Você pode evitar tais problemas lendo a documentação do toolkit Elemental para aprender a https://rancher.github.io/elemental-toolkit/docs/customizing/[personalizar o Elemental corretamente].
+====
+
+=== Criando um Recurso CloudInit
+
+A personalização do nó {harvester-product-name} é limitada apenas pela sua criatividade e pelo que a marcação do toolkit Elemental pode expressar sintaticamente. A documentação, portanto, não pode fornecer uma lista exaustiva de possíveis personalizações e casos de uso.
+
+*Exemplo:* Você deseja adicionar uma chave SSH autorizada para o usuário padrão `rancher` em todos os nós.*
+
+Comece criando um manifesto Kubernetes para um recurso CloudInit.
+
+----
+file: ssh_access.yaml
+----
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-access
+spec:
+  matchSelector: {}
+  filename: 99_ssh.yaml
+  contents: |
+    stages:
+      network:
+        - authorized_keys:
+            rancher:
+              - ssh-ed25519 AAAA...
+----
+
+Este manifesto descreve um documento cloud-init do Elemental que será aplicado a _todos os nós_ (porque o campo `matchSelector: {}` vazio corresponde a tudo). O documento YAML no campo `.spec.contents` será renderizado para `/oem/99_ssh.yaml` (por causa do campo `.spec.filename`.)
+
+Aplique este exemplo usando o comando `kubectl apply -f ssh_access.yaml`.
+
+[TIP]
+====
+Reinicie os nós relevantes {harvester-product-name} para que o executor do toolkit Elemental possa aplicar a nova configuração na inicialização.
+====
+
+==== Especificação do Recurso CloudInit
+
+|===
+| Campo | Obrigatória | Descrição
+
+| matchSelector
+| Sim
+| Configuração que permite especificar os nós que receberão as alterações de configuração.
+
+| nome_do_arquivo
+| Sim
+| Nome do arquivo que aparece em `/oem`.
+
+| conteúdo
+| Sim
+| Arquivo no estilo cloud-init do toolkit Elemental que será renderizado para um arquivo em `/oem`.
+
+| pausado
+| Não
+| Quando definido como `true`, o arquivo não será atualizado nos nós à medida que muda.
+|===
+
+O campo `matchSelector` pode ser usado para direcionar nós específicos ou grupos de nós com base em seus rótulos.
+
+Exemplo:
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+----
+
+[NOTE]
+====
+Todos os pares de chave-valor de rótulo listados no campo `matchSelector` devem corresponder aos rótulos dos nós pretendidos.
+
+No exemplo a seguir, `matchSelector` corresponderá a `harvester-node-1` apenas se esse nó também tiver o rótulo `example.com/role` com o valor `role-a`.
+
+[,yaml]
+----
+matchSelector:
+  kubernetes.io/hostname: "harvester-node-1"
+  example.com/role: "role-a"
+----
+====
+
+=== Atualizando um Recurso CloudInit
+
+Você pode usar o comando `kubectl edit` para atualizar um recurso CloudInit. No entanto, há uma ressalva se o campo `matchSelector` for atualizado para excluir um ou mais nós da personalização. Veja a nota na seção <<Deleting a CloudInit Resource>> sobre como reverter personalizações.
+
+[,console]
+----
+# kubectl edit cloudinit CLOUDINIT_NAME
+----
+
+=== Excluindo um Recurso CloudInit
+
+Você pode usar o comando `kubectl delete` para remover um recurso CloudInit do cluster {harvester-product-name}.
+
+[,console]
+----
+# kubectl delete cloudinit CLOUDINIT_NAME
+----
+
+[NOTE]
+====
+{harvester-product-name} não consegue "reverter" personalizações descritas anteriormente porque o recurso CloudInit pode descrever qualquer coisa que possa ser expressa como uma personalização do toolkit Elemental, incluindo comandos de shell arbitrários.
+
+No exemplo <<Creating a CloudInit Resource>>, o arquivo YAML contém o bloco `authorized_keys`. Esta é uma ação de somente acréscimo no toolkit Elemental. Quando o recurso é alterado ou excluído, o arquivo `authorized_keys` em {rancher-product-name} ainda conterá a chave pública antiga.
+
+*Você é responsável por ajustar ou criar um recurso CloudInit que reverta as alterações (se necessário) antes de reiniciar o nó.*
+====
+
+=== Solução de Problemas de Rollouts do CloudInit
+
+Se um documento cloud-init do toolkit Elemental não aparecer em `/oem` ou não contiver o conteúdo esperado, o bloco de status do recurso CloudInit pode conter dicas úteis.
+
+[,console]
+----
+# kubectl get cloudinit CLOUDINIT_NAME -o yaml
+----
+
+[,yaml]
+----
+status:
+  rollouts:
+    harvester-dngmf:
+      conditions:
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-02-28T22:31:23Z"
+        message: 99_ssh.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+Os pods `harvester-node-manager` no namespace `harvester-system` também podem conter algumas dicas sobre por que não está renderizando um arquivo para um nó.
+Este pod faz parte de um daemonset, então pode valer a pena verificar o pod que está rodando no nó de interesse.
+
+== Console Remoto
+
+Você pode configurar a URL do console para gerenciamento remoto de servidores. Este console é particularmente útil em ambientes onde o acesso físico é limitado.
+
+. Na interface {harvester-product-name}, vá para *Hosts*.
++
+. Localize o host de destino e, em seguida, selecione *⋮ -> Editar Config*.
++
+image::host/remote_console_config.png[]
++
+. Especifique a *URL do Console* e, em seguida, clique em *Salvar*.
++
+Exemplo (com HPE iLO):
++
+image::host/remote_console_url.png[]
++
+. Clique em *Console* para acessar o servidor remoto.
++
+image::host/remote_console_button.png[]
+
+== Rotacionando certificados expirados
+
+Se os certificados RKE2 estiverem expirados, você não pode usar a configuração `auto-rotate-rke2-certificates` para rotacioná-los. A configuração só funciona quando o cluster (`cluster.provisioning`) está marcado como `Ready`.
+
+[,shell]
+----
+> kubectl get cluster.provisioning -n fleet-local local -o yaml | yq -e '.status.conditions[] | select(.type=="Ready")'
+lastUpdateTime: "2025-10-22T06:41:33Z"
+status: "True"
+type: Ready
+----
+
+Se o valor do campo `status` for `False`, você deve rotacionar os certificados manualmente seguindo estas etapas em cada nó:
+
+. Faça login no nó usando a conta root.
+
+. Pare o serviço RKE2.
++
+** Nós de gerenciamento
++
+[,shell]
+----
+systemctl stop rke2-server
+----
++
+** Nós de trabalho
++
+[,shell]
+----
+systemctl stop rke2-agent
+----
+
+. Rotacione os certificados RKE2.
++
+[,shell]
+----
+/opt/rke2/bin/rke2 certificate rotate
+----
+
+. Inicie o serviço RKE2.
++
+** Nós de gerenciamento
++
+[,shell]
+----
+systemctl start rke2-server
+----
++
+** Nós de trabalho
++
+[,shell]
+----
+systemctl start rke2-agent
+----
+
+. Reinicie o serviço `rancher-system-agent`.
++
+[,shell]
+----
+systemctl restart rancher-system-agent
+----

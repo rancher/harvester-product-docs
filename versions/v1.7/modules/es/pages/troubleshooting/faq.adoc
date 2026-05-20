@@ -1,0 +1,117 @@
+= Preguntas más frecuentes
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Esta FAQ es un trabajo en progreso diseñado para responder a las preguntas que nuestros usuarios más frecuentemente hacen sobre Harvester.
+
+== ¿Cómo puedo iniciar sesión por ssh en el nodo de Harvester?
+
+[,shell]
+----
+$ ssh rancher@node-ip
+----
+
+== ¿Cuál es el nombre de usuario y la contraseña de inicio de sesión predeterminados del panel de Harvester?
+
+[,shell]
+----
+username: admin
+password: # you will be promoted to set the default password when logging in for the first time
+----
+
+== ¿Cómo puedo acceder al archivo kubeconfig del clúster de Harvester?
+
+Opción 1. Puedes descargar el archivo kubeconfig desde la página de soporte del panel de Harvester.
+
+image:harvester-kubeconfig.png[harvester-kubeconfig.png]
+
+Opción 2. Puedes obtener el archivo kubeconfig desde uno de los nodos de gestión de Harvester. p.ej.,
+
+[,shell]
+----
+$ sudo su
+$ cat /etc/rancher/rke2/rke2.yaml
+----
+
+== ¿Cómo instalar el qemu-guest-agent de una VM en ejecución?
+
+[,shell]
+----
+# cloud-init will only be executed once, reboot it after add the cloud-init config with the following command.
+$ cloud-init clean --logs --reboot
+----
+
+https://cloudinit.readthedocs.io/en/latest/reference/cli.html#clean
+
+== ¿Cómo puedo restablecer la contraseña del administrador?
+
+En caso de que olvides la contraseña del administrador, puedes restablecerla a través de la línea de comandos. Conéctate por SSH a uno de los nodos de gestión y ejecuta el siguiente comando:
+
+[,shell]
+----
+# switch to root and run
+$ kubectl  -n cattle-system exec $(kubectl --kubeconfig $KUBECONFIG -n cattle-system get pods -l app=rancher --no-headers | head -1 | awk '{ print $1 }') -c rancher -- reset-password
+New password for default administrator (user-xxxxx):
+<new_password>
+----
+
+== He añadido un disco adicional con particiones. ¿Por qué no se está detectando?
+
+A partir de Harvester v1.0.2, ya no soportamos añadir discos adicionales con particiones, así que asegúrate de eliminar todas las particiones primero (p.ej., usando `fdisk`).
+
+== ¿Por qué hay algunos pods de Harvester que se convierten en ErrImagePull/ImagePullBackOff?
+
+Esto es probablemente porque tu clúster de Harvester es un entorno aislado, y faltan algunas imágenes de contenedor pre-cargadas. Kubernetes tiene un mecanismo que realiza la recolección de basura contra almacenes de imágenes sobrecargados. Cuando la partición que almacena las imágenes de contenedor está más del 85% llena, `kubelet` intenta eliminar las imágenes en función de la última vez que se utilizaron, comenzando por las más antiguas, hasta que la ocupación sea inferior al 80%. Estos números (85% y 80%) son umbrales predeterminados de Alto/Bajo que vienen con Kubernetes.
+
+Para recuperarte de este estado, realiza una de las siguientes acciones, según la configuración del clúster:
+
+* Descarga las imágenes faltantes de fuentes externas al clúster (si es un entorno aislado, es posible que necesites configurar un proxy HTTP de antemano).
+* Importa manualmente las imágenes desde la imagen ISO de Harvester.
++
+[NOTE]
+====
+Toma v1.1.2 como ejemplo y descarga la imagen ISO de Harvester desde la URL oficial. Luego, extrae la lista de imágenes de la imagen ISO para decidir qué tarball de imagen vamos a importar. Por ejemplo, queremos importar la imagen de contenedor faltante `rancher/harvester-upgrade`.
+
+[,shell]
+----
+$ curl -sfL https://releases.rancher.com/harvester/v1.1.2/harvester-v1.1.2-amd64.iso -o harvester.iso
+
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images-lists images-lists
+
+$ grep -R "rancher/harvester-upgrade" images-lists/
+images-lists/harvester-images-v1.1.2.txt:docker.io/rancher/harvester-upgrade:v1.1.2
+----
+
+Descubre la ubicación del tarball de imagen y extráelo de la imagen ISO. Descomprime el tarball de imagen zstd extraído.
+
+[,shell]
+----
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images/harvester-images-v1.1.2.tar.zst harvester.tar.zst
+
+$ zstd -d --rm harvester.tar.zst
+----
+
+Sube el tarball de imagen a los nodos de Harvester que necesitan recuperarse. Finalmente, ejecuta el siguiente comando para importar las imágenes de contenedor en cada uno de ellos.
+
+[,shell]
+----
+$ ctr -n k8s.io images import harvester.tar
+$ rm harvester.tar
+----
+====
+
+* Encuentra las imágenes faltantes en ese nodo desde los otros nodos, luego exporta las imágenes desde el nodo donde aún existan e impórtalas en el nodo faltante.
+
+Para evitar que esto suceda, recomendamos limpiar las imágenes de contenedor no utilizadas de la versión anterior después de cada actualización exitosa de Harvester, si el espacio en disco de la tienda de imágenes está saturado. Proporcionamos un https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[guion de harv-purge-images] que facilita la limpieza del espacio en disco, especialmente para el almacenamiento de imágenes de contenedor. El guion debe ejecutarse en cada nodo de Harvester. Por ejemplo, si el clúster estaba originalmente en v1.1.2 y ahora se actualiza a v1.2.0, puedes hacer lo siguiente para descartar las imágenes de contenedor que solo se usaron en v1.1.2 pero que ya no son necesarias en v1.2.0:
+
+[,shell]
+----
+# on each node
+$ ./harv-purge-images.sh v1.1.2 v1.2.0
+----
+
+[CAUTION]
+====
+* El guion solo descarga las listas de imágenes y las compara para calcular la diferencia entre ambas versiones. No se comunica con el clúster y, como resultado, no sabe de qué versión se actualizó el clúster.
+* Publicamos listas de imágenes para cada versión lanzada desde v1.1.0. Para clústeres anteriores a v1.1.0, debes limpiar manualmente las imágenes antiguas.
+====

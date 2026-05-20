@@ -1,0 +1,209 @@
+= Actualiza de v1.4.1 o v1.4.2 a v1.4.3
+:revdate: 2025-07-07
+:page-revdate: {revdate}
+
+== Información general
+
+Un *botón de actualizar* aparece en la pantalla *Panel de control* cada vez que haya disponible una nueva {harvester-product-name} versión a la que puedas actualizar. Para más información, consulta xref:./upgrades.adoc#_start_an_upgrade[Iniciar una actualización].
+
+{harvester-product-name} v1.4.2 y v1.4.3 utilizan la misma versión menor de {rke2-product-name} (v1.31). Esto te permite actualizar directamente de v1.4.1 a v1.4.3.
+
+Para entornos aislados, consulta xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar una actualización en entorno aislado].
+
+== Problemas conocidos
+
+=== 1. La actualización en entorno aislado se atasca con el error `ImagePullBackOff` en los pods de Fluentd y Fluent Bit.
+
+La actualización puede quedarse atascada al principio del proceso, como se indica por un progreso del 0% y por los elementos marcados como *Pendiente* en el diálogo de *actualizar versión* de la interfaz de usuario {harvester-product-name}.
+
+image::upgrade/upgrade-dialog-with-empty-status.png[]
+
+Específicamente, los pods de Fluentd y Fluent Bit pueden quedar atascados en el estado `ImagePullBackOff`. Para comprobar el estado de los pods, ejecuta los siguientes comandos:
+
+[,bash]
+----
+$ kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true
+NAME                 AGE
+hvst-upgrade-x2hz8   7m14s
+
+$ kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=hvst-upgrade-x2hz8
+NAME                            UPGRADE
+hvst-upgrade-x2hz8-upgradelog   hvst-upgrade-x2hz8
+
+$ kubectl -n harvester-system get pods -l harvesterhci.io/upgradeLog=hvst-upgrade-x2hz8-upgradelog
+NAME                                                        READY   STATUS             RESTARTS   AGE
+hvst-upgrade-x2hz8-upgradelog-downloader-6cdb864dd9-6bw98   1/1     Running            0          7m7s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-2nq7q         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-697wf         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentbit-kd8kl         0/1     ImagePullBackOff   0          7m42s
+hvst-upgrade-x2hz8-upgradelog-infra-fluentd-0               0/2     ImagePullBackOff   0          7m42s
+----
+
+Esto ocurre porque las siguientes imágenes de contenedor no están precargadas en los nodos del clúster ni se han descargado de Internet:
+
+* `ghcr.io/kube-logging/fluentd:v1.15-ruby3`
+* `ghcr.io/kube-logging/config-reloader:v0.0.5`
+* `fluent/fluent-bit:2.1.8`
+
+Para solucionar el problema, realiza cualquiera de las siguientes acciones:
+
+* Actualiza el CR de Logging para utilizar las imágenes que ya están precargadas en los nodos del clúster. Para hacer esto, ejecuta los siguientes comandos en el clúster:
++
+[,bash]
+----
+# Get the Logging CR names
+OPERATOR_LOGGING_NAME=$(kubectl get loggings -l app.kubernetes.io/name=rancher-logging -o jsonpath="{.items[0].metadata.name}")
+INFRA_LOGGING_NAME=$(kubectl get loggings -l harvesterhci.io/upgradeLogComponent=infra -o jsonpath="{.items[0].metadata.name}")
+
+# Gather image info from operator's Logging CR
+FLUENTD_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.repository}")
+FLUENTD_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.image.tag}")
+
+FLUENTBIT_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.repository}")
+FLUENTBIT_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentbit.image.tag}")
+
+CONFIG_RELOADER_IMAGE_REPO=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.repository}")
+CONFIG_RELOADER_IMAGE_TAG=$(kubectl get loggings $OPERATOR_LOGGING_NAME -o jsonpath="{.spec.fluentd.configReloaderImage.tag}")
+
+# Patch the Logging CR
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentbit/image\",\"value\":{\"repository\":\"$FLUENTBIT_IMAGE_REPO\",\"tag\":\"$FLUENTBIT_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/image\",\"value\":{\"repository\":\"$FLUENTD_IMAGE_REPO\",\"tag\":\"$FLUENTD_IMAGE_TAG\"}}]"
+kubectl patch logging $INFRA_LOGGING_NAME --type=json -p="[{\"op\":\"replace\",\"path\":\"/spec/fluentd/configReloaderImage\",\"value\":{\"repository\":\"$CONFIG_RELOADER_IMAGE_REPO\",\"tag\":\"$CONFIG_RELOADER_IMAGE_TAG\"}}]"
+----
++
+El estado de los pods de Fluentd y Fluent Bit debería cambiar a `Running` en un momento y el proceso de actualización debería continuar después de que se actualice el CR de Logging. Si el estado del pod de Fluentd sigue siendo `ImagePullBackOff`, puedes eliminar el pod para forzarlo a reiniciarse.
++
+[,bash]
+----
+UPGRADE_NAME=$(kubectl -n harvester-system get upgrades -l harvesterhci.io/latestUpgrade=true -o jsonpath='{.items[0].metadata.name}')
+UPGRADELOG_NAME=$(kubectl -n harvester-system get upgradelogs -l harvesterhci.io/upgrade=$UPGRADE_NAME -o jsonpath='{.items[0].metadata.name}')
+
+kubectl -n harvester-system delete pods -l harvesterhci.io/upgradeLog=$UPGRADELOG_NAME,harvesterhci.io/upgradeLogComponent=aggregator
+----
+
+* En un ordenador con acceso a Internet, descarga las imágenes de contenedor requeridas y luego expórtalas a un archivo TAR. A continuación, transfiere el archivo TAR a los nodos del clúster y luego importa las imágenes ejecutando los siguientes comandos en cada nodo:
++
+[,bash]
+----
+# Pull down the three container images
+docker pull ghcr.io/kube-logging/fluentd:v1.15-ruby3
+docker pull ghcr.io/kube-logging/config-reloader:v0.0.5
+docker pull fluent/fluent-bit:2.1.8
+
+# Export the images to a tar file
+docker save \
+  ghcr.io/kube-logging/fluentd:v1.15-ruby3 \
+  ghcr.io/kube-logging/config-reloader:v0.0.5 \
+  fluent/fluent-bit:2.1.8 > upgradelog-images.tar
+
+# After transferring the tar file to the cluster nodes, import the images (need to be run on each node)
+ctr -n k8s.io images import upgradelog-images.tar
+----
++
+El proceso de actualización debería continuar después de que se precarguen las imágenes.
+
+- (No recomendado) Reinicia el proceso de actualización con el registro desactivado. Asegúrese de que la casilla *Habilitar registro* en el diálogo *actualizar versión* no esté seleccionada.
+
+Problema relacionado: https://github.com/harvester/harvester/issues/7955[#7955]
+
+=== 2. Volúmenes sobredimensionados
+
+En {harvester-product-name} v1.4.3, que utiliza {longhorn-product-name} v1.7.3, los volúmenes sobredimensionados (por ejemplo, de 999999 Gi de tamaño) se marcan como _No listo_ y no se pueden eliminar.
+
+Para resolver este problema, siga los siguientes pasos:
+
+. Elimine temporalmente la regla del webhook PVC.
++
+[,bash]
+----
+RULE_INDEX=$(kubectl get \
+  validatingwebhookconfiguration longhorn-webhook-validator -o json \
+  | jq '.webhooks[0].rules | map(.resources[0] == "persistentvolumeclaims") | index(true)')
+
+if [ -n "$RULE_INDEX" -a "$RULE_INDEX" != "null" ]; then
+  kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+    --type='json' \
+    -p="[{'op': 'remove', 'path': '/webhooks/0/rules/$RULE_INDEX'}]"
+fi
+----
+
+. Espere a que se elimine el PVC relacionado.
+
+. Restaure la regla del webhook PVC para volver a habilitar la validación.
++
+[,bash]
+----
+kubectl patch validatingwebhookconfiguration longhorn-webhook-validator \
+  --type='json' \
+  -p='[{"op": "add", "path": "/webhooks/0/rules/-", "value": {"apiGroups":[""],"apiVersions":["v1"],"operations":["UPDATE"],"resources":["persistentvolumeclaims"],"scope":"Namespaced"}}]'
+----
+
+El problema se abordará en {longhorn-product-name} v1.8.2, que probablemente se incluirá en {harvester-product-name} v1.5.1.
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8096[#8096] y https://github.com/longhorn/longhorn/issues/10741[#10741]
+
+=== 3. Los usuarios que no son root en clústeres invitados no pueden acceder a volúmenes RWX.
+
+Los usuarios no root en clústeres invitados encuentran errores inesperados de "permiso denegado" al acceder a volúmenes RWX. Esto es causado por un https://github.com/nfs-ganesha/nfs-ganesha/issues/1132[problema de regresión] en `nfs-ganesha` v6.0+, que afecta a v1.7.3 de la imagen `longhorn-share-manager`.
+
+Puede resolver el problema reemplazando `longhorn-share-manager:v1.7.3` con la imagen corregida `longhorn-share-manager:v1.7.3-hotfix-1`.
+
+[CAUTION]
+====
+No utilice la imagen corregida si no se ve afectado por el problema.
+====
+
+. Edite el `longhorn-manager` DaemonSet ejecutando el siguiente comando:
++
+[,bash]
+----
+  kubectl -n longhorn-system edit daemonset/longhorn-manager
+----
+
+. En el campo `spec.containers.command`, cambie el `--share-manager-image` por `longhornio/longhorn-share-manager:v1.7.3-hotfix-1`.
++
+[,yaml]
+----
+  ...
+    spec:
+      containers:
+      - command:
+        - longhorn-manager
+        - -d
+        - daemon
+        - --engine-image
+        - longhornio/longhorn-engine:v1.7.3
+        - --instance-manager-image
+        - longhornio/longhorn-instance-manager:v1.7.3
+        - --share-manager-image
+        - longhornio/longhorn-share-manager:v1.7.3-hotfix-1
+        - --backing-image-manager-image
+        - longhornio/backing-image-manager:v1.7.3
+        - --support-bundle-manager-image
+        - longhornio/support-bundle-kit:v0.0.51
+        - --manager-image
+        - longhornio/longhorn-manager:v1.7.3
+        - --service-account
+        - longhorn-service-account
+        - --upgrade-version-check
+  ...
+----
+
+. Una vez que se aplique la actualización, reinicie las cargas de trabajo que estén utilizando volúmenes RWX.
+
+[IMPORTANT]
+====
+Si está utilizando la imagen corregida y desea actualizar {harvester-product-name} v1.5.x, debe editar el `longhorn-manager` DaemonSet y revertir a la imagen `longhorn-share-manager:v1.7.3` antes de comenzar la actualización.
+====
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8354[8354] y https://github.com/longhorn/longhorn/issues/10621[10621]
+
+=== 4. Las máquinas virtuales que utilizan volúmenes RWX migrables se reinician inesperadamente
+
+Las máquinas virtuales que utilizan xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[volúmenes RWX migrables] se reinician inesperadamente cuando se reinician los pods del plugin CSI. Este problema afecta a {harvester-product-name} v1.4.x, v1.5.0 y v1.5.1.
+
+La solución alternativa es desactivar la configuración https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_automatically_delete_workload_pod_when_the_volume_is_detached_unexpectedly[Eliminar automáticamente el pod de carga de trabajo cuando el volumen se desconecta inesperadamente] en la interfaz de usuario {longhorn-product-name} antes de iniciar la actualización. Debe habilitar de nuevo la configuración una vez que se complete la actualización.
+
+El problema se solucionará en {longhorn-product-name} v1.8.3, v1.9.1 y versiones posteriores. {harvester-product-name} v1.6.0 incluirá {longhorn-product-name} v1.9.1. 
+
+Problemas relacionados: https://github.com/harvester/harvester/issues/8534[#8534] y https://github.com/longhorn/longhorn/issues/11158[#11158]

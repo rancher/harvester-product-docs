@@ -1,0 +1,117 @@
+= FAQ（よくある質問と答え）
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+このFAQは、Harvesterに関してユーザーが最も頻繁に尋ねる質問に答えるために設計された進行中の作業です。
+
+== HarvesterノードにSSHログインするにはどうすればよいですか？
+
+[,shell]
+----
+$ ssh rancher@node-ip
+----
+
+== Harvesterダッシュボードのデフォルトのログインユーザー名とパスワードは何ですか？
+
+[,shell]
+----
+username: admin
+password: # you will be promoted to set the default password when logging in for the first time
+----
+
+== Harvesterクラスターのkubeconfigファイルにアクセスするにはどうすればよいですか？
+
+オプション1。Harvesterダッシュボードのサポートページからkubeconfigファイルをダウンロードできます。
+
+image:harvester-kubeconfig.png[harvester-kubeconfig.png]
+
+オプション2。Harvester管理ノードの1つからkubeconfigファイルを取得できます。例、
+
+[,shell]
+----
+$ sudo su
+$ cat /etc/rancher/rke2/rke2.yaml
+----
+
+== 稼働中のVMのqemu-guest-agentをインストールするにはどうすればよいですか？
+
+[,shell]
+----
+# cloud-init will only be executed once, reboot it after add the cloud-init config with the following command.
+$ cloud-init clean --logs --reboot
+----
+
+https://cloudinit.readthedocs.io/en/latest/reference/cli.html#clean
+
+== 管理者パスワードをリセットするにはどうすればよいですか？
+
+管理者パスワードを忘れた場合、コマンドラインを介してリセットできます。管理ノードの1つにSSH接続し、次のコマンドを実行します：
+
+[,shell]
+----
+# switch to root and run
+$ kubectl  -n cattle-system exec $(kubectl --kubeconfig $KUBECONFIG -n cattle-system get pods -l app=rancher --no-headers | head -1 | awk '{ print $1 }') -c rancher -- reset-password
+New password for default administrator (user-xxxxx):
+<new_password>
+----
+
+== パーティションがある追加ディスクを取り付けました。なぜ検出されないのですか？
+
+Harvester v1.0.2以降、追加のパーティション付きディスクの追加はサポートされていないため、最初にすべてのパーティションを削除してください（例：`fdisk`を使用）。
+
+== なぜいくつかのHarvesterポッドがErrImagePull/ImagePullBackOffになるのですか？
+
+これは、おそらくHarvesterクラスターがエアギャップ(された)セットアップであり、いくつかの事前にロードされたコンテナイメージが欠落しているためです。Kubernetesには、膨張したイメージストアに対してガーベジコレクションを行うメカニズムがあります。コンテナイメージを保存するパーティションが85％以上満杯になると、`kubelet`は最後に使用された時間に基づいてイメージをプルーニングし、最も古いものから始めて、占有率が80％未満になるまで続けます。これらの数値（85％と80％）は、Kubernetesに付属するデフォルトの高/低しきい値です。
+
+この状態から回復するには、クラスターの設定に応じて次のいずれかを実行してください：
+
+* クラスターの外部から不足しているイメージをプルします（エアギャップ(された)環境の場合、事前にHTTPプロキシを設定する必要があるかもしれません）。
+* Harvester ISOイメージから手動でイメージをインポートします。
++
+[NOTE]
+====
+v1.1.2を例にとり、公式URLからHarvester ISOイメージをダウンロードします。次に、ISOイメージからイメージリストを抽出して、どのイメージのtarballをインポートするかを決定します。例えば、不足しているコンテナイメージ `rancher/harvester-upgrade` をインポートしたいです。
+
+[,shell]
+----
+$ curl -sfL https://releases.rancher.com/harvester/v1.1.2/harvester-v1.1.2-amd64.iso -o harvester.iso
+
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images-lists images-lists
+
+$ grep -R "rancher/harvester-upgrade" images-lists/
+images-lists/harvester-images-v1.1.2.txt:docker.io/rancher/harvester-upgrade:v1.1.2
+----
+
+イメージのtarボールの場所を見つけ、ISOイメージから抽出します。抽出したzstdイメージのtarボールを解凍します。
+
+[,shell]
+----
+$ xorriso -osirrox on -indev harvester.iso -extract /bundle/harvester/images/harvester-images-v1.1.2.tar.zst harvester.tar.zst
+
+$ zstd -d --rm harvester.tar.zst
+----
+
+回復が必要なHarvesterノードにイメージのtarボールをアップロードします。最後に、各ノードでコンテナイメージをインポートするために、次のコマンドを実行します。
+
+[,shell]
+----
+$ ctr -n k8s.io images import harvester.tar
+$ rm harvester.tar
+----
+====
+
+* そのノードで不足しているイメージを他のノードから見つけ、イメージがまだ存在するノードからイメージをエクスポートし、不足しているノードにインポートします。
+
+これを防ぐために、イメージストアのディスクスペースが圧迫されている場合は、各Harvesterのアップグレード後に前のバージョンから未使用のコンテナイメージをクリーンアップすることをお勧めします。ディスクスペースのクリーンアップを簡単にするための https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[harv-purge-images スクリプト] を提供しました。特にコンテナイメージストレージに便利です。スクリプトは各Harvesterノードで実行する必要があります。例えば、クラスターが元々v1.1.2で、現在v1.2.0にアップグレードされた場合、v1.1.2でのみ使用されていてv1.2.0ではもはや必要ないコンテナイメージを破棄するために、次のようにできます：
+
+[,shell]
+----
+# on each node
+$ ./harv-purge-images.sh v1.1.2 v1.2.0
+----
+
+[CAUTION]
+====
+* スクリプトはイメージリストをダウンロードし、2つを比較して2つのバージョン間の違いを計算します。クラスターと通信せず、その結果、クラスターがどのバージョンからアップグレードされたかを知りません。
+* v1.1.0以降にリリースされた各バージョンのイメージリストを公開しました。v1.1.0より古いクラスターについては、古いイメージを手動でクリーンアップする必要があります。
+====

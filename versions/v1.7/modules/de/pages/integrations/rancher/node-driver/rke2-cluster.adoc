@@ -1,0 +1,146 @@
+= Erstellen eines RKE2 Kubernetes-Clusters
+:revdate: 2025-06-09
+:page-revdate: {revdate}
+
+Sie können jetzt {rke2-product-name} Kubernetes-Cluster auf dem {harvester-product-name} Cluster in {rancher-product-name} mit dem integrierten Harvester Node Driver bereitstellen.
+
+image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+
+[NOTE]
+====
+
+* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN-Netzwerk] ist für den Harvester Node Driver erforderlich.
+* Die Bereitstellung von RKE2 Kubernetes-Cluster umfasst die Konfiguration der IP-Adresse der zugrunde liegenden virtuellen Maschinen. Sie können dies mit einem DHCP-Server im VLAN-Netzwerk tun, an das die virtuellen Maschinen angeschlossen sind. Wenn ein solcher Server im Netzwerk nicht vorhanden ist, können Sie die Funktion xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] verwenden, um die IP-Adresse zu konfigurieren.
+* Der Harvester Node Driver unterstützt nur Cloud-Images.
+* Für die Portanforderungen der Gast-Kubernetes-Cluster, die innerhalb von {harvester-product-name} bereitgestellt werden, siehe das Dokument xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[hier].
+* Für die Unterstützungsmatrix von RKE2 mit Harvester Cloud Provider, siehe die Website https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[hier].
+====
+
+== Hinweis zur Abwärtskompatibilität
+
+[NOTE]
+====
+Bitte beachten Sie ein bekanntes Problem mit der Abwärtskompatibilität, wenn Sie die Harvester Cloud Provider-Version *v0.2.2* oder höher verwenden.  Wenn Ihre {harvester-product-name} Version unter *v1.2.0* liegt und Sie beabsichtigen, neuere RKE2-Versionen (d.h. >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`) zu verwenden, ist es wichtig, Ihr {harvester-product-name} Cluster auf v1.2.0 oder eine höhere Version zu upgraden, bevor Sie mit dem Upgrade des Gast-Kubernetes-Clusters oder des Harvester Cloud Providers fortfahren.
+
+Für eine detaillierte Unterstützungsmatrix siehe den Abschnitt *Harvester CCM & CSI Driver mit RKE2 Releases* der offiziellen https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[Website].
+====
+
+== Erstellen Sie Ihre Cloud-Anmeldeinformationen
+
+. Klicken Sie auf *☰ > Clusterverwaltung*.
+. Klicken Sie auf *Cloud-Anmeldeinformationen*.
+. Klicken Sie auf *Erstellen*.
+. Klicken Sie auf *Harvester*.
+. Geben Sie Ihren Namen für die Cloud-Anmeldeinformationen ein.
+. Wählen Sie "Importierten Harvester-Cluster".
+. Klicken Sie auf *Erstellen*.
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== Erstellen Sie einen RKE2 Kubernetes-Cluster
+
+Benutzer können einen RKE2 Kubernetes-Cluster von der *Clusterverwaltung* Seite über den RKE2 Knoten-Treiber erstellen.
+
+. Wählen Sie das *Clusters*-Menü.
+. Klicken Sie auf die Schaltfläche *Erstellen*.
+. Schalten Sie den Schalter auf *RKE2/K3s* um.
+. Wählen Sie den Harvester Knoten-Treiber aus.
+. Wählen Sie eine *Cloud-Anmeldeinformation* aus.
+. Geben Sie den *Cluster-Namen* ein (erforderlich).
+. Geben Sie den *Namespace* ein (erforderlich).
+. Geben Sie das *Image* ein (erforderlich).
+. Geben Sie den *Netzwerknamen* ein (erforderlich).
+. Geben Sie den *SSH-Benutzer* ein (erforderlich).
+. (optional) Konfigurieren Sie die menu:Erweiterte Optionen anzeigen[Benutzerdaten], um die erforderlichen Pakete der VM zu installieren.
++
+[,yaml]
+----
+#cloud-config
+packages:
+  - iptables
+----
++
+[NOTE]
+====
+Calico- und Canal-Netzwerke erfordern, dass das `iptables`- oder `xtables-nft`-Paket auf dem Knoten installiert ist. Für weitere Informationen siehe https://documentation.suse.com/cloudnative/rke2/latest/en/known_issues.html#_canal_and_ip_exhaustion[Canal und IP-Erschöpfung] in der RKE2-Dokumentation.
+====
+
+. Klicken Sie auf *Erstellen*.
++
+image:rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+image:rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+image:rancher/create-rke2-harvester-cluster-3.png[create-rke2-harvester-cluster-3]
++
+[NOTE]
+====
+* RKE2 v1.21.5+rke2r2 oder höher bietet einen integrierten Harvester Cloud Provider und eine Guest-CSI-Treiber-Integration.
+* Nur importierte {harvester-product-name} Cluster werden vom Harvester Node Driver unterstützt.
+====
+
+=== Fügen Sie die Knotenaffinität hinzu.
+
+Der Harvester Node Driver unterstützt jetzt die Planung einer Gruppe von Maschinen auf bestimmten Knoten durch die Knotenaffinitätsregeln, die hohe Verfügbarkeit und eine bessere Ressourcennutzung bieten können.
+
+Die Knotenaffinität kann während der Erstellung des Clusters zu den Maschinenpools hinzugefügt werden:
+
+. Klicken Sie auf die `Show Advanced`-Schaltfläche und klicken Sie auf die `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. Setzen Sie die Priorität auf `Required`, wenn Sie möchten, dass der Scheduler die Maschinen nur plant, wenn die Regeln erfüllt sind.
+. Klicken Sie auf `Add Rule`, um die Knotenaffinitätsregeln anzugeben, z. B. für den xref:./node-driver.adoc#_topology_spread_constraints[topology spread constraints] Anwendungsfall können Sie die `region` und `zone` Labels wie folgt hinzufügen:
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[affinity-add-rules]
+
+=== Fügen Sie die Arbeitslastaffinität hinzu.
+
+Die Regeln zur Arbeitslastaffinität ermöglichen es Ihnen, einzuschränken, auf welchen Knoten Ihre Maschinen geplant werden können, basierend auf den Labels von Arbeitslasten (VMs und Pods), die bereits auf diesen Knoten ausgeführt werden, anstatt auf den Knotenlabels.
+
+Regeln zur Arbeitslastaffinität können während der Erstellung des Clusters zu den Maschinenpools hinzugefügt werden:
+
+. Wählen Sie *Erweiterte Optionen anzeigen* und wählen Sie *Workload Selector hinzufügen*.
+image:rancher/affinity-rke2-add-workload-selector.png[affinity-add-workload-selector]
+. Wählen Sie *Typ*, *Affinity* oder *Anti-Affinity*.
+. Wählen Sie *Priorität*. *Bevorzugt* bedeutet, dass es sich um eine optionale Regel handelt, und *Erforderlich* bedeutet, dass es sich um eine verbindliche Regel handelt.
+. Wählen Sie die Namespaces für die Zielarbeitslasten aus.
+. Wählen Sie *Regel hinzufügen*, um die Regeln zur Arbeitslastaffinität anzugeben.
+. Legen Sie *Topologie-Schlüssel* fest, um den Label-Schlüssel anzugeben, der {harvester-product-name} Hosts in verschiedene Topologien unterteilt.
+
+Siehe die https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/#inter-pod-affinity-and-anti-affinity[Kubernetes Pod Affinity and Anti-Affinity Documentation] für weitere Details.
+
+== Aktualisieren Sie den RKE2 Kubernetes-Cluster
+
+Die unten hervorgehobenen Felder des RKE2 Maschinenpools repräsentieren die {harvester-product-name} VM-Konfigurationen. Änderungen an diesen Feldern führen zu einer Neuprovisionierung der Knoten.
+
+image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+== Verwendung des Harvester RKE2-Knotentreibers in einer Air-Gapped-Umgebung
+
+Die RKE2-Bereitstellung ist auf das `qemu-guest-agent`-Paket angewiesen, um die IP der virtuellen Maschine zu erhalten.
+
+Calico und Canal erfordern, dass das `iptables`- oder `xtables-nft`-Paket auf dem Knoten installiert ist.
+
+Es kann jedoch unpraktisch sein, Pakete in einer Air-Gapped-Umgebung zu installieren.
+
+Sie können die Installationsbeschränkungen mit den folgenden Optionen angehen:
+
+* Option 1. Verwenden Sie ein VM-Image, das mit den erforderlichen Paketen (z. B. `iptables`, `qemu-guest-agent`) vorkonfiguriert ist.
+* Option 2. Gehen Sie zu *Erweiterte Optionen anzeigen* > *Benutzerdaten*, um VMs zu ermöglichen, die erforderlichen Pakete über einen HTTP(S)-Proxy zu installieren.
+
+Beispiel für Benutzerdaten im {harvester-product-name}-Knotentemplate:
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

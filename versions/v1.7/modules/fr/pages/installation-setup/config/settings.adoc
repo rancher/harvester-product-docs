@@ -1,0 +1,935 @@
+= Paramètres
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+Ce qui suit est une liste de paramètres avancés que vous pouvez utiliser. Vous pouvez modifier la ressource personnalisée `settings.harvesterhci.io` à l'aide de l'interface utilisateur et de la commande `kubectl`.
+
+== Paramètres généraux
+
+=== `additional-ca`
+
+*Définition* : Certificats CA supplémentaires de confiance qui permettent à {harvester-product-name} d'accéder à des services externes.
+
+[CAUTION]
+====
+Modifier ce paramètre peut entraîner une indisponibilité temporaire ou un accès impossible aux clusters à nœud unique.
+====
+
+*Valeur par défaut* : aucune
+
+*Exemple*{nbsp}:
+
+----
+-----BEGIN CERTIFICATE-----
+SOME-CA-CERTIFICATES
+-----END CERTIFICATE-----
+----
+
+=== `auto-disk-provision-paths` [Expérimental]
+
+*Définition* : Paramètre qui permet à {harvester-product-name} d'ajouter automatiquement des disques correspondant au modèle spécifié par un glob en tant que stockage de VM.
+
+Ce paramètre n'ajoute que des disques formatés qui sont montés sur le système. Lors de la spécification de plusieurs modèles, séparez les valeurs par des virgules.
+
+[CAUTION]
+==== 
+Ce paramètre s'applique à *tous les nœuds* du cluster. Toutes les données dans les dispositifs de stockage *seront détruites*.
+====
+
+*Valeur par défaut* : aucune
+
+*Exemple*{nbsp}:
+
+L'exemple suivant ajoute des disques qui correspondent au modèle `/dev/sd*` ou `/dev/hd*` :
+
+----
+/dev/sd*,/dev/hd*
+----
+
+=== `auto-rotate-rke2-certs`
+
+*Définition* : Paramètre qui vous permet de faire tourner automatiquement les certificats pour les services {rke2-product-name}. Ce paramètre est désactivé par défaut.
+
+Utilisez le champ `expiringInHours` pour spécifier la période de validité de chaque certificat (`1` à `8759` heures). Si le certificat expire dans la période spécifiée, {harvester-product-name} remplace automatiquement le certificat.
+
+Pour plus d'informations, consultez la section *Rotation des certificats* de la documentation https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/cluster-admin/manage-clusters/rotate-certificates.html[{rancher-product-name}] et https://documentation.suse.com/cloudnative/rke2/latest/en/advanced.html#_certificate_rotation[{rke2-product-name}].
+
+Si vos certificats ont expiré, vous pouvez xref:hosts/hosts.adoc#_rotating_expired_certificates[les faire tourner manuellement].
+
+*Valeur par défaut*{nbsp}: `{"enable":false,"expiringInHours":240}`
+
+*Exemple*{nbsp}:
+
+----
+{"enable":true,"expiringInHours":48}
+----
+
+=== `backup-target`
+
+*Définition*{nbsp}: Cible de sauvegarde personnalisée utilisée pour stocker les sauvegardes de VM.
+
+Pour plus d'informations, consultez la https://documentation.suse.com/cloudnative/storage/1.8/en/snapshots-backups/volume-snapshots-backups/configure-backup-target.html#_set_up_aws_s3_backupstore[{longhorn-product-name} documentation].
+
+*Valeur par défaut* : aucune
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "type": "s3",
+  "endpoint": "https://s3.endpoint.svc",
+  "accessKeyId": "test-access-key-id",
+  "secretAccessKey": "test-access-key",
+  "bucketName": "test-bup",
+  "bucketRegion": "us‑east‑2",
+  "cert": "",
+  "virtualHostedStyle": false
+}
+----
+
+=== `cluster-registration-url`
+
+*Définition* : URL utilisée pour importer le {harvester-product-name} cluster dans {rancher-product-name} pour la gestion multi-cluster.
+
+Lorsque vous configurez ce paramètre, un nouveau pod appelé `cattle-cluster-agent-*` est créé dans l'espace de noms `cattle-system` à des fins d'enregistrement. Ce pod utilise l'image de conteneur `rancher/rancher-agent:related-version`, qui n'est pas incluse dans l'ISO {harvester-product-name} et est déterminée par {rancher-product-name}. Le `related-version` est généralement le même que la version {rancher-product-name}. Par exemple, lorsque vous enregistrez {harvester-product-name} à {rancher-product-name} v2.7.9, l'image est `rancher/rancher-agent:v2.7.9`. Pour plus d'informations, consultez https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/other-installation-methods/air-gapped/publish-images.html#_1_find_the_required_assets_for_your_rancher_version[Trouvez les ressources requises pour votre version de Rancher].
+
+Selon vos paramètres, l'image est téléchargée depuis l'un des emplacements suivants{nbsp}:
+
+* {harvester-product-name} containerd-registry : Vous pouvez configurer un <<_containerd_registry, registre privé pour le cluster>>.
+* Docker Hub (docker.io){nbsp}: C'est l'option par défaut lorsque vous ne configurez pas de registre privé dans {rancher-product-name}.
+
+Alternativement, vous pouvez obtenir une copie de l'image et la télécharger manuellement sur tous les nœuds.
+
+*Valeur par défaut* : aucune
+
+*Exemple*{nbsp}:
+
+----
+https://172.16.0.1/v3/import/w6tp7dgwjj549l88pr7xmxb4x6m54v5kcplvhbp9vv2wzqrrjhrc7c_c-m-zxbbbck9.yaml
+----
+
+=== `containerd-registry`
+
+*Définition* : Configuration d'un registre privé créé pour le cluster {harvester-product-name}.
+
+La valeur est stockée dans le fichier `registries.yaml` de chaque nœud (chemin{nbsp}: `/etc/rancher/rke2/registries.yaml`). Pour plus d'informations, consultez https://documentation.suse.com/cloudnative/rke2/latest/en/install/containerd_registry_configuration.html[Configuration du registre Containerd] dans la documentation {rke2-product-name}.
+
+Pour des raisons de sécurité, {harvester-product-name} supprime automatiquement le nom d'utilisateur et le mot de passe configurés pour le registre privé après que ces informations d'identification sont stockées dans le fichier `registries.yaml`.
+
+*Exemple*{nbsp}:
+
+image::advanced/containerd-registry.png[containerd-registry]
+
+[,json]
+----
+{
+  "Mirrors": {
+    "docker.io": {
+      "Endpoints": ["https://myregistry.local:5000"],
+      "Rewrites": null
+    }
+  },
+  "Configs": {
+    "myregistry.local:5000": {
+      "Auth": {
+        "Username": "testuser",
+        "Password": "testpassword"
+      },
+      "TLS": {
+        "InsecureSkipVerify": false
+      }
+    }
+  }
+}
+----
+
+=== `csi-driver-config`
+
+*Définition*{nbsp}: Configuration nécessaire pour utiliser des pilotes CSI tiers installés dans le cluster.
+
+Vous devez configurer les informations suivantes avant d'utiliser les fonctionnalités liées aux sauvegardes et aux instantanés :
+
+* Provisionneur pour le pilote CSI tiers installé
+* `volumeSnapshotClassName` : Nom du `VolumeSnapshotClass` utilisé pour créer des instantanés de volume ou des instantanés de VM.
+* `backupVolumeSnapshotClassName` : Nom du `VolumeSnapshotClass` utilisé pour créer des sauvegardes de VM.
+
+*Valeur par défaut* :
+
+----
+{
+  "driver.longhorn.io": {
+    "volumeSnapshotClassName": "longhorn-snapshot",
+    "backupVolumeSnapshotClassName": "longhorn"
+  }
+}
+----
+
+=== `csi-online-expand-validation`
+
+*Définition* : Paramètre qui vous permet de marquer les fournisseurs de stockage avec un support confirmé pour l'expansion en ligne des volumes comme validés.
+
+Selon le fournisseur de stockage sous-jacent, vous devrez peut-être prendre des mesures supplémentaires pour utiliser la fonctionnalité d'expansion en ligne des volumes.
+
+* *{longhorn-product-name}* : {harvester-product-name} considère que {longhorn-product-name} prend en charge l'expansion en ligne des volumes, même s'il existe des différences entre les versions du moteur de données Longhorn. Actuellement, le moteur de données V1 prend entièrement en charge l'expansion en ligne des volumes, tandis que le moteur de données V2 ne prend pas du tout en charge l'expansion des volumes (quel que soit l'état de connexion du volume). Le webhook {harvester-product-name} gère les différences entre ces versions.
+
+* *Stockage tiers* : {harvester-product-name} rejette par défaut les demandes d'expansion en ligne des volumes pour le stockage tiers. Si vous avez confirmé que votre fournisseur de stockage prend en charge l'expansion en ligne des volumes, vous pouvez utiliser ce paramètre pour marquer ce fournisseur de stockage comme validé et forcer {harvester-product-name} à autoriser les demandes d'expansion en ligne associées.
+
+*Valeur par défaut* : `{"driver.longhorn.io":true}`
+
+=== `default-vm-termination-grace-period-seconds`
+
+*Définition* : Nombre de secondes que {harvester-product-name} attend avant de forcer l'arrêt d'une VM qui a été arrêtée via l'interface utilisateur.
+
+{harvester-product-name} envoie un signal d'arrêt gracieux à toute VM qui est arrêtée via l'interface utilisateur. Si le processus d'arrêt gracieux n'est pas terminé dans le nombre de secondes spécifié, {harvester-product-name} force l'arrêt de la VM.
+
+*Valeur par défaut* : `120`
+
+=== `http-proxy`
+
+*Définition* : Proxy HTTP utilisé pour accéder aux services externes, y compris le téléchargement d'images et la sauvegarde vers les services S3.
+
+[CAUTION]
+====
+Modifier ce paramètre peut entraîner une indisponibilité temporaire ou un accès impossible aux clusters à nœud unique.
+====
+
+*Valeur par défaut*{nbsp}: `{}`
+
+*Options et valeurs prises en charge*{nbsp}:
+
+* URL du proxy pour les requêtes HTTP{nbsp}: `"httpProxy": "http://<username>:<pswd>@<ip>:<port>"`
+* URL du proxy pour les requêtes HTTPS{nbsp}: `"httpsProxy": "https://<username>:<pswd>@<ip>:<port>"`
+* Liste de noms d'hôtes et/ou de CIDR séparés par des virgules{nbsp}: `"noProxy": "<hostname | CIDR>"`
+
+Vous devez spécifier des informations clés dans le champ `noProxy` si vous avez configuré les options ou paramètres suivants{nbsp}:
+
+|===
+| Option/configuration configurée | Valeur requise dans `noProxy` | Raison
+
+| `httpProxy` et `httpsProxy`
+| CIDR du nœud
+| Ne pas spécifier le CIDR du nœud peut compromettre le fonctionnement du cluster.
+
+| `cluster-registration-url`
+| Hôte de `cluster-registration-url`
+| Les informations sur l'hôte vous permettent d'accéder au cluster depuis {rancher-product-name}.
+|===
+
+{harvester-product-name} ajoute les adresses nécessaires aux valeurs `noProxy` spécifiées par l'utilisateur (par exemple,`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`). Cela garantit que le trafic interne circule comme prévu.
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "httpProxy": "http://my.proxy",
+  "httpsProxy": "https://my.proxy",
+  "noProxy": "some.internal.svc,172.16.0.0/16"
+}
+----
+
+=== `log-level`
+
+*Définition*{nbsp}: Niveau de journalisation pour l'hôte.
+
+*Valeur par défaut*{nbsp}: `info`
+
+*Options et valeurs prises en charge*{nbsp}:
+
+* `panic` : Niveau de journalisation le moins verbeux
+* `fatal`
+* `error`
+* `warn`, `warning`
+* `info`
+* `debug`
+* `trace` : Niveau de journalisation le plus verbeux
+
+*Exemple*{nbsp}:
+
+----
+debug
+----
+
+=== `longhorn-v2-data-engine-enabled` [Expérimental]
+
+*Définition*{nbsp}: Paramètre qui active et désactive le moteur de données Longhorn V2.
+
+Lorsqu'il est réglé sur `true`, {harvester-product-name} charge automatiquement les modules de kernel requis par le moteur de données Longhorn V2 et tente d'allouer 1024 × 2 MiB de pages énormes (par exemple, 2 GiB de RAM) sur tous les nœuds. 
+
+Modifier ce paramètre redémarre automatiquement {rke2-product-name} sur tous les nœuds mais n'affecte pas les charges de travail de machines virtuelles en cours d'exécution.
+
+[TIP]
+====
+Si vous rencontrez des messages d'erreur contenant la phrase "capacité de hugepages-2Mi insuffisante", laissez un certain temps pour que l'erreur soit résolue. Si l'erreur persiste, redémarrez les nœuds affectés.
+
+Pour désactiver le moteur de données Longhorn V2 sur des nœuds spécifiques (par exemple, des nœuds avec moins de ressources de traitement et de mémoire), allez à l'écran *Hôtes* et ajoutez l'étiquette suivante aux nœuds cibles{nbsp}:
+
+* étiquette{nbsp}: `node.longhorn.io/disable-v2-data-engine`
+* valeur{nbsp}: `true`
+====
+
+*Valeur par défaut*{nbsp}: `false`
+
+*Exemple*{nbsp}:
+
+```
+true
+```
+
+=== `max-hotplug-ratio`
+
+*Définition*{nbsp}: Paramètre qui détermine la quantité maximale par défaut de ressources UC et mémoire disponibles pour une machine virtuelle en cours d'exécution. Ce ratio est multiplié par la quantité de ressources UC et mémoire que vous avez allouées lors de la création de la machine virtuelle.
+
+[sidebar]
+Ressource maximale disponible au composant d'exécution = (Ressource allouée lors de la création de la machine virtuelle) x (`max-hotplug-ratio` valeur)
+
+*Valeur par défaut*{nbsp}: `4`
+
+*Valeurs prises en charge*{nbsp}: `1` à `20`
+
+*Exemple*{nbsp}:
+
+Le `max-hotplug-ratio` est défini sur `4`.
+
+|===
+| Ressource | Montant alloué | Montant maximum disponible
+
+| Cœurs d'UC
+| `1`
+| `4`
+
+| Mémoire (Gi)
+| `2`
+| `8`
+|===
+
+=== `ntp-servers`
+
+*Définition*{nbsp}: Serveurs NTP pour la synchronisation de l'heure sur les nœuds.
+
+Vous pouvez définir des serveurs NTP lors de l'xref:installation-setup/config/configuration-file.adoc#_os_ntp_servers[installation] et mettre à jour les adresses après l'installation.
+
+[CAUTION]
+====
+Les modifications de la liste des adresses des serveurs sont appliquées à tous les nœuds.
+====
+
+*Valeur par défaut*{nbsp}: ""
+
+*Exemple*{nbsp}:
+
+----
+{
+  "ntpServers": [
+    "0.suse.pool.ntp.org",
+    "1.suse.pool.ntp.org"
+  ]
+}
+----
+
+=== `overcommit-config`
+
+*Définition*{nbsp}: Pourcentage des ressources physiques de calcul, de mémoire et de stockage qui peuvent être allouées pour l'utilisation de la VM.
+
+Le surengagement est utilisé pour optimiser l'allocation des ressources physiques, en particulier lorsque les VM ne sont pas censées consommer pleinement les ressources allouées la plupart du temps. Définir des valeurs supérieures à 100 % permet de planifier plusieurs VM même lorsque les ressources physiques sont notionnellement entièrement allouées.
+
+*Valeurs par défaut*{nbsp}: `{ "cpu":1600, "memory":150, "storage":200 }`
+
+Avec les valeurs par défaut, il serait possible de planifier les éléments suivants{nbsp}:
+
+* 16 fois le nombre de UC physiques sur un hôte
+* 1,5 fois la quantité de RAM physique sur un hôte
+* 2 fois la quantité de stockage physique dans {longhorn-product-name}
+
+Une VM configurée pour utiliser 2 UC (équivalent à 2 000 milliCPU) peut consommer l'allocation complète tant que les ressources sont disponibles. Cependant, si l'hôte exécute des charges de travail lourdes et qu'une valeur de surengagement est définie (par exemple, 1600 %), {harvester-product-name} ne demande que 125 milliCPU au planificateur Kubernetes (2000/16 = 125 milliCPU).
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "cpu": 1000,
+  "memory": 200,
+  "storage": 300
+}
+----
+
+=== `release-download-url`
+
+*Définition*{nbsp}: URL pour télécharger le logiciel requis pour les mises à niveau.
+
+{harvester-product-name} récupère l'URL ISO et la valeur de somme de contrôle à partir du fichier `${URL}/${VERSION}/version.yaml` qui est accessible via l'URL configurée.
+
+*Valeur par défaut*{nbsp}: `https://releases.rancher.com/harvester`
+
+*Exemple (version.yaml)*:
+
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Version
+metadata:
+  name: ${VERSION}
+  namespace: harvester-system
+spec:
+  isoChecksum: ${ISO_CHECKSUM}
+  isoURL: ${ISO_URL}
+----
+
+=== `server-version`
+
+*Définition*{nbsp}: Version de {harvester-product-name} installée sur les nœuds.
+
+*Exemple*{nbsp}:
+
+----
+v1.0.0-abcdef-head
+----
+
+=== `ssl-certificates`
+
+*Définition*{nbsp}: Certificats SSL pour l'interface utilisateur et l'API.
+
+[CAUTION]
+====
+Modifier ce paramètre peut entraîner une indisponibilité temporaire ou un accès impossible aux clusters à nœud unique.
+====
+
+*Valeur par défaut*{nbsp}: `{}`
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "ca": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "publicCertificate": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nSOME-PRIVATE-KEY-ENCODED-IN-PEM-FORMAT\n-----END RSA PRIVATE KEY-----"
+}
+----
+
+=== `ssl-parameters`
+
+*Définition*{nbsp}: Protocoles et chiffrements SSL/TLS activés pour l'interface utilisateur et l'API.
+
+[IMPORTANT]
+.important
+====
+Si vous configurez mal ce paramètre et que vous ne pouvez pas accéder à l'interface utilisateur et à l'API, consultez xref:troubleshooting/cluster.adoc#_i_cant_access_suse_virtualization_after_i_changed_ssltls_enabled_protocols_and_ciphers[Troubleshooting].
+====
+
+*Valeur par défaut*{nbsp}: aucune
+
+*Options et valeurs prises en charge*{nbsp}:
+
+* `protocols` : Protocoles activés.
+* `ciphers` : Chiffrements activés.
+
+Pour plus d'informations sur les options prises en charge, consultez https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-protocols[`ssl-protocols`] et https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-ciphers[`ssl-ciphers`] dans la documentation du contrôleur Ingress-Nginx.
+
+Si vous ne spécifiez aucune valeur, {harvester-product-name} utilise `TLSv1.2` et `ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305`.
+
+*Exemple*{nbsp}:
+
+----
+{
+  "protocols": "TLSv1.2 TLSv1.3",
+  "ciphers": "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305"
+}
+----
+
+=== `storage-network`
+
+*Définition*{nbsp}: Réseau de stockage séparé pour le trafic {longhorn-product-name}.
+
+Par défaut, {longhorn-product-name} utilise le réseau de gestion, qui est limité à une seule interface et partagé avec les charges de travail à l'échelle du cluster. Si votre mise en œuvre nécessite une séparation du réseau, vous pouvez utiliser un xref:networking/storage-network.adoc[réseau de stockage] pour isoler le trafic de données {longhorn-product-name} dans le cluster.
+
+[IMPORTANT]
+.important
+====
+Éteignez toutes les VM avant de configurer ce paramètre.
+
+Spécifiez une plage d'IP au format CIDR IPv4. Le nombre d'IP doit être quatre fois le nombre de vos nœuds de cluster.
+====
+
+*Valeur par défaut* : ""
+
+*Exemple*{nbsp}:
+
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "storage",
+  "range": "192.168.0.0/24"
+}
+----
+
+=== `support-bundle-image`
+
+*Définition* : Image du bundle de support, avec différentes versions disponibles dans https://hub.docker.com/r/rancher/support-bundle-kit/tags[`rancher/support-bundle-kit`].
+
+*Valeur par défaut*{nbsp}: image `support-bundle-kit` qui est intégrée dans l'ISO {harvester-product-name} et est spécifique à chaque version {harvester-product-name}.
+
+*Options et valeurs prises en charge* :
+
+La valeur est un objet littéral JSON qui contient les paires clé-valeur suivantes :
+
+* `repository` : Nom du dépôt qui stocke l'image du bundle de support.
++
+* `tag` :  Tag attribué à l'image du bundle de support.
++
+* `imagePullPolicy` : Politique de récupération de l'image du bundle de support. Les valeurs prises en charge sont `IfNotPresent`, `Always` et `Never`. Pour plus d'informations, voir https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy[Politique de récupération d'image] dans la documentation Kubernetes.
+
+*Exemple*{nbsp}:
+
+----
+{
+  "repository": "rancher/support-bundle-kit",
+  "tag": "v0.0.25",
+  "imagePullPolicy": "IfNotPresent"
+}
+----
+
+Dans cet exemple, le tag d'image par défaut du cluster est `v0.0.25`.
+
+La CLI affiche l'objet de configuration suivant `support-bundle-image` :
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'  // default value, automatically set
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+Après un certain temps, un nouveau tag d'image (`v0.0.36`) est spécifié dans le champ `value` à l'aide de l'interface utilisateur.
+
+image::advanced/support-bundle-image-set-customized-value.png[]
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value
+```
+
+Finalement, ce cluster est mis à niveau et l'objet change à nouveau.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default value, automatically updated after upgrade
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value is kept unchanged
+```
+
+La valeur de `tag` dans le champ `value` est `v0.0.36`, tandis que la valeur de `tag` dans le champ `default` est `v0.0.38`.
+
+Pour effacer le paramètre obsolète et utiliser le tag d'image par défaut, exécutez la commande suivante, supprimez le champ `value` et enregistrez les modifications.
+
+```
+$ kubectl edit settings.harvesterhci.io support-bundle-image
+```
+
+L'objet apparaît comme suit après la suppression du champ `value`.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+Le bouton *Utiliser la valeur par défaut* sur l'interface utilisateur peut être utilisé pour copier le contenu du champ `default` dans le champ `value`.
+
+image::advanced/support-bundle-image-set-use-default-value.png[]
+
+L'objet apparaît comme suit après que les modifications ont été enregistrées.
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // copied from default
+```
+
+Lorsque le cluster sera mis à niveau à l'avenir, le contenu du champ `value` pourrait devenir obsolète à nouveau car le tag d'image par défaut est susceptible de changer.
+
+[NOTE]
+====
+* La valeur de `tag` dans le champ `default` est toujours basée sur l'image qui est intégrée dans l'ISO {harvester-product-name}. Ce champ est automatiquement mis à jour chaque fois que le cluster est mis à niveau.
++
+* Le champ `default` est utilisé lorsque le champ `value` n'est pas défini ou est laissé vide. {harvester-product-name} vérifie si l'image par défaut est stockée dans le cluster et est à jour.
++
+* La configuration de ce paramètre n'est pas requise. Si vous décidez de spécifier un tag d'image différent dans le champ `value`, rappelez-vous que ce tag peut devenir obsolète lorsque le cluster est mis à niveau.
++
+* Utilisez la commande `$ kubectl edit settings.harvesterhci.io support-bundle-image` pour effacer le champ `value`.
++
+* Le bouton *Utiliser la valeur par défaut* sur l'interface utilisateur ne fait que copier le contenu du champ `default` dans le champ `value`. Vous pouvez l'utiliser pour remplacer un tag d'image obsolète, mais le tag copié deviendra également obsolète (lorsque le cluster sera mis à niveau et que le champ `default` sera mis à jour).
++
+* Si votre cluster se trouve dans un environnement isolé physiquement et que vous avez spécifié un tag d'image non par défaut dans le champ `value`, assurez-vous que l'image est disponible dans le registre local de containerd. {harvester-product-name} ne xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[générera pas un bundle de support] si l'image n'est pas disponible.
+====
+
+=== `support-bundle-namespaces`
+
+*Définition*{nbsp}: Espaces de noms supplémentaires que vous pouvez utiliser lors de xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[la génération d'un bundle de support].
+
+Par défaut, le bundle de support ne collecte des ressources que dans les espaces de noms prédéfinis suivants{nbsp}:
+
+* cattle-dashboards
+* cattle-fleet-local-system
+* cattle-fleet-system
+* cattle-fleet-clusters-system
+* cattle-monitoring-system
+* fleet-local
+* harvester-system
+* local
+* longhorn-system
+* cattle-logging-system
+
+Les espaces de noms que vous sélectionnez sont ajoutés à la liste des espaces de noms prédéfinis.
+
+*Valeur par défaut*{nbsp}: aucune
+
+=== `support-bundle-timeout`
+
+*Définition*{nbsp}: Nombre de minutes que {harvester-product-name} permet pour l'achèvement du processus de génération du bundle de support.
+
+Le processus est considéré comme ayant échoué lorsque les tâches de collecte de données et de conditionnement de fichiers ne sont pas terminées dans le nombre de minutes configuré. {harvester-product-name} ne continue pas et ne réessaie pas les processus de génération de bundle de support qui ont expiré. Lorsque la valeur est `0`, la fonction de délai d'attente est désactivée.
+
+*Valeur par défaut*{nbsp}: `10`
+
+=== `support-bundle-expiration`
+
+*Définition*{nbsp}: Nombre de minutes que {harvester-product-name} attend avant de supprimer un bundle de support qui a été conditionné mais non téléchargé (soit délibérément, soit sans succès) ou conservé.
+
+Vous pouvez spécifier une valeur supérieure ou égale à 0. Lorsque la valeur est 0, {harvester-product-name} utilise la valeur par défaut.
+
+*Valeur par défaut*: `30`
+
+=== `support-bundle-node-collection-timeout`
+
+*Définition*{nbsp}: Nombre de minutes que {harvester-product-name} permet pour la collecte des journaux et des configurations sur les nœuds pour le bundle de support.
+
+Si le processus de collecte n'est pas terminé dans le temps imparti, {harvester-product-name} vous permet toujours de télécharger le bundle de support (sans les données non collectées). Vous pouvez spécifier une valeur supérieure ou égale à 0. Lorsque la valeur est 0, {harvester-product-name} utilise la valeur par défaut.
+
+*Valeur par défaut*: `30`
+
+=== `upgrade-checker-enabled`
+
+*Définition*{nbsp}: Paramètre qui vérifie automatiquement les mises à niveau disponibles.
+
+*Valeur par défaut*{nbsp}: `true`
+
+*Exemple*{nbsp}:
+
+----
+false
+----
+
+=== `upgrade-checker-url`
+
+*Définition*{nbsp}: URL utilisée pour vérifier les mises à niveau disponibles.
+
+Ce paramètre ne peut être utilisé que si le paramètre `upgrade-checker-enabled` est défini sur `true`.
+
+*Valeur par défaut*{nbsp}: `https://harvester-upgrade-responder.rancher.io/v1/checkupgrade`
+
+*Exemple*{nbsp}:
+
+----
+https://your.upgrade.checker-url/v99/checkupgrade
+----
+
+=== `upgrade-config`
+
+*Définition*{nbsp}: Configuration liée à la mise à niveau.
+
+*Valeur par défaut*:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "sequential"
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "auto"
+    }
+  },
+  "restoreVM": false,
+  "logReadyTimeout": "5"
+}
+----
+
+*Options et champs pris en charge*{nbsp}:
+
+* `imagePreloadOption` : Options pour la phase de préchargement de l'image.
++
+L'ISO complet contient les composants essentiels du système d'exploitation et toutes les images de conteneur requises. {harvester-product-name} peut précharger ces images de conteneur sur chaque nœud pendant l'installation et les mises à niveau. Lorsque des charges de travail sont programmées sur les nœuds de gestion et de travail, les images de conteneur sont prêtes à l'emploi.
++
+** `strategy` : Stratégie de préchargement d'image.
++
+*** `type` : Type de stratégie de préchargement d'image.
++
+**** `sequential` : Les images de conteneur de l'ISO cible sont préchargées sur chaque nœud. Il s'agit de l'option par défaut.
++
+**** `skip` : Les images de conteneur ne sont pas préchargées sur chaque nœud. *Ne pas utiliser cette option dans les environnements de production.*
++
+[IMPORTANT]
+====
+Si vous décidez d'utiliser `skip`, assurez-vous que les exigences suivantes sont respectées{nbsp}:
+
+* Vous disposez d'un registre de conteneur privé contenant toutes les images requises.
+* Votre cluster a un accès Internet haut débit et peut télécharger toutes les images depuis Docker Hub si nécessaire.
+
+Notez toute interruption potentielle du service Internet et à quel point vous êtes proche d'atteindre votre https://www.docker.com/increase-rate-limits/[limite de taux Docker Hub]. L'échec du téléchargement de l'une des images requises peut entraîner l'échec de la mise à niveau et laisser le cluster dans un état intermédiaire.
+====
++
+**** `parallel` (*expérimental*){nbsp}: Les nœuds préchargent les images par lots. Vous pouvez ajuster cela en utilisant l'option `concurrency`.
++
+*** `concurrency` : Nombre de nœuds pouvant précharger des images simultanément. Cette option prend effet uniquement lorsque `type` est défini sur `parallel`.
++
+La valeur par défaut est `0`, ce qui équivaut à suivre le nombre de nœuds du cluster. L'utilisation de `0` permet au système de suivre dynamiquement l'échelle du cluster. Les valeurs supérieures au nombre de nœuds du cluster sont considérées comme `0`, tandis que les valeurs inférieures sont considérées comme invalides et sont rejetées.
++
+[NOTE]
+====
+{harvester-product-name} déploie un service upgrade-repo sur le cluster qui sert de serveur HTTP pour les nœuds ayant besoin de précharger les images de conteneur. Lorsqu'une valeur `concurrency` est définie, chaque lot de nœuds télécharge les images de conteneur depuis cet upgrade-repo en parallèle. De ce fait, vous devez prendre en compte la vitesse du réseau de gestion {harvester-product-name} et la vitesse de lecture du disque par défaut pour {longhorn-product-name}.
+====
+
+* `nodeUpgradeOption` : Définition de la manière dont {harvester-product-name} doit effectuer les mises à niveau des nœuds.
++
+La mise à niveau des nœuds est une opération atomique, qui inclut la mise à niveau des composants RKE2 du nœud et du système d'exploitation. La mise à niveau est soit entièrement terminée, soit échouée, sans état intermédiaire.
++
+Pour préparer un nœud cible à la mise à niveau, {harvester-product-name} tente d'abord de migrer en direct toutes les machines virtuelles en cours d'exécution vers d'autres nœuds. Les machines virtuelles qui ne peuvent pas être migrées en direct sont automatiquement arrêtées pour éviter toute perturbation et problème lors des étapes de mise à niveau suivantes.
++
+** `strategy` : Stratégie de mise à niveau des nœuds.
++
+*** `mode` : Mode de la stratégie de mise à niveau des nœuds{nbsp}:
++
+**** `auto` : Les mises à niveau des nœuds commencent automatiquement. Il s'agit de la valeur par défaut.
+**** `manual` : Les mises à niveau des nœuds sont suspendues jusqu'à ce que vous preniez des mesures spécifiques pour reprendre le processus.
++
+*** `pauseNodes` : Liste des nœuds qui doivent être exclus des mises à niveau automatiques.
++
+Si le champ `mode` est défini sur `manual` et que vous ne spécifiez aucun nom de nœud dans ce champ, les mises à niveau sont suspendues pour tous les nœuds. Si le champ `mode` est défini sur `auto`, les noms de nœuds spécifiés dans ce champ sont ignorés et les mises à niveau des nœuds commencent automatiquement.
++
+[IMPORTANT]
+====
+La mise à niveau des nœuds listés dans ce champ est _suspendue définitivement_ jusqu'à ce que vous preniez des mesures spécifiques pour xref:upgrades/upgrades.adoc#_resuming_a_paused_node_upgrade[reprendre le processus]. Étant donné que {harvester-product-name} met à niveau les nœuds séquentiellement, cela implique que l'ensemble du progrès de mise à niveau est également suspendu. 
+====
++
+Exemple :
++
+[,json]
+----
+"pauseNodes": ["node-0", "node-2"]
+----
+
+* `restoreVM` : Option permettant à {harvester-product-name} de restaurer automatiquement les xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[machines virtuelles non migrables] qui étaient en cours d'exécution, après que la mise à niveau ait été *réussie*. Vous pouvez spécifier l'une des valeurs suivantes{nbsp}:
++
+** `true`{nbsp}: {harvester-product-name} arrête de force les *machines virtuelles en cours d'exécution* et *en pause* non migrables sur chaque nœud. Après la mise à niveau, les machines virtuelles précédemment en cours d'exécution sont automatiquement redémarrées, tandis que les machines virtuelles en pause restent arrêtées.
+** `false` : Il s'agit de la valeur par défaut. Dans des environnements multi-nœuds, vous devez arrêter toutes les machines virtuelles non migrables pour permettre à la mise à niveau de se poursuivre. {harvester-product-name} ne redémarre pas ces machines virtuelles après la mise à niveau.
++
+[NOTE]
+====
+Toutes les machines virtuelles sont considérées comme non migrables dans des environnements à nœud unique. {harvester-product-name} arrête de force toutes les machines virtuelles avant de commencer le processus de mise à niveau.
+====
+
+* `logReadyTimeout` : Nombre de minutes que {harvester-product-name} permet pour la création de l'infrastructure de journalisation de mise à niveau.
++
+** Valeur par défaut{nbsp}: `"5"`
+** Valeurs valides{nbsp}: `""`, `"1"` à `"20"` (entre guillemets doubles)
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "parallel",
+      "concurrency": 2
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "manual",
+      "pauseNodes": [
+        "node-3"
+      ]
+    }
+  }
+  "restoreVM": true,
+  "logReadyTimeout": "5"
+}
+----
+
+=== `vip-pools`
+
+*Versions*: Obsolète depuis la v1.2.0 (Utilisez xref:networking/ip-pool.adoc[pools IP] à la place.)
+
+*Définition*{nbsp}: Pools d'adresses IP globaux ou spécifiques à un espace de noms du VIP par CIDR ou plage d'IP.
+
+*Valeur par défaut*{nbsp}: `{}`
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "default": "172.16.0.0/24,172.16.1.0/24",
+  "demo": "172.16.2.50-172.16.2.100,172.16.2.150-172.16.3.200"
+}
+----
+
+=== `vm-force-reset-policy`
+
+*Définition*{nbsp}: Paramètre qui vous permet de forcer la replanification d'une machine virtuelle lorsque le nœud sur lequel elle s'exécute devient indisponible.
+
+Lorsque l'état du nœud change en `Not Ready`, la machine virtuelle est supprimée de force et replanifiée sur un nœud disponible après le nombre de secondes configuré.
+
+Lorsque le nœud devient indisponible ou est éteint, la machine virtuelle redémarre uniquement et ne migre pas.
+
+*Options prises en charge*:
+
+* `period` : Nombre de secondes que {harvester-product-name} attend avant d'ajouter la taint `kubevirt.io/drain` aux nœuds en échec. Cette option déclenche la migration de la machine virtuelle.
+* `vmMigrationTimeout` : Nombre de secondes que {harvester-product-name} attend avant d'ajouter la taint `node.kubernetes.io/out-of-service` aux nœuds en échec. Cette option force le nettoyage des ressources orphelines.
+
+*Valeur par défaut*{nbsp}: `{"enable":true, "period":15, "vmMigrationTimeout": 180}`
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "enable": "true",
+  "period": 15,
+  "vmMigrationTimeout": 180
+}
+----
+
+=== `vm-migration-network`
+
+*Définition*{nbsp}: Réseau séparé pour le trafic de migration de machines virtuelles.
+
+Par défaut, {harvester-product-name} utilise le réseau de cluster intégré `mgmt` pour la migration de machines virtuelles. `mgmt` est limité à une seule interface et est partagé avec les charges de travail à l'échelle du cluster. Si votre implémentation nécessite une séparation des réseaux, vous pouvez utiliser un xref:networking/vm-migration-network.adoc[réseau de migration de VM] pour isoler le trafic de migration.
+
+[IMPORTANT]
+====
+Spécifiez une plage d'IP au format CIDR IPv4. Le nombre d'adresses IP doit être supérieur ou égal au nombre de vos nœuds de cluster.
+====
+
+*Valeur par défaut*{nbsp}: ""
+
+*Exemple*{nbsp}:
+
+[,json]
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "vm-migration",
+  "range": "192.168.1.0/24"
+}
+----
+
+=== `volume-snapshot-class`
+
+*Définition*{nbsp}: VolumeSnapshotClassName pour le VolumeSnapshot et le VolumeSnapshotContent lors de la restauration d'une VM dans un espace de noms qui ne contient pas la VM source.
+
+*Valeur par défaut*{nbsp}: `longhorn`
+
+*Exemple*{nbsp}:
+
+`longhorn`
+
+== Paramètres de l'interface utilisateur
+
+=== `branding`
+
+*Définition*{nbsp}: Ce paramètre vous permet de rebrander globalement l'interface utilisateur en personnalisant le nom du produit, les logos et le schéma de couleurs.
+
+*Valeur par défaut*{nbsp}: *Harvester*
+
+[CAUTION]
+====
+Parce que ce paramètre fait partie de la ressource personnalisée `settings.management.cattle.io`, vous ne pouvez pas configurer l'une des options prises en charge (par exemple, `Logo` et `Primary Color`) en utilisant un xref:installation-setup/config/configuration-file.adoc#_system_settings[fichier de configuration].
+====
+
+image::advanced/branding.png[containerd-registry]
+
+*Options et valeurs prises en charge*{nbsp}:
+
+* *Marque Privée*: Nom du produit ou autre texte qui remplace "Harvester" dans la plupart des emplacements de l'interface utilisateur.
+* *Logo*{nbsp}: Image du logo dans l'en-tête de navigation de niveau supérieur. Vous devez télécharger des logos pour les modes clair et sombre.
+* *Favicon*{nbsp}: Petite image affichée à côté du titre de la page dans l'onglet du navigateur.
+* *Couleur Principale*{nbsp}: Couleur principale utilisée dans toute l'interface utilisateur.
+* *Couleur des Liens*{nbsp}: Couleur utilisée pour le texte des liens dans toute l'interface utilisateur.
+
+=== `ui-index`
+
+*Définition*{nbsp}: Emplacement de l'index HTML pour l'interface utilisateur.
+
+*Valeur par défaut*{nbsp}: `https://releases.rancher.com/harvester-ui/dashboard/latest/index.html`
+
+*Exemple*{nbsp}:
+
+----
+https://your.static.dashboard-ui/index.html
+----
+
+=== `ui-path`
+
+*Définition*{nbsp}: Chemin qui décrit l'emplacement de `index.html`, utilisé pour accéder à l'interface utilisateur.
+
+`ui-path` sert de point d'entrée à l'interface utilisateur et est actif uniquement dans les situations suivantes{nbsp}:
+
+* La valeur de `ui-source` est `bundled`.
+* La valeur de `ui-source` est `auto`, mais `ui-index` ne parvient pas à récupérer le fichier HTML.
+
+*Valeur par défaut*{nbsp}: `/usr/share/harvester/harvester`
+
+*Exemples*:
+
+`index.html` est stocké dans un conteneur dans `/home/samplefolder`. La valeur de `ui-source` est `bundled`.
+
+Scénario 1 : La valeur de `ui-path` est `/home/samplefolder`. Chaque fois que vous accédez à l'interface utilisateur, le contenu de `/home/samplefolder/index.html` est affiché.
+
+Scénario 2 : La valeur de `ui-index` pointe vers une page qui est indisponible ou inexistante (par exemple, `notexist-example.com/index.html`). Lorsque vous accédez à l'interface utilisateur pour la première fois, le contenu de `/home/samplefolder/index.html` est affiché. Cependant, si vous modifiez le paramètre `ui-index` pour utiliser la valeur par défaut et accédez à l'interface utilisateur à nouveau, le contenu de `/home/samplefolder/index.html` est toujours affiché (même si la nouvelle valeur `ui-index` pointe vers une page disponible). Pour plus d'informations, voir https://github.com/harvester/harvester/issues/6066[Problème #6066].
+
+=== `ui-source`
+
+*Définition*\&nbsp;: Paramètre qui vous permet de configurer la procédure de chargement de la source de l'interface utilisateur.
+
+*Valeur par défaut*\&nbsp;: `auto`
+
+*Valeurs prises en charge*\&nbsp;:
+
+* `auto` : Détecte automatiquement s'il faut utiliser l'interface utilisateur intégrée ou non.
+* `external` : Utilise la source d'interface utilisateur externe à partir de l'URL ui-index.
+* `bundled` : Utilise la source d'interface utilisateur intégrée à partir du serveur local {harvester-product-name}.
+
+*Exemple*{nbsp}:
+
+----
+external
+----

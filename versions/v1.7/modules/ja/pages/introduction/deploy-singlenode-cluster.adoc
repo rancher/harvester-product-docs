@@ -1,0 +1,108 @@
+= シングルノードクラスターをデプロイする
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+高可用性などのマルチノード機能を完全に実現するには、3つ以上のノードを持つ{harvester-product-name}クラスターが必要です。最新のバージョンでは、2つの管理ノードと1つのxref:../hosts/witness-node.adoc[ウィットネスノード]（オプションで1つ以上のワーカーノード）を持つクラスターを作成できます。高可用性、マルチレプリカサポート、ライブマイグレーションを除くほとんどの機能をサポートするxref:../installation-setup/single-node-clusters.adoc[シングルノードクラスター]を作成することもできます。
+
+このガイドでは、*シングルノードクラスター*とゲストクラスターをホストし、カスタムワークロードを実行できる仮想マシン（VM）をデプロイするために必要な手順を説明します。
+
+== 1.最小限のハードウェアおよびネットワーク要件が満たされていることを確認してください。
+
+{harvester-product-name}は、エンタープライズグレードのオープンソースソフトウェアコンポーネントを使用して、ベアメタルサーバー向けに構築されています。インストーラーは自動的にハードウェアをチェックし、最小xref:../installation-setup/requirements.adoc[要件]が満たされていない場合は警告メッセージを表示します。
+
+== 2.使用したいインストール方法に基づいてインストールファイルを準備してください。
+
+インストールファイルは、 https://github.com/harvester/harvester/releases[リリース]ページからダウンロードできます。リリースノートの*ダウンロード*セクションには、ISOファイルおよび関連アーティファクトへのリンクが含まれています。利用できるISOファイルの種類は次のとおりです：
+
+* *フルISO*：コアオペレーティングシステムコンポーネントと、インストール中にプリロードされるすべての必要なコンテナイメージが含まれています。ファイアウォールやプロキシの背後で{harvester-product-name}をインストールする場合や、インターネット接続がない環境では、フルISOを使用する必要があります。
+* xref:../installation-setup/media/net-install.adoc[*ネットインストールISO*]：コアオペレーティングシステムコンポーネントのみが含まれています。インストールが完了すると、オペレーティングシステムはインターネットからすべての必要なコンテナイメージを取得します（主にDocker Hubから）。
+
+|===
+| メソッド | 必要なインストールファイル | その他の要件
+
+| xref:../installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| N/A
+
+| xref:../installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| USBフラッシュドライブ； https://etcher.balena.io/[balenaEtcher]やLinuxの https://man7.org/linux/man-pages/man1/dd.1.html[ddコマンド]などのユーティリティ
+
+| xref:../installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO、Linuxカーネルイメージ（vmlinuz）、initrd、SquashFSイメージ
+| HTTPサーバー上のディレクトリ（ブートファイルを提供するため）；iPXEブートスクリプト（自動インストール用）；DHCPサーバーの設定
+|===
+
+== 3.クラスターの設定要件を準備します。
+
+* クラスター トークン：ノードがクラスターに参加する際に使用するASCII文字列
+* 各ノードの固定IPアドレス：静的に割り当てることも、DHCP（ホスト予約）を使用して割り当てることもできます。
+* クラスター管理アドレスとして使用される固定仮想IPアドレス（VIP）：クラスターが展開された後に管理タスクを実行する際に接続するVIP
+* DNSサーバー、NTPサーバー、およびプロキシサーバーのアドレス（必要に応じて）
+
+== 4.クラスターのノードを展開します。
+
+展開には、ホストにオペレーティングシステムやその他のコンポーネントをインストールし、インストールが完了したら再起動することが含まれます。ノードを展開するとクラスターが作成され、ノードはデフォルトで管理役割が割り当てられます。
+
+インストール中に、ノード設定を構成し、クラスター管理アドレス（VIP）とクラスターのトークンを定義し、その他の情報を指定する必要があります。必要に応じて、xref:../installation-setup/config/configuration-file.adoc[設定ファイル]を使用してさらに設定できます。
+
+インストールが完了すると、ノードが再起動し、コンソールが表示されます。コンソールには、クラスター（管理URLとステータス）およびノード（ホスト名、IPアドレス、ステータス）に関する情報が表示されます。クラスターが初期化され、すべてのサービスが実行を開始すると、クラスターのステータスが*準備完了*に変更されます。
+
+== 5.デフォルトの`admin`ユーザーの強力なパスワードを設定してください。
+
+クラスターのステータスが*準備完了*に変更されると、コンソールに表示された管理URLを使用してxref:../installation-setup/authentication.adoc[UI]にアクセスできます。
+
+== 6.デフォルトのStorageClassを設定します。
+
+{harvester-product-name}は、Longhornがボリュームをプロビジョニングする方法を説明するためにStorageClassesを使用します。各StorageClassには、各ボリュームのために作成されるレプリカの数を定義するパラメータがあります。
+
+デフォルトのStorageClass `harvester-longhorn`は、高可用性のためにレプリカ数の値が*3*です。単一ノードクラスターで`harvester-longhorn`を使用すると、Longhornはデフォルトのレプリカ数を作成できず、ボリュームはUI上で_劣化_としてマークされます。
+
+この問題を回避するために、次のいずれかのアクションを実行できます：
+
+* xref:../installation-setup/config/configuration-file.adoc[設定ファイル]を使用して、`harvester-longhorn`のxref:../installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[レプリカ数]を*1*に変更します。
+* xref:../storage/storageclass.adoc#_creating_a_storageclass[新しいStorageClassを作成]し、*レプリカの数*パラメータを*1*に設定します。作成後、リスト内の新しいStorageClassを見つけて、*⋮* > *デフォルトに設定*を選択します。
+
+== 7.カスタムクラスターネットワークとVMネットワークを作成します。(オプション)
+
+ネットワーキングには、3つの主要な概念があります：
+
+* xref:../networking/cluster-network.adoc#_cluster_network[*クラスターネットワーク*]：{harvester-product-name}クラスター内のネットワークトラフィックの送信のためのトラフィック隔離された転送パス。
++
+デプロイ中に、xref:../networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`]というクラスターネットワークが作成され、クラスター内通信のために使用されます。`mgmt`は、各ノードがクラスター管理目的のために管理NICで接続するインフラストラクチャネットワーク（クラスター外）からVMにアクセスできるようにします。{harvester-product-name}は、VMトラフィック専用のxref:../networking/cluster-network.adoc#_custom_cluster_network[カスタムクラスターネットワーク]を作成することも可能です。
+
+* xref:../networking/cluster-network.adoc#_network_configuration[*ネットワーク設定*]：クラスターのノードが特定のクラスターネットワークに接続する方法の定義。
++
+各ネットワーク設定は、均一なネットワーク仕様を持つノードのセットに対応しています。ネットワーク設定に含まれるノードのみが、関連するクラスターネットワークにアクセスできます。この配置は、特に各ノードのネットワークインターフェース名が異なる場合に、異種クラスターを構成する際の柔軟性を提供します。
+
+* xref:../networking/cluster-network.adoc#_vm_network[*VMネットワーク*]：VMが他のVMや外部ネットワークと通信するために使用する仮想ネットワークです。
++
+各VMネットワークは特定のクラスターネットワークにリンクされており、VMトラフィックの送信に使用されます。トラフィックの分離、ネットワークのセグメンテーション、管理の容易さ、または外部ネットワーク環境との整合性などの要件に基づいて、xref:../networking/vm-network.adoc#_vlan_network[VLANネットワーク]またはxref:../networking/vm-network.adoc#_untagged_network[タグなしネットワーク]を作成できます。
+
+単一ノードクラスターで`mgmt`をテストする際に{harvester-product-name}を使用するVMネットワークを作成できます。
+
+== 8.VMイメージをインポートします。
+
+UI上で、ローカルファイルシステムからイメージをアップロードするか、クラスターからアクセス可能なイメージのURLを指定することで、ISO、qcow2、および生のxref:../virtual-machines/vm-images/upload-image.adoc[イメージ]をインポートできます。
+
+== 9.SSHキーをインポートします。（推奨）
+
+SSH公開鍵を{harvester-product-name}に保存できます。VMが起動すると、保存されたキーがVMにxref:../virtual-machines/access-vm.adoc#_ssh_access[注入され]、SSHを介して安全にアクセスできるようになります。検証済みのキーは、UIの*SSHキー*画面に表示されます。
+
+== 10.VMを作成します。
+
+次のいずれかの方法を使用してxref:../virtual-machines/create-vm.adoc[Linux VM]を作成できます：
+
+* UI：*仮想マシン*画面で、*作成*をクリックし、各タブの設定を行います。
+* Kubernetes API：`VirtualMachine`オブジェクトを作成します。
+* xref:../integrations/terraform/terraform-provider.adoc[Terraformプロバイダー]：`harvester_virtualmachine`リソースブロックを定義します。
+
+UIでxref:../virtual-machines/create-windows-vm.adoc[Windows VMs]を作成するには、若干異なる手順が必要です。{harvester-product-name}は、Windows用のVirtioドライバーを持つボリュームを追加する`windows-iso-image-base-template`という名前のVMテンプレートを提供し、VMの設定処理を効率化します。Virtioデバイスが必要ですが、テンプレートを使用しない場合は、正しいハードウェア検出を有効にするために、Windows用の独自のVirtioドライバーを追加する必要があります。
+
+== 次のタスク
+
+以下のセクションでは、VMのバックアップと復元、ホストの管理、{rancher-product-name}を{harvester-product-name}と共に使用する方法についてのガイドを提供します。
+
+* xref:../virtual-machines/backup-restore.adoc[VMバックアップ、スナップショット＆復元]
+* xref:../hosts/hosts.adoc[ホスト管理]
+* xref:../integrations/rancher/rancher-integration.adoc[{rancher-product-name}統合]

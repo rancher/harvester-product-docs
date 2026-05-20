@@ -1,0 +1,430 @@
+= 存储网络
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+{harvester-product-name}使用{longhorn-product-name}为虚拟机和pod提供块设备卷。如果您想将{longhorn-product-name}复制流量与`mgmt`（内置集群网络）或其他集群范围的工作负载隔离，可以使用专用存储网络以获得更好的网络带宽和性能。
+
+有关更多信息，请参见 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/networking/storage-network.html[存储网络]中的{longhorn-product-name}文档。
+
+[NOTE]
+====
+避免直接配置{longhorn-product-name}设置，因为这可能导致意外或不希望的系统行为。
+====
+
+== 先决条件
+
+在开始配置存储网络之前，请确保满足以下要求：
+
+* 网络交换机已正确配置，并且为存储网络分配了专用VLAN ID。
+
+* xref:networking/cluster-network.adoc[集群网络]和xref:networking/vm-network.adoc#_vlan_network[VLAN网络]已正确配置。确保这两个网络覆盖所有节点并且可访问。
+
+* 存储网络的IP范围具有以下特征：
++
+** 使用IPv4 CIDR格式
++
+** 与Kubernetes集群网络不冲突或重叠
++
+以下地址是保留的：`10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16`和`10.53.0.0/16`。
++
+** 满足集群的要求
++
+所需的IP地址数量使用以下公式计算：`Required number of IPs = (Number of nodes * 2) + (Number of disks * 2) + Number of images to be downloaded or uploaded`
++
+示例：如果一个集群有五个节点，每个节点有两个磁盘，并且要同时上传十个镜像，则IP范围应大于或等于`/26`（计算：（5 x 2） + （5 x 2） + 10 = 30）。
++
+** 排除{longhorn-product-name} pod和存储网络不得使用的IP地址，例如保留给xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX卷]、网关和其他组件的地址。
+
+* Whereabouts CNI已正确安装。
++
+您可以使用命令`ippools.whereabouts.cni.cncf.io`检查`kubectl get crd ippools.whereabouts.cni.cncf.io` CRD是否存在于集群中。
++
+如果返回空字符串，请使用以下命令在 https://github.com/harvester/harvester/tree/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds[此目录]中添加CRDs：
++
+[,console]
+----
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_ippools.yaml
+kubectl apply -f https://raw.githubusercontent.com/harvester/harvester/v1.1.0/deploy/charts/harvester/dependency_charts/whereabouts/crds/whereabouts.cni.cncf.io_overlappingrangeipreservations.yaml
+----
++
+[NOTE]
+====
+在某些 https://github.com/harvester/harvester/issues/3168[升级场景]中，CNI的安装不正确。
+====
+
+* 所有虚拟机已停止。
++
+您可以使用命令`kubectl get -A vmi`检查虚拟机的状态，该命令应返回空字符串。
++
+[CAUTION]
+====
+{harvester-product-name}通过{harvester-product-name} UI向已停止的虚拟机发送优雅的关闭信号。然而，工作负载会被中断，并且在您确认存储网络配置成功应用后，必须手动启动虚拟机才能恢复可用性。
+====
+
+* 所有附加到{longhorn-product-name}卷的pod已停止。
+
+* 所有正在进行的镜像上传和下载要么已完成，要么已删除。
+
+== {longhorn-product-name}复制流量路由
+
+{longhorn-product-name}复制流量的路由取决于虚拟机VLAN流量和{longhorn-product-name}存储网络是否共享相同的物理接口或使用不同的接口。
+
+* *相同的物理接口*：在以下示例中，`eth2`和`eth3`用于虚拟机VLAN流量，而{longhorn-product-name}存储网络也使用它们。红线表示{longhorn-product-name}通过`eth3`发送复制流量。
++
+image::storagenetwork/storagenetwork-same.png[storagenetwork-same.png]
++
+[NOTE]
+====
+您必须在集群网络和VLAN网络配置中包含`eth2`和`eth3`。
+====
+
+* *不同的物理接口*：在以下示例中，`eth2`和`eth3`用于虚拟机VLAN流量，而`eth4`和`eth5`用于{longhorn-product-name}存储网络。红线表示{longhorn-product-name}通过`eth4`发送复制流量。
++
+image::storagenetwork/storagenetwork-diff.png[storagenetwork-diff.png]
++
+[NOTE]
+====
+您必须在集群网络和VLAN网络配置中包含`eth4`和`eth5`。
+====
+
+== `storage-network`设置
+
+xref:../installation-setup/config/settings.adoc#_storage_network[`storage-network`]设置允许您配置在需要隔离时用于隔离集群内存储流量的网络。
+
+您可以使用用户界面或CLI启用和禁用存储网络。当设置启用时，您必须通过配置某些字段来构建Multus `NetworkAttachmentDefinition` CRD。
+
+一旦应用了`storage-network`设置，{harvester-product-name}将执行以下操作：
+
+* 停止与{longhorn-product-name}卷、Prometheus、Grafana、Alertmanager和VM导入控制器相关的所有pod。
+* 创建一个新的`NetworkAttachmentDefinition`并更新{longhorn-product-name}存储网络设置。
+* 重启所有`instance-manager`和`backing-image-manager`pod以应用新的配置。
+
+=== 配置步骤
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+强烈建议使用{harvester-product-name}用户界面来配置`storage-network`设置。
+====
+
+==== 启用存储网络
+
+. 前往*高级 -> 设置 -> 存储网络*。
+
+. 选择*启用*。
+
+. 配置*VLAN ID*、*集群网络*、*IP范围*和*排除*字段以构建Multus `NetworkAttachmentDefinition` CRD。
+
+. 单击*保存*。
+
+image::storagenetwork/storage-network-enabled.png[存储网络已启用]
+
+==== 禁用存储网络
+
+. 前往*高级 -> 设置 -> 存储网络*。
+
+. 选择*禁用*。
+
+. 单击*保存*。
+
+一旦存储网络被禁用，{longhorn-product-name}将开始使用pod网络进行存储相关操作。
+
+image::storagenetwork/storage-network-disabled.png[存储网络已禁用]
+--
+
+CLI::
++
+--
+您可以使用以下命令来配置xref:../installation-setup/config/settings.adoc#_storage_network[`storage-network`设置]。
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io storage-network
+----
+
+在以下情况下，存储网络会自动启用：
+
+* `value`字段包含有效的JSON字符串。
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+value: '{"vlan":100,"clusterNetwork":"storage","range":"192.168.0.0/24", "exclude":["192.168.0.100/32"]}'
+----
+
+* `value`字段为空。
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+value: ''
+----
+
+当您移除`value`字段时，存储网络将被禁用。
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: storage-network
+----
+
+[CAUTION]
+====
+{harvester-product-name} 将 JSON 字符串中的额外无关字符视为不同的配置。
+====
+--
+
+======
+
+==== 更改存储网络的 MTU
+
+请参见 xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[更改附加存储网络的网络配置的 MTU]。
+
+=== 配置后步骤
+
+[IMPORTANT]
+====
+{harvester-product-name} 不会自动启动虚拟机。您必须确保配置正确并成功应用，然后在必要时启动虚拟机。
+====
+
+. 使用以下命令验证 `storage-network` 设置的状态为 `True`，类型为 `configured`：
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io storage-network -o yaml
+----
++
+示例：
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  annotations:
+    storage-network.settings.harvesterhci.io/hash: da39a3ee5e6b4b0d3255bfef95601890afd80709
+    storage-network.settings.harvesterhci.io/net-attach-def: ""
+    storage-network.settings.harvesterhci.io/old-net-attach-def: ""
+  creationTimestamp: "2022-10-13T06:36:39Z"
+  generation: 51
+  name: storage-network
+  resourceVersion: "154638"
+  uid: 2233ad63-ee52-45f6-a79c-147e48fc88db
+status:
+  conditions:
+  - lastUpdateTime: "2022-10-13T13:05:17Z"
+    reason: Completed
+    status: "True"
+    type: configured
+----
+
+. 验证 {longhorn-product-name} pods（`instance-manager` 和 `backing-image-manager`）是否已准备好，并且它们的网络是否已正确配置。
++
+您可以使用以下命令检查每个 pod：
++
+[,bash]
+----
+kubectl -n longhorn-system describe pod <pod-name>
+----
++
+类似于以下的错误表明存储网络已耗尽可用的 IP 地址。您必须重新配置存储网络，以确保有足够的 IP 范围。
++
+[,bash]
+----
+Events:
+Type     Reason                  Age    From     Message
+----     ------                  ----   ----     -------
+....
+Warning  FailedCreatePodSandBox  2m58s  kubelet  Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "04e9bc160c4f1da612e2bb52dadc86702817ac557e641a3b07b7c4a340c9fc48": plugin type="multus" name="multus-cni-network" failed (add): [longhorn-system/backing-image-ds-default-image-lxq7r/7d6995ee-60a6-4f67-b9ea-246a73a4df54:storagenetwork-sdfg8]: error adding container to network "storagenetwork-sdfg8": error at storage engine: Could not allocate IP in range: ip: 172.16.0.1 / - 172.16.0.6 / range: net.IPNet{IP:net.IP{0xac, 0x10, 0x0, 0x0}, Mask:net.IPMask{0xff, 0xff, 0xff, 0xf8}}
+....
+----
++
+[NOTE]
+====
+如果存储网络已耗尽可用的 IP 地址，您在上传或下载镜像时可能会遇到类似的错误。您必须删除受影响的镜像，并重新配置存储网络，以确保有足够的 IP 范围。
+====
+
+. 验证在 `k8s.v1.cni.cncf.io/network-status` 注释中是否存在名为 `lhnet1` 的接口。该接口的 IP 地址必须在指定的 IP 范围内。
++
+您可以使用以下命令检索 {longhorn-product-name} `instance-manager` pods 的列表：
++
+[,bash]
+----
+kubectl get pods -n longhorn-system -l longhorn.io/component=instance-manager -o yaml
+----
++
+示例：
++
+[,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 2518b0696f6635896645b5546417447843e14208525d3c19d7ec6d7296cc13cd
+    cni.projectcalico.org/podIP: 10.52.2.122/32
+    cni.projectcalico.org/podIPs: 10.52.2.122/32
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+          "name": "k8s-pod-network",
+          "ips": [
+              "10.52.2.122"
+          ],
+          "default": true,
+          "dns": {}
+      },{
+          "name": "harvester-system/storagenetwork-95bj4",
+          "interface": "lhnet1",
+          "ips": [
+              "192.168.0.3"
+          ],
+          "mac": "2e:51:e6:31:96:40",
+          "dns": {}
+      }]
+    k8s.v1.cni.cncf.io/networks: '[{"namespace": "harvester-system", "name": "storagenetwork-95bj4",
+      "interface": "lhnet1"}]'
+    k8s.v1.cni.cncf.io/networks-status: |-
+      [{
+          "name": "k8s-pod-network",
+          "ips": [
+              "10.52.2.122"
+          ],
+          "default": true,
+          "dns": {}
+      },{
+          "name": "harvester-system/storagenetwork-95bj4",
+          "interface": "lhnet1",
+          "ips": [
+              "192.168.0.3"
+          ],
+          "mac": "2e:51:e6:31:96:40",
+          "dns": {}
+      }]
+    kubernetes.io/psp: global-unrestricted-psp
+    longhorn.io/last-applied-tolerations: '[{"key":"kubevirt.io/drain","operator":"Exists","effect":"NoSchedule"}]'
+
+Omitted...
+----
+
+. 测试 {longhorn-product-name} pods 之间的通信。
++
+存储网络专用于 {longhorn-product-name} pods 之间的内部通信，从而实现高性能和可靠性。然而，存储网络仍然依赖于 xref:./deep-dive.adoc#_external_networking[外部网络基础设施] 进行连接（类似于 xref:./vm-network.adoc#_create_a_vm_with_vlan_network[虚拟机 VLAN 网络] 的功能）。当外部网络未正确连接和配置时，您可能会遇到以下问题：
++
+* 新创建的虚拟机在 `Not-Ready` 状态下卡住。
+* `longhorn-manager` pod 日志包含错误信息。
++
+示例：
++
+[,console]
+----
+longhorn-manager-j6dhh/longhorn-manager.log:2024-03-20T16:25:24.662251001Z time="2024-03-20T16:25:24Z" level=error msg="Failed rebuilding of replica 10.0.16.26:10000" controller=longhorn-engine engine=pvc-0a151c59-ffa9-4938-9c86-59ebb296bc88-e-c2a7fe77 error="proxyServer=10.52.6.33:8501 destination=10.0.16.23:10000: failed to add replica tcp://10.0.16.26:10000 for volume: rpc error: code = Unknown desc = failed to get replica 10.0.16.26:10000: rpc error: code = Unavailable desc = all SubConns are in TransientFailure, latest connection error: connection error: desc = \"transport: Error while dialing dial tcp 10.0.16.26:10000: connect: no route to host\"" node=oml-harvester-9 volume=pvc-0a151c59-ffa9-4938-9c86-59ebb296bc88
+----
++
+要测试 {longhorn-product-name} pods 之间的通信，请执行以下步骤：
++
+.. 获取在上一步中识别的每个实例管理器 pod 的存储网络 IP（每个节点一个）。
++
+示例：
++
+[,console]
+----
+instance-manager-43f1624d14076e1d95cd72371f0316e2
+storage network IP: 10.0.16.8
+
+instance-manager-ba38771e483008ce61249acf9948322f
+storage network IP: 10.0.16.14
+----
++
+.. 登录到这些 pods。
++
+当您运行命令 `ip addr` 时，输出包含与 pod 注释中的 IP 相同的 IP。在以下示例中，一个 IP 用于 pod 网络，另一个用于存储网络。
++
+示例：
++
+[,console]
+----
+$ kubectl exec -i -t -n longhorn-system instance-manager-ba38771e483008ce61249acf9948322f -- /bin/sh
+
+$ ip addr
+1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00
+    inet 127.0.0.1/8 scope host lo
+...
+3: eth0@if2277: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1450 qdisc noqueue state UP group default // pod network link
+    link/ether 0e:7c:d6:77:44:72 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.52.6.146/32 scope global eth0
+...
+4: lhnet1@if2278: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc noqueue state UP group default // storage network link, note the MTU value
+    link/ether fe:92:4f:fb:dd:20 brd ff:ff:ff:ff:ff:ff link-netnsid 0
+    inet 10.0.16.14/20 brd 10.0.31.255 scope global lhnet1
+...
+
+$ ip route
+default via 169.254.1.1 dev eth0
+10.0.16.0/20 dev lhnet1 proto kernel scope link src 10.0.16.14
+169.254.1.1 dev eth0 scope link
+----
++
+[NOTE]
+====
+存储网络链接始终继承附加的xref:./cluster-network.adoc#_cluster_network[集群网络]的MTU值，无论配置的xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[MTU值]如何。
+====
++
+.. 在一个 pod 中启动一个简单的 HTTP 服务器。
++
+您必须明确将此 HTTP 服务器绑定到存储网络 IP。
++
+示例：
++
+[,console]
+----
+$ python3 -m http.server 8000 --bind 10.0.16.14 (replace with your pod storage network IP)
+----
++
+.. 在另一个 pod 中测试 HTTP 服务器。
++
+示例：
++
+[,console]
+----
+From instance-manager-43f1624d14076e1d95cd72371f0316e2 (IP 10.0.16.8)
+
+$ curl http://10.0.16.14:8000
+----
++
+当存储网络正常工作时，`curl` 命令返回 HTTP 服务器上的文件列表。
++
+.. （可选）排除问题。
++
+存储网络可能因外部网络问题而发生故障，例如：
++
+** 与存储网络相关的物理 NIC（安装在 {harvester-product-name} 节点上）未在外部交换机中添加到同一 VLAN。
+** 外部交换机未正确连接和配置。
+
+一旦配置得到验证，您可以在必要时手动启动虚拟机。
+
+== 最佳实践
+
+* 在为存储网络配置IP范围时，请确保分配的IP地址能够满足集群未来的需求。这很重要，因为{longhorn-product-name} pods（`instance-manager`和`backing-image-manager`）在向集群添加新节点或在存储网络配置后向节点添加更多磁盘时停止运行，并且当所需的IP数量超过分配的IP时。解决此问题涉及使用正确的IP范围重新配置存储网络。
++
+{longhorn-product-name} pods 使用存储网络如下：
++
+** `instance-manager` pods：实例管理器组件被 https://longhorn.io/docs/1.5.0/deploy/important-notes/#instance-managers-consolidated[在 {longhorn-product-name} v1.5.0 中合并]。每个节点需要一个 IP 地址。在升级期间，这些 pods 的旧版本和新版本同时存在，旧版本在升级完成后被删除。
++
+** `backing-image-ds` pods：这些 pods 处理即时上传和下载的底层镜像数据源，并在镜像上传和下载完成后被去除。
++
+** `backing-image-manager` pods：每个磁盘需要一个 IP 地址。在升级期间，这些 pods 的旧版本和新版本同时存在，旧版本在升级完成后被删除。
+
+* 在非-`mgmt` 集群网络上配置存储网络，以确保 {longhorn-product-name} 复制流量与 Kubernetes 控制平面流量完全隔离。使用 `mgmt` 是可能的，但不推荐，因为它会对控制平面网络性能产生负面影响（资源和带宽争用）。仅在您的集群存在与 NIC 相关的限制，并且能够完全隔离流量时使用 `mgmt`。

@@ -1,0 +1,203 @@
+= Rede de VM
+:revdate: 2025-11-13
+:page-revdate: {revdate}
+
+{harvester-product-name} fornece três tipos de redes para máquinas virtuais (VMs), incluindo:
+
+* Rede de gerenciamento
+* Rede VLAN
+* Rede sem tag
+
+A rede de gerenciamento é geralmente usada para VMs cujo tráfego flui apenas dentro do cluster. Se suas VMs precisarem se conectar à rede externa, use a rede VLAN ou a rede sem tag.
+
+{harvester-product-name} também introduziu a rede de armazenamento para separar o tráfego de armazenamento de outras cargas de trabalho em todo o cluster. Por favor, consulte xref:./storage-network.adoc[o documento da rede de armazenamento] para mais detalhes.
+
+== Rede de gerenciamento
+
+{harvester-product-name} usa https://projectcalico.docs.tigera.io/getting-started/kubernetes/flannel/flannel[Canal] como sua rede de gerenciamento padrão. É uma rede incorporada que pode ser usada diretamente do cluster.
+Por padrão, o IP da rede de gerenciamento de uma VM só pode ser acessado dentro dos nós do cluster, e o IP da rede de gerenciamento mudará após a reinicialização da VM. Esse é um comportamento não típico que precisa ser observado, uma vez que espera-se que os IPs das VMs permaneçam inalterados após uma reinicialização.
+
+No entanto, você pode aproveitar o https://kubevirt.io/user-guide/virtual_machines/service_objects/[objeto de serviço] do Kubernetes para criar um IP estável para suas VMs com a rede de gerenciamento.
+
+=== Procedimentos para usar a rede de gerenciamento
+
+Como a rede de gerenciamento é incorporada e não requer operações extras, você pode adicioná-la diretamente ao configurar a rede da VM.
+
+image::networking/management-network.png[]
+
+[IMPORTANT]
+====
+`mgmt` usa o valor MTU padrão `1500` se você não especificar um valor diferente de `0` ou `1500`. No entanto, as interfaces de rede das máquinas virtuais conectadas a `mgmt` têm um valor MTU de https://docs.tigera.io/calico/latest/networking/configuring/mtu#determine-mtu-size[`1450`]. Isso ocorre porque {harvester-product-name} usa o *Calico e Flannel CNI*, que tem uma sobrecarga de 50 bytes por pacote, para transportar a rede overlay dentro do cluster.
+
+image::networking/management-network-mtu.png[]
+
+Se alguma de suas cargas de trabalho envolver a transmissão de tráfego de rede, você deve especificar o valor MTU apropriado para as interfaces de rede e pontes da VM afetadas.
+====
+
+== Rede VLAN
+
+O controlador de rede utiliza os plugins CNI https://github.com/k8snetworkplumbingwg/multus-cni[multus] e https://www.cni.dev/plugins/current/main/bridge/[bridge] para implementar sua rede VLAN personalizada de ponte L2. Ele ajuda a conectar suas VMs à interface de rede do host e pode ser acessado a partir de redes internas e externas usando o switch físico.
+
+=== Criar uma rede de VM
+
+. Vá para *Redes -> Redes de VM*.
+
+. Selecione *Criar*.
+
+. Defina as seguintes configurações:
++
+** Namespace
+** Nome
+** A descrição (opcional)
+
+. Na aba *Configurações Básicas*, configure as seguintes definições:
++
+** Tipo: Selecione *RedeL2Vlan*.
+** Modo: Selecione *Acesso*.
+** ID da VLAN
+** Rede do Cluster
++
+[NOTE]
+====
+As redes de máquinas virtuais herdam o MTU da configuração de rede da rede de cluster associada. Isso garante que as máquinas virtuais se beneficiem do melhor desempenho de hardware possível. Você não pode definir um MTU diferente para redes de máquinas virtuais.
+
+Quando você altera o MTU nas NICs físicas do uplink da rede do cluster, as novas redes de máquinas virtuais criadas herdam automaticamente o novo MTU. As redes de VM existentes também são atualizadas automaticamente. Para mais informações, veja xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[Alterar o MTU de uma Configuração de Rede com uma Rede de Armazenamento Anexada] e xref:./cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_no_attached_storage_network[Alterar o MTU de uma Configuração de Rede sem Rede de Armazenamento Anexada].
+
+O {harvester-product-name} webhook não permite que você altere diretamente o MTU nas redes de VM.
+====
+
+. Na aba Rota, selecione uma opção e, em seguida, especifique os endereços IPv4 relacionados.
+ ** Auto(DHCP): O controlador de rede recupera os endereços CIDR e gateway do servidor DHCP. Você pode especificar o endereço do servidor DHCP.
++
+image::networking/create-network-auto.png[]
+ ** Manual: Especifique os endereços CIDR e gateway.
++
+image::networking/create-network-manual.png[]
++
+[IMPORTANT]
+====
+{harvester-product-name} usa as informações para verificar se todos os nós podem acessar a rede de VM que você está criando. Se esse for o caso, a coluna _Conectividade de rede_ na tela *Redes de VM* indica que a rede está ativa. Caso contrário, a tela indica que ocorreu um erro.
+====
+
+=== Crie uma VM com Rede VLAN
+
+Agora você pode criar uma nova VM usando a rede VLAN configurada acima:
+
+* Clique no botão *Criar* na página *Máquinas Virtuais*.
+* Especifique os parâmetros necessários e clique na aba *Redes*.
+* Configure a rede padrão para ser uma rede VLAN ou selecione uma rede adicional para adicionar.
+
+== Rede sem tag
+
+Como é sabido, o tráfego sob uma rede VLAN possui uma etiqueta de ID VLAN e podemos usar a rede VLAN com `PVID` (padrão 1) para comunicar com qualquer tráfego normal não etiquetado. No entanto, alguns dispositivos de rede podem não esperar receber um ID VLAN etiquetado explicitamente que corresponda à VLAN nativa no switch ao qual a uplink pertence. Essa é a razão pela qual fornecemos a rede não etiquetada.
+
+=== Como usar a rede não etiquetada
+
+O uso da rede não etiquetada é semelhante à xref:./vm-network.adoc#_vlan_network[rede VLAN].
+
+Para criar uma nova rede não etiquetada, vá para a página *Redes > Redes de VM* e clique no botão *Criar*. Você deve especificar o nome, selecionar o tipo `Untagged Network` e escolher a rede do cluster.
+
+image::networking/create-untagged-network.png[]
+
+[NOTE]
+====
+{harvester-product-name} suporta a atualização e exclusão de redes de VM. Certifique-se de parar todas as VMs afetadas antes de atualizar ou excluir redes de VM.
+====
+
+== Rede tronco VLAN
+
+. Vá para *Redes -> Redes de VM*.
+
+. Selecione *Criar*.
+
+. Defina as seguintes configurações:
++
+** Namespace
+** Nome
+** A descrição (opcional)
+
+. Na aba *Configurações Básicas*, configure as seguintes definições:
++
+** Tipo: Selecione *RedeL2Vlan*.
+** Modo: Selecione *Tronco*.
+** ID mínimo da VLAN: Especifique o ID da VLAN inicial de um intervalo.
+** ID máximo da VLAN: Especifique o ID da VLAN final de um intervalo.
+** Rede do cluster: Selecione a rede do cluster associada.
++
+[NOTE]
+====
+Você pode especificar múltiplos intervalos de IDs de VLAN sobrepostos.
+====
+
+Quando uma máquina virtual está conectada a uma rede de tronco VLAN, o sistema operacional convidado e os aplicativos podem enviar e receber pacotes marcados com qualquer um dos IDs de VLAN dentro do intervalo especificado.
+
+[NOTE]
+====
+Você pode alterar o tipo de rede apenas quando todas as máquinas virtuais conectadas estão paradas.
+
+Quando você altera o tipo de rede de `VLAN` para `VLAN Trunk` ou `Untagged`, as configurações que você configurou na aba `Route` são removidas. Você deve reconfigurar essas configurações se decidir mudar o tipo de rede de volta para `VLAN`.
+====
+
+== Rede de sobreposição (Experimental)
+
+O controlador de rede utiliza https://github.com/kubeovn/kube-ovn[Kube-OVN] para criar uma rede virtualizada baseada em OVN que suporta capacidades avançadas de SDN, como xref:networking/kubeovn-vpc.adoc[nuvens privadas virtuais (VPCs) e sub-redes] para cargas de trabalho de máquinas virtuais.
+
+Uma rede de sobreposição representa um switch virtual de camada 2 que encapsula e encaminha o tráfego entre máquinas virtuais. Essa rede pode ser vinculada à sub-rede criada na VPC para que as máquinas virtuais possam acessar a rede virtualizada interna e também alcançar a rede externa. No entanto, as mesmas máquinas virtuais não podem ser acessadas por redes externas, como VLANs e redes sem tag, devido às limitações atuais da VPC.
+
+image::networking/kubeovn-harvester-topology.png[Arquitetura de integração do Kube-OVN]
+
+=== Criando uma rede de sobreposição
+
+. Vá para *Redes -> Redes de Máquinas Virtuais*, e então clique em *Criar*.
++
+image::networking/create_vm_networks.png[Criando uma rede de sobreposição]
+
+. Na tela *Rede da Máquina Virtual: Criar*, especifique um nome para a rede.
+
+. Na aba *Configurações Básicas*, selecione `OverlayNetwork` como o tipo de rede.
+
+. Clique em *Criar*.
+
+=== Limitações da rede de sobreposição
+
+A implementação da rede de sobreposição no {harvester-product-name} v1.6 possui as seguintes limitações:
+
+* Redes sobrepostas que são suportadas pelo Kube-OVN só podem ser criadas no `mgmt` (a rede de gerenciamento incorporada).
+
+* Por padrão, as configurações `enableDHCP` e `dhcpV4Options` não estão configuradas, portanto, não existe uma rota padrão em máquinas virtuais que estão conectadas a uma sub-rede sobreposta do Kube-OVN. Tentativas de acessar destinos externos falham até que a rota padrão seja configurada corretamente no sistema operacional convidado. Você pode realizar uma das seguintes soluções alternativas:
++
+** Adicione manualmente o IP do gateway da sub-rede como a rota padrão da máquina virtual.
++
+** Use a vinculação `managedTap`: Edite a configuração YAML da sub-rede anexada e verifique se o campo `.spec.enableDHCP` está definido como `true`. Em seguida, edite a configuração YAML da máquina virtual e modifique a definição da interface para usar a vinculação.
++
+[,yaml]
+----
+interfaces:
+- binding:
+    name: managedtap
+    model: virtio
+    name: default
+----
+
+* Balanceadores de carga "nativos" do Kube-OVN ainda não estão integrados, pois isso requer mudanças fundamentais na base de código upstream. Atualmente, o Kube-OVN funciona como o plug-in CNI principal para cada cluster.
+
+* A rede subjacente ainda não está disponível. Consequentemente, você não pode mapear diretamente uma sub-rede para uma rede física, e hosts externos não podem alcançar máquinas virtuais que estão em uma sub-rede sobreposta.
+
+* O campo `natOutgoing` é definido como `false` por padrão em todas as sub-redes (tanto em VPCs padrão quanto personalizadas). Apenas sub-redes que pertencem à VPC padrão podem acessar a internet após você alterar o valor para `true` e configurar a rota padrão. Sub-redes criadas em VPCs personalizadas não conseguem acessar a internet sem suporte a `VpcNatGateway`.
+
+* O IP estático no cloud-init parece ser ignorado para NICs de sobreposição. Na prática, o IP estático funciona _apenas se corresponder ao endereço exato que o Kube-OVN reservou_ para a máquina virtual. Qualquer outro valor quebra a conectividade.
+
+* Quando várias NICs estão conectadas e a NIC de sobreposição não é a interface primária, você deve inicializar manualmente a NIC de sobreposição dentro do sistema operacional convidado (configuração do link IP) e executar o comando do cliente DHCP (dhclient) para obter o endereço IP da NIC.
++
+** O emparelhamento só funciona entre VPCs personalizadas. Tentativas de estabelecer uma conexão de emparelhamento entre a VPC padrão e uma VPC personalizada falharão.
+** Balanceadores de carga de máquinas virtuais, que são fornecidos pelo {harvester-product-name} balanceador de carga, não são compatíveis com redes de sobreposição do Kube-OVN. Você só pode usar esses balanceadores de carga com redes VLAN.
+
+* Balanceadores de carga de cluster não funcionam corretamente com clusters convidados em redes de sobreposição do Kube-OVN. Os problemas de compatibilidade são causados pelos seguintes fatores:
++
+** `Pool` IPAM: O Kube-OVN não está ciente de que os endereços IP front end do balanceador de carga são alocados a partir de pools gerenciados pelo {harvester-product-name} balanceador de carga. Isso pode levar a conflitos de endereços IP.
+** `DHCP` IPAM: A alocação dinâmica de endereços IP não funciona mesmo quando o serviço DHCP está habilitado para a sub-rede do Kube-OVN. O registro de concessão é gerenciado no plano de controle pelo Kube-OVN. Melhorias de integração são necessárias para permitir que os componentes afetados funcionem corretamente juntos.
+
+* A integração com o Rancher (especificamente, a criação de clusters downstream usando o Harvester Node Driver) só funciona em redes de sobreposição do Kube-OVN dentro da VPC padrão. Para garantir a criação bem-sucedida do cluster, você deve realizar as seguintes ações:
++
+** Habilite o serviço DHCP para a rede de sobreposição. Você deve definir um gateway padrão válido.
+** Atualize manualmente a especificação da máquina virtual subjacente para adaptar a interface de binding `managedTap` para o cluster downstream durante o período de provisionamento do cluster.

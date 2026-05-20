@@ -1,0 +1,97 @@
+= Nœud témoin
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name}Les clusters déployés dans des environnements de production nécessitent un plan de contrôle pour la gestion des nœuds et des pods. Un cluster typique à trois nœuds a trois nœuds de gestion qui contiennent chacun l'ensemble complet des composants du plan de contrôle. Un composant clé est etcd, que Kubernetes utilise pour stocker ses données (configuration, état et métadonnées). Le nombre de nœuds etcd doit toujours être un nombre impair (par exemple, 3 est le nombre par défaut dans {harvester-product-name}) pour garantir qu'un quorum est maintenu.
+
+Certaines situations peuvent nécessiter d'éviter de déployer des charges de travail et des données utilisateur sur les nœuds de gestion. Dans ces situations, un nœud de cluster peut se voir attribuer le rôle de _witness_, ce qui le limite à fonctionner en tant que membre du cluster etcd. Le nœud témoin est responsable d'établir un quorum de membres (une majorité de nœuds), qui doivent s'accorder sur les mises à jour de l'état du cluster.
+
+Les nœuds témoins ne stockent aucune donnée, mais les https://etcd.io/docs/v3.3/op-guide/hardware/[recommandations matérielles] pour les nœuds etcd doivent tout de même être prises en compte. Utiliser du matériel avec des ressources limitées affecte considérablement les performances du cluster, comme décrit dans l'article https://www.suse.com/support/kb/doc/?id=000020100[Performances lentes d'etcd (tests de performance et optimisation)].
+
+{harvester-product-name} prend en charge des clusters avec deux nœuds de gestion et un nœud témoin (et éventuellement, un ou plusieurs nœuds de travail). Pour plus d'informations sur les rôles des nœuds, voir xref:../hosts/hosts.adoc#_role_management[Gestion des rôles].
+
+[IMPORTANT]
+====
+Un nœud ne peut se voir attribuer le rôle de _witness_ qu'au moment où il rejoint un cluster. Chaque cluster ne peut avoir qu'un seul nœud témoin.
+====
+
+== Créer un {harvester-product-name} cluster avec un nœud témoin
+
+Vous pouvez attribuer le rôle de _witness_ à un nœud lorsqu'il rejoint un cluster nouvellement créé.
+
+Dans l'exemple suivant, un cluster avec trois nœuds a été créé et le nœud `harvester-node-1` a été attribué le rôle de _witness_. `harvester-node-1` consomme moins de ressources et n'a que des capacités etcd.
+
+----
+NAME↑               STATUS   ROLE                         VERSION               PODS     CPU      MEM    %CPU    %MEM    CPU/A    MEM/A AGE
+harvester-node-0    Ready    control-plane,etcd,master    v1.27.10+rke2r1         70    1095    10143      10      63    10000    15976 4d13h
+harvester-node-1    Ready    etcd                         v1.27.10+rke2r1          7     258     2258       2      14    10000    15976 4d13h
+harvester-node-2    Ready    control-plane,etcd,master    v1.27.10+rke2r1         36     840     6905       8      43    10000    15976 4d13h
+----
+
+Parce que le cluster doit avoir trois nœuds, le contrôleur de promotion promouvra les deux autres nœuds. Après cela, le cluster aura deux nœuds de plan de contrôle et un nœud témoin.
+
+== Charges de travail sur le nœud témoin
+
+Le nœud témoin exécute uniquement les charges de travail essentielles suivantes{nbsp}:
+
+* *harvester-node-manager*
+* *cloud-controller-manager*
+* *etcd*
+* *kube-proxy*
+* *rke2-canal*
+* *rke2-multus*
+
+== Mettre à niveau un cluster avec un nœud témoin
+
+Les exigences et procédures générales de mise à niveau s'appliquent aux clusters avec un nœud témoin. Cependant, l'existence de volumes dégradés dans de tels clusters peut entraîner l'échec des opérations de mise à niveau.
+
+== Répliques Longhorn dans des clusters avec un nœud témoin
+
+{harvester-product-name} utilise Longhorn, un système de stockage de blocs distribué, pour la gestion des volumes de dispositifs de bloc. Longhorn est provisionné pour les nœuds de gestion et de travail, mais pas pour les nœuds témoins, qui ne stockent aucune donnée.
+
+Longhorn crée des répliques de chaque volume pour augmenter la disponibilité. Les répliques contiennent une chaîne d'instantanés du volume, chaque instantané stockant la modification par rapport à un instantané précédent. Dans {harvester-product-name}, la StorageClass par défaut `harvester-longhorn` a une valeur de nombre de répliques de `3`.
+
+== limites
+
+Les nœuds témoins ne stockent aucune donnée. Cela signifie que dans des clusters à trois nœuds (sans nœuds de travail), seules deux répliques sont créées pour chaque volume Longhorn. Cependant, la StorageClass par défaut `harvester-longhorn` a une valeur de nombre de répliques de `3` pour une haute disponibilité. Si vous utilisez cette StorageClass pour créer des volumes, Longhorn ne peut pas créer le nombre de répliques configuré. Cela entraîne que les volumes sont marqués comme *Dégradés* sur l'interface Longhorn.
+
+En résumé, vous devez utiliser une StorageClass qui correspond à la configuration du cluster.
+
+* 2 nœuds de gestion + 1 nœud témoin{nbsp}: Créez une nouvelle StorageClass par défaut avec le paramètre *Nombre de réplicas* défini sur *2*. Cela garantit que seulement deux réplicas sont créés pour chaque volume Longhorn.
+* 2 nœuds de gestion + 1 nœud témoin + 1 ou plusieurs nœuds de travail{nbsp}: Vous pouvez utiliser la StorageClass par défaut existante.
+
+image::advanced/new-storageclass-rep-2.png[new storageclass replica 2]
+
+image::advanced/set-to-default-sc.png[set to default]
+
+Si vous avez déjà créé des volumes en utilisant la StorageClass par défaut originale, vous pouvez modifier le nombre de réplicas sur l'écran *Volume* de l'xref:../troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[interface utilisateur Longhorn intégrée].
+
+image::advanced/redirect-to-longhorn-vol-page.png[rediriger-vers-page-volume-longhorn]
+
+image::advanced/update-replica-2.png[mettre-à-jour-nombre-de-réplicas-à-2]
+
+== Problèmes connus
+
+=== 1. Lors de la création d'un cluster avec un nœud témoin, la *Configuration réseau{nbsp}: L'écran de création* sur l'{harvester-product-name} UI ne parvient pas à identifier de NIC pouvant être utilisés avec tous les nœuds.
+
+image::advanced/create-policy-with-all-nodes.png[créer une configuration réseau avec tous les nœuds]
+
+image::advanced/no-uplink.png[pas de lien monté]
+
+La solution de contournement consiste à sélectionner un nœud non témoin, puis à sélectionner un NIC qui peut être utilisé avec ce nœud spécifique.
+
+image::advanced/create-policy-with-specific-node.png[créer une configuration réseau avec un nœud spécifique]
+
+image::advanced/get-uplink.png[get uplink]
+
+Vous devez répéter cette procédure pour chaque nœud non témoin dans le cluster. Les mêmes paramètres de lien monté peuvent être utilisés sur tous les nœuds.
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/5325[[BUG\] Impossible de sélectionner NIC pour créer la configuration réseau lorsque le cluster contient un nœud témoin]
+
+=== 2. Lors de la sélection d'un nœud cible pour la migration de VM, la liste des cibles inclut le nœud témoin.
+
+image::advanced/vm-migration-witness-node.png[vm migration target witness node]
+
+Ne sélectionnez pas le nœud témoin comme cible de migration. Si vous le faites, la migration de la VM échouera.
+
+Problème connexe{nbsp}: https://github.com/harvester/harvester/issues/5338[[BUG\] Le nœud témoin ne doit pas être sélectionné comme cible de migration]

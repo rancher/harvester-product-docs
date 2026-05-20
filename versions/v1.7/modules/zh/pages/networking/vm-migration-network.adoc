@@ -1,0 +1,209 @@
+= 虚拟机迁移网络
+:revdate: 2025-09-16
+:page-revdate: {revdate}
+
+虚拟机迁移网络有助于将迁移流量与`mgmt`上的集群流量和其他集群范围的工作负载隔离。使用虚拟机迁移网络可以获得更好的网络带宽和性能。
+
+[NOTE]
+====
+避免直接配置KubeVirt设置，因为这可能导致意外或不希望的系统行为。
+====
+
+== 先决条件
+
+在开始配置虚拟机迁移网络之前，请确保满足以下要求：
+
+* 网络交换机已正确配置，并且为虚拟机迁移网络分配了专用VLAN ID。
+
+* xref:networking/cluster-network.adoc[集群网络]和xref:networking/vm-network.adoc[VLAN网络]已正确配置。确保这两个网络覆盖所有节点并且可访问。
+
+* 没有虚拟机正在迁移。
+
+* 虚拟机迁移网络的IP范围采用IPv4 CIDR格式，且不得与Kubernetes集群网络冲突或重叠。以下地址是保留的：`10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16`和`10.53.0.0/16`。
+
+=== `vm-migration-network`设置
+
+xref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`]设置允许您在需要隔离时配置用于隔离集群内虚拟机迁移流量的网络。
+
+您可以通过UI或CLI启用和禁用虚拟机迁移网络。当设置启用时，您必须通过配置某些字段来构建Multus `NetworkAttachmentDefinition` CRD。
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+强烈建议使用{harvester-product-name} UI来配置`vm-migration-network`设置。
+====
+
+==== 启用虚拟机迁移网络
+
+. 转到*高级 -> 设置 -> vm-migration-network*。
+
+. 选择*启用*。
+
+. 配置*VLAN ID*、*集群网络*、*IP范围*和*排除*字段以构建Multus `NetworkAttachmentDefinition` CRD。
+
+. 单击*保存*。
+
+image::networking/vm-migration-network-enabled.png[虚拟机迁移网络已启用]
+
+==== 禁用虚拟机迁移网络
+
+. 转到*高级 > 设置 > vm-migration-network*。
+
+. 选择*禁用*。
+
+. 单击*保存*。
+
+一旦虚拟机迁移网络被禁用，KubeVirt将开始使用`mgmt`进行与虚拟机迁移相关的操作。
+
+image::networking/vm-migration-network-disabled.png[虚拟机迁移网络已禁用]
+--
+
+CLI::
++
+--
+您可以使用以下命令配置xref:installation-setup/config/settings.adoc#_vm_migration_network[`vm-migration-network`]设置。
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io vm-migration-network
+----
+
+当值字段包含有效的JSON字符串时，虚拟机迁移网络会自动启用。
+
+示例：
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+value: '{"vlan":100,"clusterNetwork":"vm-migration","range":"192.168.1.0/24", "exclude":["192.168.1.100/32"]}'
+----
+
+在以下情况下，虚拟机迁移网络被禁用：
+
+* 值字段为空。
++
+[,yaml]
+----
+  apiVersion: harvesterhci.io/v1beta1
+  kind: Setting
+  metadata:
+    name: vm-migration-network
+  value: ''
+----
+
+* 值字段已被移除。
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  name: vm-migration-network
+----
+
+[CAUTION]
+====
+{harvester-product-name}将JSON字符串中的额外无关字符视为不同的配置。
+====
+--
+======
+
+一旦应用`vm-migration-network`设置，将发生以下情况：
+
+* {harvester-product-name}创建一个新的`NetworkAttachmentDefinition`并更新KubeVirt配置。
+* KubeVirt重新启动所有`virt-handler` pod以应用新的网络配置。
+
+=== 配置后步骤
+
+. 使用以下命令验证设置的状态为`True`，类型为`configured`：
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io vm-migration-network -o yaml
+----
++
+示例：
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Setting
+metadata:
+  annotations:
+    vm-migration-network.settings.harvesterhci.io/hash: ec8322fb6b741f94739cbb904fc73c3fda864d6d
+    vm-migration-network.settings.harvesterhci.io/net-attach-def: harvester-system/vm-migration-network-6flk7
+  creationTimestamp: "2025-06-13T06:36:39Z"
+  generation: 51
+  name: vm-migration--network
+  resourceVersion: "154638"
+  uid: 2233ad63-ee52-45f6-a79c-147e48fc88db
+status:
+  conditions:
+  - lastUpdateTime: "2025-06-13T13:05:17Z"
+    reason: Completed
+    status: "True"
+    type: configured
+----
+
+. 验证所有 KubeVirt `virt-handler` Pod 是否已准备好，并且它们的网络是否已正确配置。
++
+您可以使用以下命令检查 Pod 详细信息：
++
+[,bash]
+----
+kubectl -n harvester-system describe pod <pod-name>
+----
+
+. 检查`k8s.v1.cni.cncf.io/network-status`注释并验证名为`migration0`的接口是否存在。该接口的IP地址必须在指定的IP范围内。
++
+您可以使用以下命令检索 `virt-handler` 个 Pod 的列表：
++
+[,bash]
+----
+kubectl get pods -n harvester-system -l kubevirt.io=virt-handler -o yaml
+----
++
+示例：
++
+[,yaml]
+----
+apiVersion: v1
+kind: Pod
+metadata:
+  annotations:
+    cni.projectcalico.org/containerID: 004522bc8468ea707038b43813cce2fba144f0e97551d2d358808d57caf7b543
+    cni.projectcalico.org/podIP: 10.52.2.122/32
+    cni.projectcalico.org/podIPs: 10.52.2.122/32
+    k8s.v1.cni.cncf.io/network-status: |-
+      [{
+        "name": "k8s-pod-network",
+        "ips": [
+            "10.52.2.122"
+        ],
+        "default": true,
+        "dns": {}
+      },{
+        "name": "harvester-system/vm-migration-network-6flk7",
+        "interface": "migration0",
+        "ips": [
+            "10.1.2.1"
+        ],
+        "mac": "c6:30:6f:02:52:3e",
+        "dns": {}
+      }]
+    k8s.v1.cni.cncf.io/networks: vm-migration-network-6flk7@migration0
+Omitted...
+----
+
+== 最佳实践
+
+* 在为虚拟机迁移网络配置<<Prerequisites,IP范围>>时，请确保分配的IP地址能够满足集群未来的需求。这很重要，因为KubeVirt pods（`virt-handler`）在虚拟机迁移网络配置后添加新节点到集群时会停止运行，并且当所需的IP数量超过分配的IP时也会停止运行。解决此问题涉及使用正确的IP范围重新配置虚拟机迁移网络。
+
+* 在非`mgmt`集群网络上配置虚拟机迁移网络，以确保虚拟机迁移流量与Kubernetes控制平面流量完全隔离。使用`mgmt`是可能的，但不推荐，因为它会对控制平面网络性能产生负面影响（资源和带宽争用）。仅在您的集群存在与NIC相关的限制并且能够完全隔离流量时使用`mgmt`。

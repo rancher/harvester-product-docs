@@ -1,0 +1,484 @@
+= Installation de l'environnement PXE
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+{harvester-product-name} peut être installé automatiquement avec l'environnement PXE.
+
+Nous recommandons d'utiliser https://ipxe.org/[iPXE] pour effectuer le démarrage réseau. Il dispose de plus de fonctionnalités que le programme de démarrage PXE traditionnel et est probablement disponible dans des cartes NIC modernes. Si le firmware iPXE n'est pas disponible pour votre NIC, les images de firmware iPXE peuvent d'abord être chargées depuis le serveur TFTP.
+
+Pour voir des exemples de scripts iPXE, veuillez visiter https://github.com/harvester/ipxe-examples[Exemples iPXE].
+
+== Conditions préalables
+
+Les nœuds doivent avoir au moins *8 GiB* de RAM car l'installateur charge le fichier ISO complet dans tmpfs.
+
+[IMPORTANT]
+====
+L'installateur vérifie automatiquement si le matériel répond aux xref:installation-setup/requirements.adoc#_hardware_requirements[exigences minimales] pour une utilisation en production. Si l'une des vérifications échoue, l'installation sera arrêtée. Pour contourner ce comportement, définissez soit l'xref:installation-setup/config/configuration-file.adoc#_install_skipchecks[option de fichier de configuration] `install.skipchecks=true` soit le <<Useful kernel parameters,paramètre de kernel>> `harvester.install.skipchecks=true`.
+====
+
+== Préparation des serveurs HTTP
+
+Un serveur HTTP est nécessaire pour servir les fichiers de démarrage.
+Supposons que l'adresse IP du serveur HTTP NGINX soit `10.100.0.10`, et qu'il serve le répertoire `/usr/share/nginx/html/` avec le chemin `http://10.100.0.10/`.
+
+== Préparation des fichiers de démarrage
+
+* Téléchargez les fichiers requis depuis la page https://github.com/harvester/harvester/releases[Releases].
+ ** L'ISO{nbsp}: `harvester-<version>-amd64.iso`
+ ** Le noyau Linux{nbsp}: `harvester-<version>-vmlinuz-amd64`
+ ** L'initrd{nbsp}: `harvester-<version>-initrd-amd64`
+ ** L'image squashfs rootfs{nbsp}: `harvester-<version>-rootfs-amd64.squashfs`
+* Servez les fichiers.
++
+Copiez ou déplacez les fichiers téléchargés vers un emplacement approprié afin qu'ils puissent être téléchargés via le serveur HTTP. Par exemple :
++
+----
+  sudo mkdir -p /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-amd64.iso /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-vmlinuz-amd64 /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-initrd-amd64 /usr/share/nginx/html/harvester/
+  sudo cp /path/to/harvester-<version>-rootfs-amd64.squashfs /usr/share/nginx/html/harvester/
+----
+
+== Préparation des scripts de démarrage iPXE
+
+Lors d'une installation automatique, il existe deux modes{nbsp}:
+
+* `CREATE`{nbsp}: nous installons un nœud pour construire un cluster initial.
+* `JOIN`{nbsp}: nous installons un nœud pour rejoindre un cluster existant.
+
+Vous pouvez attribuer des rôles aux nœuds pour soutenir différents scénarios. Pour plus d'informations, reportez-vous au xref:installation-setup/config/configuration-file.adoc#_install_role[fichier de configuration].
+
+=== Mode CRÉATION
+
+[CAUTION]
+====
+*Risques de sécurité*{nbsp}: Le fichier de configuration ci-dessous contient des identifiants qui doivent rester secrets. Veuillez ne pas rendre le fichier de configuration accessible au public.
+====
+
+Créez un xref:installation-setup/config/configuration-file.adoc[fichier de configuration] appelé `config-create.yaml` pour le mode `CREATE`. Modifiez les valeurs si nécessaire{nbsp}:
+
+[,YAML]
+----
+# cat /usr/share/nginx/html/harvester/config-create.yaml
+scheme_version: 1
+token: token # Replace with a desired token
+os:
+  hostname: node1 # Set a hostname. This can be omitted if DHCP server offers hostnames
+  ssh_authorized_keys:
+  - ssh-rsa ... # Replace with your public key
+  password: p@ssword     # Replace with your password
+  ntp_servers:
+  - 0.suse.pool.ntp.org
+  - 1.suse.pool.ntp.org
+install:
+  mode: create
+  management_interface: # available as of v1.1.0
+    interfaces:
+      - name: ens5
+    default_route: true
+    method: dhcp
+    bond_options:
+      mode: balance-tlb
+      miimon: 100
+  device: /dev/sda # The target disk to install
+#  data_disk: /dev/sdb # It is recommended to use a separate disk to store VM data
+  iso_url: http://10.100.0.10/harvester/harvester-<version>-amd64.iso
+#  tty: ttyS1,115200n8   # For machines without a VGA console
+
+  vip: 10.100.0.99        # The VIP to access the UI. Make sure the IP is free to use
+  vip_mode: static        # Or dhcp, check configuration file for more information
+#  vip_hw_addr: 52:54:00:ec:0e:0b   # Leave empty when vip_mode is static
+----
+
+Pour les machines qui doivent être installées en utilisant le mode `CREATE`, le script iPXE suivant démarre le noyau Linux avec la configuration ci-dessus{nbsp}:
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+Cela suppose que le script iPXE est stocké dans `/usr/share/nginx/html/harvester/ipxe-create`.
+
+[NOTE]
+====
+Si vous avez plusieurs interfaces réseau, vous pouvez utiliser le paramètre `ip=` de dracut pour spécifier l'interface de démarrage et toute autre configuration réseau que dracut prend en charge (par exemple, `ip=eth1:dhcp`).
+Voir https://man7.org/linux/man-pages/man7/dracut.cmdline.7.html[`man dracut.cmdline`] pour plus d'informations.
+
+Utilisez le paramètre `ip=` pour désigner uniquement l'interface de démarrage, car nous ne prenons en charge qu'un seul *paramètre `ip=`*.
+====
+
+=== Mode d'association
+
+[CAUTION]
+====
+*Risques de sécurité* : Le fichier de configuration ci-dessous contient des identifiants qui doivent rester secrets. Veuillez ne pas rendre le fichier de configuration accessible au public.
+====
+
+
+Créez un xref:installation-setup/config/configuration-file.adoc[fichier de configuration] appelé `config-join.yaml` pour le mode `JOIN`. Modifiez les valeurs si nécessaire :
+
+[,YAML]
+----
+# cat /usr/share/nginx/html/harvester/config-join.yaml
+scheme_version: 1
+server_url: https://10.100.0.99:443  # Should be the VIP set up in "CREATE" config
+token: token
+os:
+  hostname: node2
+  ssh_authorized_keys:
+    - ssh-rsa ... # Replace with your public key
+  password: p@ssword     # Replace with your password
+  dns_nameservers:
+  - 1.1.1.1
+  - 8.8.8.8
+install:
+  mode: join
+  management_interface: # available as of v1.1.0
+    interfaces:
+      - name: ens5
+    default_route: true
+    method: dhcp
+    bond_options:
+      mode: balance-tlb
+      miimon: 100
+  device: /dev/sda # The target disk to install
+#  data_disk: /dev/sdb # It is recommended to use a separate disk to store VM data
+  iso_url: http://10.100.0.10/harvester/harvester-<version>-amd64.iso
+#  tty: ttyS1,115200n8   # For machines without a VGA console
+----
+
+Notez que le `mode` est `join` et que le `server_url` doit être fourni.
+
+Pour les machines qui doivent être installées en mode `JOIN`, le script iPXE suivant démarre le noyau Linux avec la configuration ci-dessus :
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-join.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+Cela suppose que le script iPXE est stocké dans `/usr/share/nginx/html/harvester/ipxe-join`.
+
+== Configuration du serveur DHCP
+
+[NOTE]
+====
+Dans le scénario d'installation PXE, vous devez ajouter l'option _routeurs_ (`option routers`) lors de la configuration du serveur DHCP. Cette option est utilisée pour ajouter la route par défaut sur l'hôte. Sans la route par défaut, le nœud échouera à démarrer.
+
+Dans le scénario d'installation ISO, lorsque l'interface réseau de gestion est en mode DHCP, vous devez également ajouter l'option _routeurs_ (`option routers`) lors de la configuration du serveur DHCP.
+
+Par exemple :
+
+----
+    Harvester Host:~ # ip route
+    default via 192.168.122.1 dev mgmt-br proto dhcp
+----
+
+Pour plus d'informations, voir http://www.ipamworldwide.com/ipam/isc-dhcpv4-options.html[Configuration des options ISC DHCPv4].
+====
+
+Voici un exemple de la façon de configurer le serveur DHCP ISC pour offrir des scripts iPXE :
+
+[,sh]
+----
+option architecture-type code 93 = unsigned integer 16;
+
+subnet 10.100.0.0 netmask 255.255.255.0 {
+    option routers 10.100.0.10;
+        option domain-name-servers 192.168.2.1;
+    range 10.100.0.100 10.100.0.253;
+}
+
+group {
+  # create group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-create-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-create";
+    }
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node1 { hardware ethernet 52:54:00:6b:13:e2; }
+}
+
+group {
+  # join group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-join-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-join";
+    }
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node2 { hardware ethernet 52:54:00:69:d5:92; }
+}
+----
+
+Le fichier de configuration déclare un sous-réseau et deux groupes. Le premier groupe est destiné aux hôtes qui démarrent en mode `CREATE` et l'autre est pour le mode `JOIN`. Par défaut, le chemin iPXE est choisi, mais s'il détecte un client PXE, il propose l'image iPXE en fonction de l'architecture du client. Veuillez préparer ces images et un serveur TFTP d'abord.
+
+Le Consortium des systèmes Internet (ISC) a annoncé la fin du service https://www.isc.org/blogs/isc-dhcp-eol/[pour ISC DHCP] en 2022. Les utilisateurs d'ISC DHCP sont encouragés à migrer vers le https://www.isc.org/kea/[Kea DHCP], plus moderne et riche en fonctionnalités, que l'ISC a conçu pour des environnements réseau plus modernes. Si vous utilisez déjà le serveur Kea DHCPv4, consultez l'exemple de configuration suivant. Pour plus d'informations, voir https://kea.readthedocs.io/en/kea-1.6.2/arm/dhcp4-srv.html#dhcpv4-server-configuration[Configuration de Kea DHCPv4].
+
+[,json]
+----
+"client-classes": [
+  {
+    "name": "iPXE UEFI/CREATE",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-create-efi",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE non-UEFI/CREATE",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and not option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-create",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE UEFI/JOIN",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-join-efi",
+    "only-if-required": true
+  },
+  {
+    "name": "iPXE non-UEFI/JOIN",
+    "test": "option[user-class].exists and substring(option[user-class].hex,0,4) == 'iPXE' and not option[client-system].hex == 0x0007",
+    "boot-file-name": "http://10.100.0.10/harvester/ipxe-join",
+    "only-if-required": true
+  },
+  {
+    "name": "PXE UEFI",
+    "test": "option[user-class].exists and not substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "next-server": "10.100.0.20",
+    "boot-file-name": "ipxe.efi"
+  },
+  {
+    "name": "PXE non-UEFI",
+    "test": "option[user-class].exists and not substring(option[user-class].hex,0,4) == 'iPXE' and option[client-system].hex == 0x0007",
+    "next-server": "10.100.0.20",
+    "boot-file-name": "undionly.kpxe"
+  }
+]
+
+"subnet4": [
+  {
+    "subnet": "10.100.0.0/24",
+    "pools": [
+      {
+        "pool": "10.100.0.100 - 10.100.0.199",
+        "require-client-classes" : [ "iPXE UEFI/CREATE", "iPXE non-UEFI/CREATE" ]
+      }.
+      {
+        "pool": "10.100.0.200 - 10.100.0.253",
+        "require-client-classes" : [ "iPXE UEFI/JOIN", "iPXE non-UEFI/JOIN" ]
+      }
+    ],
+    "option-data": [
+      {
+        "name": "routers",
+        "data": "10.100.0.10"
+      }
+    ],
+    "reservations": [
+      // assign ip address to the host for booting in CREATE mode
+      {
+        "hw-address": "52:54:00:6b:13:e2",
+        "ip-address": "10.100.0.101"
+      },
+      // assign ip address to the host for booting in JOIN mode
+      {
+        "hw-address": "52:54:00:69:d5:92",
+        "ip-address": "10.100.0.201"
+      }
+    ]
+  }
+]
+----
+
+== Fichier de configuration
+
+Pour plus d'informations, reportez-vous au xref:installation-setup/config/configuration-file.adoc[fichier de configuration].
+
+Par défaut, le premier nœud sera le nœud de gestion du cluster. Lorsque trois nœuds sont présents, les deux autres nœuds ajoutés en premier sont automatiquement promus en nœuds de gestion pour former un cluster HA.
+
+Si vous souhaitez promouvoir des nœuds de gestion provenant de différentes zones, vous pouvez ajouter l'étiquette de nœud `topology.kubernetes.io/zone` dans la configuration xref:installation-setup/config/configuration-file.adoc#_os_labels[os.labels]. Dans ce cas, au moins trois zones différentes sont requises.
+
+Les utilisateurs peuvent également fournir une configuration via des paramètres du noyau Linux. Par exemple, pour spécifier le mode d'installation `CREATE`, les utilisateurs peuvent passer le paramètre de kernel `harvester.install.mode=create` lors du démarrage. Les valeurs passées par les paramètres de kernel ont une priorité plus élevée que les valeurs spécifiées dans le fichier de configuration.
+
+== Support du démarrage HTTP UEFI
+
+Le firmware UEFI prend en charge le chargement d'une image de démarrage depuis un serveur HTTP. Cette section démontre comment utiliser le démarrage HTTP UEFI pour charger le programme iPXE et effectuer une installation automatique.
+
+=== Servir le programme iPXE
+
+Téléchargez le programme UEFI iPXE depuis http://boot.ipxe.org/ipxe.efi et assurez-vous que `ipxe.efi` peut être téléchargé depuis le serveur HTTP. Par exemple :
+
+[,bash]
+----
+cd /usr/share/nginx/html/harvester/
+wget http://boot.ipxe.org/ipxe.efi
+----
+
+Le fichier peut maintenant être téléchargé depuis `http://10.100.0.10/harvester/ipxe.efi` localement.
+
+=== Configuration du serveur DHCP
+
+Si l'utilisateur prévoit d'utiliser la fonctionnalité de démarrage HTTP UEFI en obtenant d'abord une adresse IP dynamique, le serveur DHCP doit fournir l'URL du programme iPXE lorsqu'il voit une telle demande. Voici un exemple de groupe de serveur ISC DHCP mis à jour{nbsp}:
+
+[,sh]
+----
+group {
+  # create group
+  if exists user-class and option user-class = "iPXE" {
+    # iPXE Boot
+    if option architecture-type = 00:07 {
+      filename "http://10.100.0.10/harvester/ipxe-create-efi";
+    } else {
+      filename "http://10.100.0.10/harvester/ipxe-create";
+    }
+  } elsif substring (option vendor-class-identifier, 0, 10) = "HTTPClient" {
+    # UEFI HTTP Boot
+    option vendor-class-identifier "HTTPClient";
+    filename "http://10.100.0.10/harvester/ipxe.efi";
+  } else {
+    # PXE Boot
+    if option architecture-type = 00:07 {
+      # UEFI
+      filename "ipxe.efi";
+    } else {
+      # Non-UEFI
+      filename "undionly.kpxe";
+    }
+  }
+
+  host node1 { hardware ethernet 52:54:00:6b:13:e2; }
+}
+----
+
+La déclaration `elsif substring` est nouvelle et elle offre `http://10.100.0.10/harvester/ipxe.efi` lorsqu'elle voit une demande DHCP de démarrage HTTP UEFI. Après que le client ait récupéré le programme iPXE et l'ait exécuté, le programme iPXE enverra à nouveau une demande DHCP et chargera le script iPXE depuis l'URL `http://10.100.0.10/harvester/ipxe-create-efi`.
+
+Si vous souhaitez activer le démarrage HTTP UEFI sur le serveur Kea DHCPv4, vous devez ajouter un nouveau `client-class` à la fin du `client-classes`.
+
+Exemple :
+
+[,json]
+----
+{
+  "name": "HTTP",
+  "test": "substring(option[vendor-class-identifier].hex,0,10) == 'HTTPClient'",
+  "option-data": [
+    {
+      "name": "vendor-class-identifier",
+      "data": "HTTPClient"
+    }
+  ],
+  "boot-file-name": "http://10.100.0.10/harvester/ipxe.efi"
+}
+----
+
+=== Le script iPXE pour le démarrage UEFI
+
+Il est obligatoire de spécifier l'image initrd pour le démarrage UEFI dans les paramètres de kernel. Voici une version mise à jour du script iPXE pour le mode `CREATE`.
+
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz initrd=harvester-<version>-initrd ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml
+initrd harvester-<version>-initrd
+boot
+----
+
+Le paramètre `initrd=harvester-<version>-initrd` est requis.
+
+== Démarrage réseau VLAN tagué
+
+Pour effectuer un démarrage PXE sur un réseau VLAN tagué, les hôtes {harvester-product-name} doivent être configurés avec les paramètres BIOS/UEFI suivants{nbsp}:
+
+* L'ID VLAN est défini sur l'identité du réseau.
+* Le protocole de démarrage est défini sur `PXE`.
+* Le DHCP est activé.
+
+[IMPORTANT]
+====
+Un démarrage réseau réussi peut nécessiter des modifications de configuration supplémentaires en fonction des spécifications de l'hôte. La méthode pour effectuer ces modifications peut également varier. Par exemple, sur un serveur HPE ProLiant DL360 Gen9, vous ne pouvez changer le protocole de démarrage et l'ID VLAN que via le firmware de la NIC.
+
+Pour plus d'informations, consultez la documentation de votre serveur.
+====
+
+Pour garantir que l'interface réseau correcte est utilisée au démarrage, mettez à jour la commande iPXE `kernel` avec les paramètres dracut suivants{nbsp}:
+
+* `BOOTIF=<mac_address>` : Utilise l'interface réseau nommée `<interface_name>`
+* `ifname=<interface_name>:<mac_address>` : Attribue le nom `<interface_name>` à l'interface réseau avec l'adresse `<mac_address>`
+* `vlan=<vlan_id>:<interface_name>` : Configure le périphérique VLAN nommé `<vlan_id>` sur `<interface_name>`
+
+Exemple de script iPXE{nbsp}:
+
+[,shell]
+----
+#!ipxe
+kernel harvester-<version>-vmlinuz ip=dhcp net.ifnames=1 rd.cos.disable rd.noverifyssl console=tty1 root=live:http://10.100.0.10/harvester/rootfs.squashfs harvester.install.automatic=true harvester.install.config_url=http://10.100.0.10/harvester/config-create.yaml BOOTIF=<mac_address> ifname=<interface_name>:<mac_address> vlan=<vlan_id>:<interface_name>
+initrd harvester-<version>-initrd
+boot
+----
+
+== Paramètres du noyau Linux utiles
+
+En plus de la configuration, vous pouvez également spécifier d'autres paramètres du noyau Linux qui sont utiles dans différents scénarios.
+Voir aussi https://man7.org/linux/man-pages/man7/dracut.cmdline.7.html[dracut.cmdline(7)].
+
+=== `ip=dhcp`
+
+Si vous avez plusieurs interfaces réseau, vous pouvez ajouter le paramètre `ip=dhcp` pour obtenir une adresse IP du serveur DHCP à partir de toutes les interfaces.
+
+=== `rd.net.dhcp.retry=<cnt>`
+
+Le fait de ne pas obtenir d'adresse IP du serveur DHCP entraînerait un échec du démarrage iPXE. Vous pouvez ajouter le paramètre `rd.net.dhcp.retry=<cnt>` pour réessayer la demande DHCP pendant `<cnt>` fois.
+
+=== `harvester.install.skipchecks=true`
+
+L'installation est arrêtée si les vérifications matérielles échouent (car les exigences minimales pour une utilisation en production ne sont pas satisfaites). Pour remplacer ce comportement, définissez le paramètre de kernel `harvester.install.skipchecks=true`. Lorsqu'il est réglé sur `true`, les messages d'avertissement sont toujours enregistrés dans `/var/log/console.log`, mais l'installation se poursuit même si les exigences matérielles pour une utilisation en production ne sont pas satisfaites.
+
+=== `harvester.install.with_net_images=true`
+
+L'installateur ne précharge pas les images pendant l'installation et récupère plutôt toutes les images nécessaires sur Internet après que l'installation soit terminée. L'utilisation de ce paramètre n'est pas recommandée dans la plupart des cas. Pour plus d'informations, voir xref:installation-setup/media/net-install.adoc[Net Install ISO].
+
+=== `harvester.install.mode=install` 
+
+Démarre automatiquement l'installateur en mode installation au démarrage. 
+
+=== `console=tty1` 
+
+Spécifie le teletype de la console à activer au démarrage. 
+
+=== `harvester.install.tty=tty1`
+
+Spécifie sur quel teletype de console démarrer l'installateur.
+
+=== `net.ifnames=1`
+
+Active des noms d'interface réseau prévisibles dans l'installateur, qui correspondront au paramètre par défaut du système après l'installation de {harvester-product-name}. Cela permet au système d'utiliser les interfaces correctes.

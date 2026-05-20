@@ -1,0 +1,49 @@
+= Tarefas pós-instalação
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Você pode aumentar a segurança e o desempenho do seu {harvester-product-name} cluster realizando os seguintes procedimentos após a conclusão da instalação.
+
+== Desative a autenticação por senha SSH
+
+Por padrão, a autenticação por senha SSH está habilitada nos nós {harvester-product-name} durante a instalação. Isso permite que o administrador acesse os nós para diagnóstico pós-instalação.
+
+Uma vez que a instalação é concluída, é recomendável desativar a autenticação por senha SSH. Você pode executar o seguinte comando, que usa `kubectl` para aplicar uma configuração https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`], para desativar a autenticação por senha SSH em todos os nós {harvester-product-name}:
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* O campo `matchSelector` é usado para selecionar nós {harvester-product-name} com rótulos específicos.
+* Todos os nós afetados devem ser reiniciados para que a configuração `CloudInit` tenha efeito.
+====
+
+Uma vez que a configuração é aplicada, quaisquer tentativas de acessar os nós {harvester-product-name} com a senha SSH são negadas.
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----

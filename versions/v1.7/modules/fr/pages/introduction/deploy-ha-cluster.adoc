@@ -1,0 +1,105 @@
+= Déployer un cluster à haute disponibilité
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Un cluster {harvester-product-name} avec trois nœuds ou plus est requis pour réaliser pleinement les fonctionnalités multi-nœuds telles que la haute disponibilité. Les dernières versions vous permettent de créer des clusters avec deux nœuds de gestion et un xref:/hosts/witness-node.adoc[witness node] (et éventuellement, un ou plusieurs nœuds de travail). Vous pouvez également créer des xref:/installation-setup/single-node-clusters.adoc[clusters à nœud unique] qui prennent en charge la plupart des fonctionnalités (à l'exception de la haute disponibilité, du support multi-répliques et de la migration en direct).
+
+Ce guide vous accompagne à travers les étapes nécessaires pour déployer un *cluster à haute disponibilité* et des machines virtuelles (VM) qui peuvent héberger des clusters invités et exécuter des charges de travail personnalisées.
+
+== 1. Vérifiez que les exigences minimales en matière de matériel et de réseau sont respectées.
+
+{harvester-product-name} est conçu pour des serveurs sur matériel sans système d'exploitation utilisant des composants logiciels Open Source de niveau entreprise. L'installateur vérifie automatiquement le matériel et affiche des messages d'avertissement si les xref:/installation-setup/requirements.adoc[exigences] minimales ne sont pas respectées.
+
+== 2. Préparez les fichiers d'installation en fonction de la méthode d'installation que vous souhaitez utiliser.
+
+Vous pouvez télécharger les fichiers d'installation depuis la page https://github.com/harvester/harvester/releases[Releases]. La section *Téléchargements* des notes de version contient des liens vers les fichiers ISO et les artefacts associés. Les types de fichiers ISO suivants sont disponibles{nbsp}:
+
+* *Image ISO complète*{nbsp}: Contient les composants principaux du système d'exploitation et toutes les images de conteneur requises, qui sont préchargées lors de l'installation. Vous devez utiliser une image ISO complète lors de l'installation de {harvester-product-name} derrière une passerelle de périmètre de sécurité ou un proxy, et dans des environnements sans connectivité Internet.
+* xref:/installation-setup/media/net-install.adoc[*Image ISO d'installation réseau*]{nbsp}: Contient uniquement les composants principaux du système d'exploitation. Après l'installation, le système d'exploitation récupère toutes les images de conteneur requises depuis Internet (principalement depuis Docker Hub).
+
+|===
+| Méthode | Fichiers d'installation requis | Autres exigences
+
+| xref:/installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| S/O
+
+| xref:/installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| Clé de stockage USB{nbsp}; utilitaire tel que https://etcher.balena.io/[balenaEtcher] ou la commande Linux https://man7.org/linux/man-pages/man1/dd.1.html[dd]
+
+| xref:/installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO, image du noyau Linux (vmlinuz), initrd, image SquashFS
+| Répertoire sur le serveur HTTP (pour servir les fichiers de démarrage){nbsp}; scripts de démarrage iPXE (pour installation automatique){nbsp}; configuration du serveur DHCP
+|===
+
+== 3. Préparez les exigences de configuration du cluster.
+
+* Jeton de cluster{nbsp}: Chaîne ASCII que les nœuds utilisent lors de leur adhésion au cluster
+* Adresse IP fixe pour chaque nœud{nbsp}: Peut être attribuée statiquement ou en utilisant DHCP (réservation d'hôte)
+* Adresse IP virtuelle fixe (VIP) à utiliser comme adresse de gestion du cluster{nbsp}: VIP vers lequel les nœuds se dirigent lors de leur adhésion au cluster et auquel vous vous connectez lors des tâches d'administration après le déploiement du cluster
+* Adresses des serveurs DNS, des serveurs NTP et du serveur proxy (si nécessaire)
+
+== 4. Déployez le premier nœud du cluster.
+
+Le déploiement implique l'installation du système d'exploitation et d'autres composants sur l'hôte, puis un redémarrage une fois l'installation terminée. Le déploiement du premier nœud crée le cluster, et le premier nœud est, par défaut, assigné en tant que nœud de gestion.
+
+Lors de l'installation, vous devez configurer les paramètres du nœud, définir l'adresse de gestion du cluster (VIP) et le token de cluster, et spécifier d'autres informations. Si nécessaire, vous pouvez configurer d'autres paramètres à l'aide d'un xref:/installation-setup/config/configuration-file.adoc[fichier de configuration].
+
+Une fois l'installation terminée, le nœud redémarre et la console apparaît. La console affiche des informations sur le cluster (URL de gestion et statut) et le nœud (nom d'hôte, adresse IP et statut). Après l'initialisation du cluster et le démarrage de tous les services, le statut du cluster change en *Prêt*.
+
+== 5. Configurez un mot de passe fort pour l'utilisateur par défaut `admin`.
+
+Une fois que l'état du cluster change en *Prêt*, vous pouvez accéder à l'xref:/installation-setup/authentication.adoc[interface utilisateur] en utilisant l'URL de gestion affichée sur la console.
+
+== 6. Déployez les autres nœuds et rejoignez-les au cluster.
+
+Le déploiement implique l'installation du système d'exploitation et d'autres composants sur l'hôte, puis un redémarrage une fois l'installation terminée. Tous les autres nœuds rejoignent le cluster qui a été créé lorsque le premier nœud a été déployé.
+
+Lors de l'installation, vous devez configurer les paramètres des nœuds et spécifier l'adresse de gestion du cluster (VIP) ainsi que le token de cluster que vous avez défini précédemment. Si nécessaire, vous pouvez configurer d'autres paramètres à l'aide d'un xref:/installation-setup/config/configuration-file.adoc[fichier de configuration].
+
+Lorsque le cluster compte trois nœuds ou plus, les deux nœuds ajoutés après le premier sont automatiquement promus au rôle de nœuds de gestion pour former un cluster à haute disponibilité (HA).
+
+== 7. Créez un réseau de cluster personnalisé (optionnel) et un réseau de VM (obligatoire).
+
+Le réseau implique trois concepts majeurs{nbsp}:
+
+* xref:/networking/cluster-network.adoc#_cluster_network[*Réseau de cluster*]{nbsp}: Chemin de transmission isolé pour la transmission du trafic réseau dans le cluster {harvester-product-name}.
++
+Lors du déploiement, un réseau de cluster appelé xref:/networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] est créé pour les communications intra-cluster. `mgmt` permet aux VM d'être accessibles depuis le réseau d'infrastructure (externe au cluster) auquel chaque nœud se connecte avec des NIC de gestion à des fins de gestion du cluster. {harvester-product-name} vous permet également de créer des xref:/networking/cluster-network.adoc#_custom_cluster_network[réseaux de cluster personnalisés] qui peuvent être dédiés au trafic des VM.
+
+* xref:/networking/cluster-network.adoc#_network_configuration[*Configuration réseau*]{nbsp}: Définition de la manière dont les nœuds du cluster se connectent à un réseau de cluster spécifique.
++
+Chaque configuration réseau correspond à un ensemble de nœuds avec des spécifications réseau uniformes. Seuls les nœuds couverts par la configuration réseau peuvent accéder au réseau de cluster associé. Cette disposition vous offre une flexibilité lors de la configuration d'un cluster hétérogène, en particulier lorsque les noms des interfaces réseau sont différents pour chaque nœud.
+
+* xref:/networking/cluster-network.adoc#_vm_network[*Réseau de VM*] : Réseau virtuel que les VM utilisent pour communiquer avec d'autres VM et le réseau d'infrastructure externe.
++
+Chaque réseau de VM est lié à un réseau de cluster spécifique, qui est utilisé pour la transmission du trafic des VM. Vous pouvez créer soit un xref:/networking/vm-network.adoc#_vlan_network[réseau VLAN] soit un xref:/networking/vm-network.adoc#_untagged_network[réseau non étiqueté] en fonction de vos besoins, tels que l'isolement du trafic, la segmentation du réseau, la facilité de gestion ou l'alignement avec l'environnement réseau externe.
+
+Avant de créer des VM, créez les réseaux nécessaires. Si plus d'une interface réseau est attachée à chaque nœud de cluster, envisagez xref:/networking/cluster-network.adoc#_create_a_new_cluster_network[de créer des réseaux de cluster personnalisés] et des configurations réseau pour une meilleure isolation du trafic. Sinon, vous ne pouvez utiliser que le réseau de gestion pour la transmission du trafic des VM. Ensuite, xref:/networking/vm-network.adoc#_create_a_vm_network[créez un réseau de VM] qui est lié soit à `mgmt`, soit à l'un des réseaux de cluster personnalisés que vous avez créés.
+
+== 8. Importez des images de VM.
+
+Dans l'interface utilisateur, vous pouvez importer des ISO, qcow2 et des xref:/virtual-machines/vm-images/upload-image.adoc[images] brutes en téléchargeant une image depuis le système de fichiers local ou en spécifiant l'URL d'une image accessible depuis le cluster.
+
+== 9. Importez des clés SSH. (Recommandée)
+
+Vous pouvez stocker des clés publiques SSH dans {harvester-product-name}. Lorsqu'une machine virtuelle est lancée, une clé stockée peut être xref:/virtual-machines/access-vm.adoc#_ssh_access[injectée] dans la machine virtuelle pour permettre un accès sécurisé via SSH. Les clés validées sont affichées à l'écran *Clés SSH* dans l'interface utilisateur.
+
+== 10. Créez des machines virtuelles.
+
+Vous pouvez créer des xref:/virtual-machines/create-vm.adoc[machines virtuelles Linux] en utilisant l'une des méthodes suivantes :
+
+* Interface utilisateur : Sur l'écran *machines virtuelles*, cliquez sur *Créer* et configurez les paramètres sur chaque onglet.
+* API Kubernetes : Créez un objet `VirtualMachine`.
+* xref:/integrations/terraform/terraform-provider.adoc[Fournisseur Terraform] : Définissez un bloc de ressources `harvester_virtualmachine`.
+
+Créer des xref:/virtual-machines/create-windows-vm.adoc[machines virtuelles Windows] dans l'interface utilisateur implique des étapes légèrement différentes. {harvester-product-name} fournit un modèle de machine virtuelle nommé `windows-iso-image-base-template` qui ajoute un volume avec les pilotes Virtio pour Windows, ce qui simplifie le processus de configuration de la machine virtuelle. Si vous avez besoin de périphériques Virtio mais choisissez de ne pas utiliser le modèle, vous devez ajouter vos propres pilotes Virtio pour Windows afin d'activer la détection correcte du matériel.
+
+== Suite des opérations
+
+Les sections suivantes fournissent des guides qui vous accompagnent dans la sauvegarde et la restauration des machines virtuelles, la gestion des hôtes et l'utilisation de {rancher-product-name} avec {harvester-product-name}.
+
+* xref:/virtual-machines/backup-restore.adoc[Sauvegarde, instantané et restauration des machines virtuelles]
+* xref:/hosts/hosts.adoc[Administration des hôtes]
+* xref:/integrations/rancher/rancher-integration.adoc[{rancher-product-name} Intégration]

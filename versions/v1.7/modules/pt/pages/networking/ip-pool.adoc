@@ -1,0 +1,146 @@
+= Pool de IP
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+O pool de IP é uma solução de gerenciamento de endereços IP (IPAM) incorporada, disponível exclusivamente para {harvester-product-name} balanceadores de carga (LBs).
+
+== Recursos
+
+* *Múltiplos intervalos de IP:* Cada pool de IP pode conter múltiplos intervalos de IP ou CIDRs.
+* *Histórico de alocação:* O pool de IP mantém o controle do histórico de alocação de cada endereço IP e prioriza a atribuição de endereços previamente alocados pelo nome do balanceador de carga.
++
+[,yaml]
+----
+status:
+  allocatedHistory:
+    192.168.178.8: default/rke2-default-lb-pool-2fab9ac0
+----
+
+* *Escopo:* Pools de IP podem ser restritos a uma rede, projeto, namespace ou cluster de convidados específicos.
+
+== Criando um pool de IP
+
+. Na interface {harvester-product-name}, vá para *Redes -> Pools de IP*.
+. Selecione *Criar*.
+. Especifique um nome para o pool de IP.
+. Na aba *Intervalo*, especifique um ou mais intervalos de IP.
++
+image::networking/multiple-ranges.png[Múltiplos intervalos de IP em um pool de IP]
+. Na aba *Seletor*, especifique o nível de prioridade e o escopo (namespace) do pool de IP.
++
+image::networking/ippool-scope.png[Escopo do pool de IP]
+
+=== Criando um pool de IP usando a interface Rancher
+
+Se você importou o cluster {harvester-product-name} para {rancher-short-name}, pode criar um pool de IP usando a interface {rancher-short-name} (*Gerenciamento de Virtualização* -> Pool de IP: Criar*). No entanto, a seção *Escopo* na aba *Seletor* exige que você especifique o projeto e o cluster Kubernetes de convidados, além do namespace. Para mais informações, consulte xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[Exemplo de Multi-Tenancy] e https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[Projetos e Namespaces do Kubernetes com Rancher].
+
+Um pool de IP é designado como um recurso global quando a seção *Escopo* contém apenas uma entrada com os campos *Projeto*, *Namespace* e *Cluster Kubernetes Convidado* definidos como *Todos*.
+
+== Política de seleção
+
+Cada pool de IP terá um intervalo específico, e você pode especificar os requisitos correspondentes no LB `annotations`. Pools de IP que atendem aos requisitos especificados atribuirão automaticamente endereços IP aos LBs.
+
+* Os LBs utilizam as seguintes anotações para expressar requisitos (todas as anotações são opcionais):
+ ** `loadbalancer.harvesterhci.io/network` especifica a rede da VM que os nós do cluster convidado utilizam.
+ ** `loadbalancer.harvesterhci.io/project` e `loadbalancer.harvesterhci.io/namespace` identificam o projeto e o namespace das VMs que compõem o cluster convidado.
+ ** `loadbalancer.harvesterhci.io/cluster` denota o nome do cluster convidado.
+* O pool de IP tem um seletor, incluindo rede e escopo, para corresponder aos requisitos do LB.
+ ** Rede é uma condição rígida. O pool de IP opcional deve corresponder ao valor da anotação do LB `loadbalancer.harvesterhci.io/network`.
+ ** Todo pool de IP, exceto o pool de IP global, tem um escopo único diferente dos outros se sua prioridade for `0`. O projeto, namespace ou nome do cluster dos LBs deve estar no escopo do pool de IP se quiserem obter um IP deste pool.
+* `spec.selector.priority` especifica a prioridade do pool de IP. Quanto maior o número, maior a prioridade. Se a prioridade não for `0`, o valor deve ser diferente. A prioridade ajuda você a migrar o pool de IP antigo para o novo.
+* Se o pool de IP tiver um escopo que corresponda a todos os projetos, namespaces e clusters convidados, é chamado de pool de IP global, e apenas um pool de IP global é permitido. Se não houver pool de IP que corresponda aos requisitos do LB, o IPAM alocará um endereço IP do pool de IP global, se existir.
+
+=== Exemplos
+
+* *Exemplo 1:* Você deseja configurar um pool de IP dentro da faixa `192.168.100.0/24` para o namespace `default`. Neste cenário, todos os balanceadores de carga dentro do namespace `default` receberão um endereço IP deste pool de IP designado:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: default-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.100.0/24
+  selector:
+    scope:
+      namespace: default
+----
+
+* *Exemplo 2:* Você tem um cluster de convidados `rke2` implantado dentro da rede `default/vlan1`, e seu nome `project/namespace` é `product/default`. Se você quiser configurar uma faixa de pool de IP exclusiva `192.168.10.10-192.168.10.20` para ele. Consulte a seguinte configuração `YAML`:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: rke2-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.10.0/24
+    rangeStart: 192.168.10.10
+    rangeEnd: 192.168.10.20
+  selector:
+    network: default/vlan1
+    scope:
+    - project: product
+      namespace: default
+      guestCluster: rke2
+----
+
+* *Exemplo 3:* Se você especificou o pool de IP `default-ip-pool` para o namespace `default`, você deseja migrar o pool de IP `default-ip-pool` para um pool de IP diferente `default-ip-pool-2` com faixa `192.168.200.0/24`. Não é permitido especificar mais de um pool de IP para o mesmo escopo, mas você pode dar ao pool de IP `default-ip-pool-2` uma prioridade maior do que `default-ip-pool`. Consulte a seguinte configuração `YAML`:
++
+[,yaml]
+----
+  apiVersion: networking.harvesterhci.io/v1beta1
+  kind: IPPool
+  metadata:
+    name: default-ip-pool-2
+  spec:
+    ranges:
+    - subnet: 192.168.200.0/24
+    selector:
+      priority: 1  # The priority is higher than default-ip-pool
+      scope:
+        namespace: default
+----
+
+* *Exemplo 4:* Você deseja configurar um pool de IP global com uma faixa CIDR de `192.168.20.0/24`:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
+spec:
+  ranges:
+  - subnet: 192.168.20.0/24
+  selector:
+    scope:
+    - project: "*"
+      namespace: "*"
+      guestCluster: "*"
+----
+
+== Política de alocação
+
+* O pool de IP prioriza a alocação de endereços IP previamente atribuídos com base em seu histórico de alocação.
+* Os endereços IP são atribuídos em ordem crescente.
+
+== Melhores práticas
+
+=== Pool de IP para tipo de balanceador de carga de VM
+
+* Crie um pool de IP <<Creating an IP pool,usando a interface {harvester-product-name}>>, que deixa os campos *Projeto* e *Cluster Kubernetes de Convidado* do seletor de escopo em branco.
+
+* Se você precisar <<Creating an IP pool using the Rancher UI,usar a interface {rancher-short-name}>>, defina os campos *Projeto* e *Cluster Kubernetes de Convidado* como *Todos* ou *Nenhum*.
+
+=== Pool de IP para tipo de balanceador de carga de cluster de convidados
+
+* Crie um pool de IP <<Creating an IP pool using the Rancher UI,usando a interface {rancher-short-name}>>, que permite especificar o projeto alvo e o cluster Kubernetes de convidados para melhor gerenciamento e isolamento de recursos.
+
+* Tenha cautela ao criar pools de IP globais. Um único cluster de convidados pode esgotar todo o pool, deixando outros clusters incapazes de provisionar serviços. Além disso, você não pode excluir um pool se algum dos endereços ainda estiver em uso.

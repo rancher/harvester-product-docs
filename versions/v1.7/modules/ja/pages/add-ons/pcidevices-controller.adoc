@@ -1,0 +1,158 @@
+= PCIデバイスコントローラー
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+SUSE® Virtualizationにおける`PCIDevice`は、PCIアドレスを持つホストデバイスを表します。
+デバイスは、`PCIDeviceClaim`リソースを作成するか、UIを使用してパススルーを有効にすることによって、ハイパーバイザーを介してVMに渡すことができます。デバイスをハイパーバイザーを介して渡すことは、VMがデバイスに直接アクセスでき、実質的にそのデバイスを所有することを意味します。VMは、そのデバイス用のドライバーを自分でインストールすることさえできます。
+
+これは、`pcidevices-controller`アドオンを使用することで実現されます。
+
+PCIデバイス機能を使用するには、ユーザーはまず`pcidevices-controller`アドオンを有効にする必要があります。
+
+image::vm-import-controller/EnableAddon.png[]
+
+`pcidevices-controller`アドオンが正常にデプロイされたら、スキャンが完了し、PCIDevice CRDが利用可能になるまでに数分かかることがあります。
+
+image::pcidevices/PcideviceEnabled.png[]
+
+== PCIデバイスでのパススルーの有効化
+
+. 次に、`Advanced -> PCI Devices`ページに移動します：
++
+image::pcidevices/advanced-pcidevices-index.png[]
+
+. ベンダー名（例：NVIDIA、Intelなど）またはデバイス名でデバイスを検索します。
++
+image::pcidevices/search-pcidevices.png[]
+
+. パススルーを有効にしたいデバイスを選択します：
++
+image::pcidevices/select-pcidevices.png[]
+
+. 次に、*パススルーを有効にする*をクリックし、警告メッセージを読みます。これらのデバイスを有効にしたい場合は、*有効にする*をクリックし、すべてのデバイスが`Enabled`されるのを待ちます。
++
+[CAUTION]
+====
+`host-owned` PCIデバイス（例：管理用およびVLAN NIC）は使用しないでください。不適切なデバイスの割り当ては、ノードの障害を含むクラスターに損害を与える可能性があります。
+====
++
+image::pcidevices/enable-pcidevices-inprogress.png[]
++
+image::pcidevices/enable-pcidevices-done.png[]
+
+== VMへのPCIデバイスの接続
+
+これらのPCIデバイスを有効にした後、*仮想マシン*ページに移動し、*設定を編集*を選択してこれらのデバイスを渡すことができます。
+
+image::pcidevices/vm-pcidevices-edit-config.png[]
+
+*PCIデバイス*を選択し、*利用可能なPCIデバイス*のドロップダウンを使用します。表示されたリストから接続したいデバイスを選択し、次に*保存*をクリックします。
+
+image::pcidevices/vm-pcidevices-attach.png[]
+
+== VM内でパススルーされたPCIデバイスを使用する
+
+VMを起動し、VM内で`lspci`を実行すると、接続されたPCIデバイスが表示されますが、VM内のPCIアドレスはホストのPCIアドレスと必ずしも一致するわけではありません。
+
+== VM内でのPCIデバイスのドライバーをインストールする
+
+これはホストでドライバーをインストールするのと同じです。PCIパススルー機能は、ホストデバイスを`vfio-pci`ドライバーにバインドし、VMが独自のドライバーを使用できるようにします。
+
+== 既知の問題
+
+* https://github.com/harvester/harvester/issues/6648[問題 #6648]:クラスターに同じPCIデバイスの複数のインスタンスがある場合、仮想マシンは不正なノードにスケジュールされる可能性があります。
+
+pcidevices-controllerアドオンは、現在、ユニークなリソース記述子を使用してデバイスをkubeletに公開しています。クラスター内に同じデバイスタイプの複数の`PCIDeviceClaims`が存在する場合、これらの`PCIDeviceClaims`には同じユニークなリソース記述子が使用されるため、仮想マシンは不正なノードにスケジュールされる可能性があります。正しいデバイスとノードが使用されることを確認するために、*ノードスケジューリング*設定を構成する際に*特定のノードでVMを実行*を選択してください。
+
+image::pcidevices/vm-scheduling.png[]
+
+== SR-IOVネットワークデバイス
+
+image::pcidevices/SriovNetworkDevicesLink.png[]
+
+`pcidevices-controller`アドオンは、基盤となるホスト上のネットワークインタフェースをスキャンし、SRIOV仮想関数（VF）をサポートしているかどうかを確認できるようになりました。有効なデバイスが見つかった場合、`pcidevices-controller`は新しい`SRIOVNetworkDevice`オブジェクトを生成します。
+
+image::pcidevices/SriovNetworkDevicesList.png[]
+
+SriovNetworkDevice上でVFを作成するには、*⋮ -> 有効にする*をクリックし、次に*仮想関数の数*を定義します。
+
+image::pcidevices/SriovNetworkDeviceEnable.png[]
+
+image::pcidevices/SriovNetworkVFDefinition.png[]
+
+`pcidevices-controller`はネットワークインタフェース上のVFを定義し、新しく作成されたVFの新しいPCIデバイスの状態を報告します。
+
+image::pcidevices/SriovNetworkDevicesVFStatus.png[]
+
+次回の再スキャン時に、`pcidevices-controller`はVFのPCIDevicesを作成します。これには最大1分かかる場合があります。
+
+新しいデバイスを表示するために、*PCIデバイス*ページに移動できます。
+
+基盤となるネットワークインタフェースによってPCIデバイスをフィルタリングするための新しいフィルターも導入しました。
+
+image::pcidevices/SriovNetworkDevicesFilter.png[]
+
+新しく作成されたPCIデバイスは、他のPCIデバイスと同様に仮想マシンにパススルーできます。
+
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== USBデバイス
+
+Harvesterの`USBDevice`リソースは、ノード上のUSBデバイスを表します。USBデバイスは、ハイパーバイザーによって「パススルー」され、VMからの直接アクセスを可能にします。これは`pcidevices-controller`アドオンを通じて実現されます。USBパススルーを使用するには、`USBDeviceClaim`リソースを作成するか、Harvester UIで機能を有効にします。
+
+USBパススルーは、PCIパススルーとは少し異なります。例えば、`PCIDeviceClaim`を作成することで、4つのUSBポートを持つUSBコントローラーを完全に制御できます。ただし、1つのUSBポートのみを制御するために`USBDeviceClaim`を作成することもできます。他の3つのUSBポートはノードに利用可能なままです。
+
+[CAUTION]
+====
+USBデバイスを削除する前に、仮想マシンから切り離し、次に*USBデバイス*画面でパススルーを無効にしてください。
+====
+
+=== USBデバイスでパススルーを有効にする
+
+. Harvester UIで、*高度な-> USBデバイス*に移動します。
++
+image::pcidevices/index.png[]
++
+. リストでデバイスを見つけます。
++
+image::pcidevices/search.png[]
++
+. 対象デバイスを選択し、次に*⋮ -> パススルーを有効にする*を選択します。
++
+image::pcidevices/select.png[]
++
+. 確認メッセージを読み、次に*有効にする*をクリックします。
++
+デバイスの状態が*有効*に変わるまでしばらくお待ちください。
++
+image::pcidevices/enable-done.png[]
+
+=== USBデバイスを仮想マシンに接続する
+
+. 対象デバイスでパススルーが有効になっていることを確認します。
++
+. *仮想マシン*に移動し、仮想マシンを作成するか、既存の仮想マシンの設定を編集します。
++
+. 仮想マシンの設定画面で、*USBデバイス*タブに移動し、次に*利用可能なUSBデバイス*リストからデバイスを選択します。
++
+image::pcidevices/attach-vm.png[]
++
+. *作成*または*保存*をクリックします。
+
+=== 仮想マシンに接続されているUSBデバイスを表示します。
+
+. 仮想マシンを起動してからアクセスします。
++
+. `lsusb`を実行します。
++
+このユーティリティは、USBバスと接続されたデバイスに関する情報を表示します。
++
+image::pcidevices/usb-in-vm.png[]
+
+=== 制限
+
+* 接続されたUSBデバイスを持つ仮想マシンは、デバイスが特定のノードにバインドされているため、ライブマイグレーションできません。
++
+* USBデバイスのホットプラグおよび再接続はサポートされていません。詳細については、 https://github.com/kubevirt/kubevirt/issues/11979[KubeVirtの問題 #11979]をご覧ください。
++
+* デバイスを再接続するかノードを再起動したときにデバイスのパスが変更される場合は、仮想マシンからデバイスを切り離し、再度パススルーを有効にする必要があります。

@@ -1,0 +1,195 @@
+= Migration à chaud
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+La migration à chaud signifie déplacer une machine virtuelle vers un autre hôte sans temps d'arrêt. Un certain nombre de processus et de tâches complets sont effectués en arrière-plan pour réaliser la migration à chaud.
+
+== Conditions préalables
+
+La migration à chaud peut se produire lorsque les exigences suivantes sont remplies{nbsp}:
+
+* En plus du nœud actuel, le cluster dispose d'au moins un nœud planifiable qui correspond à toutes les règles de planification de la machine virtuelle.
+
+* Le nœud cible de migration dispose de suffisamment de ressources disponibles pour héberger la machine virtuelle.
+
+* L'UC, la mémoire, xref:virtual-machines/create-vm.adoc#_volumes[volumes], les périphériques et d'autres ressources demandées par la machine virtuelle peuvent être copiés ou reconstruits sur le nœud cible de migration pendant que la machine virtuelle source est encore en cours d'exécution.
+
+== Machines virtuelles non migrables
+
+Une machine virtuelle est considérée comme non migrable si elle a une ou plusieurs des caractéristiques suivantes{nbsp}:
+
+* Volume avec les propriétés suivantes{nbsp}:
+
+** Type{nbsp}: `CD-ROM` ou `Container Disk`
+** Mode d'accès{nbsp}: `ReadWriteOnce`
+** Nombre de répliques de StorageClass{nbsp}: `1` (Cela n'est pas détecté dans tous les cas.)
+
+* Périphériques hôtes en passthrough tels que `PCI` et `vGPU`
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Sélecteur de nœud] qui lie la machine virtuelle à un nœud spécifique
+
+* xref:virtual-machines/create-vm.adoc#_node_scheduling[Règles de planification] qui ne correspondent qu'à un seul nœud.
+
+Les exemples suivants sont des conditions de règle qui sont vérifiées à l'exécution{nbsp}:
+
+* La machine virtuelle est attachée à un réseau de cluster qui ne couvre qu'un seul nœud.
+
+* Le pinning CPU est activé sur la machine virtuelle, et le gestionnaire de CPU n'est activé que sur un seul nœud.
+
+* La machine virtuelle a des règles d'anti-affinité strictes qui l'empêchent d'être co-localisée avec certaines autres machines virtuelles.
+
+Pour plus d'informations, voir xref:virtual-machines/create-vm.adoc#_automatically_applied_affinity_rules[Règles d'affinité appliquées automatiquement].
+
+[NOTE]
+====
+Pour migrer la machine virtuelle à chaud, vous devez d'abord supprimer les dispositifs non migrables et ajouter des nœuds planifiables.
+====
+
+== Machines virtuelles migrables à chaud
+
+Les machines virtuelles qui ne possèdent pas les caractéristiques des machines virtuelles non migrables peuvent être migrées à chaud.
+
+== Comment fonctionne la migration
+
+=== `VirtualMachineInstanceMigration` Objet
+
+Lorsqu'une action de migration de machine virtuelle est déclenchée, un `VirtualMachineInstanceMigration` objet est créé pour suivre l'état et la progression de l'opération. Le contrôleur {harvester-product-name} corrèle l'objet `VirtualMachineInstanceMigration` avec l'objet `VirtualMachineInstance` en s'assurant que l'identité de l'objet d'instance est reflétée dans l'objet de migration.
+
+Dans l'exemple suivant, la machine virtuelle nommée `demo` a un objet de migration associé. L'UID de cet objet est ajouté à la propriété `.status.migrationState.migrationUID` de l'objet d'instance pendant la migration.
+
+[bash, shell]
+----
+$ kubectl get vmi demo -ojsonpath={.status.migrationState.migrationUID}
+
+1d6d7273-275d-48e0-bb76-62e240b42aaf
+----
+
+Le nom de l'objet d'instance est ajouté à la propriété `.spec.vmiName` de l'objet de migration.
+
+[bash, shell]
+----
+$ kubectl get vmim demo-6crrk -ojsonpath={.spec.vmiName}
+
+démo
+----
+
+Le format du nom de l'objet `VirtualMachineInstanceMigration` varie selon que la migration est déclenchée manuellement ou automatiquement.
+
+Lorsqu'une migration est déclenchée depuis l'élément de menu **Migrer** (xref:#_starting_a_migration[menu item]), le nom de l'objet `VirtualMachineInstanceMigration` est préfixé par le nom de la machine virtuelle et une chaîne aléatoire (par exemple, `vm1-a3d1f`).
+
+Lorsqu'une migration est déclenchée xref:#_automatically_triggered_batch_migration[automatiquement], le nom de l'objet `VirtualMachineInstanceMigration` est préfixé par `kubevirt-evacuation-` et une chaîne aléatoire (par exemple, `kubevirt-evacuation-9c485`).
+
+[NOTE]
+====
+L'interface utilisateur {harvester-product-name} ne spécifie pas la source de la migration. Vous devez vérifier le nom de l'objet `VirtualMachineInstanceMigration` pour récupérer cette information.
+====
+
+=== Correspondance du modèle d'UC
+
+Chaque nœud a plusieurs modèles d'UC qui sont étiquetés avec différentes clés.
+
+* Modèle d'UC principal{nbsp}: `host-model-cpu.node.kubevirt.io/{cpu-model}`
+* Modèles d'UC pris en charge{nbsp}: `cpu-model.node.kubevirt.io/{cpu-model}`
+* Modèles d'UC pris en charge pour la migration{nbsp}: `cpu-model-migration.node.kubevirt.io/{cpu-model}`
+
+Lors de la migration en direct, le contrôleur vérifie la valeur de `spec.domain.cpu.model` dans le CR de l'instance de machine virtuelle (VMI), qui est dérivée de `spec.template.spec.domain.cpu.model` dans le CR de la machine virtuelle (VM). Si la valeur de `spec.template.spec.domain.cpu.model` n'est pas définie, le contrôleur utilise la valeur par défaut `host-model`.
+
+Lorsque `host-model` est utilisé, le processus récupère la valeur du modèle d'UC principal et remplit `spec.NodeSelectors` du pod nouvellement créé avec l'étiquette `cpu-model-migration.node.kubevirt.io/{cpu-model}`.
+
+Alternativement, vous pouvez personnaliser le modèle d'UC dans `spec.domain.cpu.model`. Par exemple, si le modèle d'UC est `XYZ`, le processus remplit `spec.NodeSelectors` du pod nouvellement créé avec l'étiquette `cpu-model.node.kubevirt.io/XYZ`.
+
+Cependant, `host-model` ne permet la migration de la VM que vers un nœud avec le même modèle d'UC. Pour plus d'informations, consultez xref:#_limitations[Limitations].
+
+== Début d'une migration
+
+. Allez à la page *Machines Virtuelles*.
+. Trouvez la machine virtuelle que vous souhaitez migrer et sélectionnez *⋮ > Migrer*.
+. Choisissez le nœud vers lequel vous souhaitez migrer la machine virtuelle. Cliquez sur *Appliquer*.
+
+image::vm/migrate-action.png[]
+
+[NOTE]
+====
+L'option de menu **Migrer** n'est pas disponible dans les situations suivantes{nbsp}:
+
+* Le cluster n'a qu'un seul nœud.
+* La machine virtuelle est [non-migrable](#non-migrable-virtual-machines).
+* La machine virtuelle a déjà un processus de migration en cours ou en attente.
+====
+
+image::vm/migrate.png[]
+
+== Annuler une migration
+
+. Allez à la page *Machines Virtuelles*.
+. Trouvez la machine virtuelle en cours de migration que vous souhaitez annuler. Sélectionnez *⋮ -> Annuler la migration*.
+
+[NOTE]
+====
+* L'élément de menu **Annuler la migration** est disponible lorsque la machine virtuelle a déjà un processus de migration en cours ou en attente.
+
+* N'utilisez pas cette fonctionnalité de l'interface utilisateur si le processus de migration a été créé en utilisant xref:#_automatically_triggered_batch_migration[migration par lot]. Pour plus d'informations, reportez-vous à xref:#_virtualmachineinstancemigration_object[`VirtualMachineInstanceMigration` Objet].
+====
+
+== Migration par lot déclenchée automatiquement
+
+xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[Mises à niveau] et xref:hosts/hosts.adoc#_node_maintenance[maintenance des nœuds] bénéficient tous deux de la migration à chaud. Le processus sous-jacent, appelé *migration par lot*, est légèrement différent de celui décrit dans xref:#_starting_a_migration[Démarrer une migration]. Ce processus comprend les étapes suivantes{nbsp}:
+
+. Le contrôleur surveille une marque dédiée sur l'objet nœud.
+
+. Le contrôleur crée un objet `VirtualMachineInstanceMigration` pour chaque xref:#_live_migratable_virtual_machines[machine virtuelle migrable à chaud] sur le nœud actuel.
+
+. Les migrations sont mises en file d'attente, programmées en interne et traitées par lots. L'interface utilisateur {harvester-product-name} affiche les statuts **Migration en attente** et **En cours de migration** pour indiquer la progression.
+
+. Le contrôleur surveille le traitement et attend que toutes soient terminées ou aient expiré.
+
+== Délai d'expiration de la migration
+
+=== Délai d'expiration de l'achèvement
+
+Le processus de migration à chaud copie les pages de mémoire de la machine virtuelle et les blocs de disque vers la destination. Dans certains cas, la machine virtuelle peut écrire sur différentes pages de mémoire ou blocs de disque à un rythme plus élevé que celui auquel ils peuvent être copiés. En conséquence, le processus de migration est empêché d'être complété dans un délai raisonnable.
+
+La migration à chaud est annulée si elle dépasse le délai d'achèvement de 800 secondes par GiB de données. Par exemple, une machine virtuelle avec 8 GiB de mémoire dépasse le délai après 6400 secondes.
+
+=== Délai de progression
+
+La migration à chaud est également annulée lorsque la copie de la mémoire ne progresse pas pendant 150 secondes.
+
+== limites
+
+=== Modèles d'UC
+
+`host-model` ne permet la migration de la machine virtuelle que vers un nœud avec le même modèle de processeur. Cependant, spécifier un modèle d'UC n'est pas toujours nécessaire. Lorsque aucun modèle d'UC n'est spécifié, vous devez éteindre la machine virtuelle, attribuer un modèle d'UC pris en charge par tous les nœuds, puis redémarrer la machine virtuelle.
+
+Exemple :
+
+* Un nœud{nbsp}: `host-model-cpu.node.kubevirt.io/XYZ` `cpu-model-migration.node.kubevirt.io/XYZ` `cpu-model.node.kubevirt.io/123`
+* Nœud B{nbsp}: `host-model-cpu.node.kubevirt.io/ABC` `cpu-model-migration.node.kubevirt.io/ABC` `cpu-model.node.kubevirt.io/123`
+
+Migrer une machine virtuelle avec `host-model` n'est pas possible car les valeurs de `host-model-cpu.node.kubevirt.io` ne sont pas identiques. Cependant, les deux nœuds prennent en charge le modèle d'UC `123`, vous pouvez donc migrer toute machine virtuelle avec le modèle d'UC `123` en utilisant l'une des méthodes suivantes{nbsp}:
+
+* Niveau de cluster{nbsp}: Exécutez `kubectl edit kubevirts.kubevirt.io -n harvester-system` et ajoutez `spec.configuration.cpuModel: "123"`. Ce changement affecte également les machines virtuelles nouvellement créées.
+* Machines virtuelles individuelles{nbsp}: Modifiez la configuration de la machine virtuelle pour inclure `spec.template.spec.domain.cpu.model: "123"`.
+
+Les deux méthodes nécessitent que vous redémarriez les machines virtuelles. Si vous êtes certain que tous les nœuds du cluster prennent en charge un modèle d'UC spécifique, vous pouvez le définir au niveau du cluster avant de créer des machines virtuelles. Ce faisant, vous éliminez le besoin de redémarrer les machines virtuelles (pour attribuer le modèle d'UC) lors de la migration à chaud.
+
+=== Pannes de réseau
+
+La migration à chaud est très sensible aux pannes de réseau. Toute interruption de la connexion réseau entre les nœuds source et cible pendant la migration peut avoir une variété de conséquences.
+
+==== `mgmt` pannes de réseau
+
+La migration à chaud via `mgmt` (le réseau de cluster intégré) dépend de la disponibilité des interfaces de gestion sur les nœuds source et cible. Les `mgmt` pannes de réseau sont considérées comme critiques car elles perturbent non seulement le processus de migration mais affectent également la gestion globale des nœuds.
+
+==== Pannes de réseau de migration de VM
+
+Un xref:networking/vm-network.adoc[réseau de migration de VM] isole le trafic de migration des autres activités réseau. Bien que cette configuration améliore les performances et la fiabilité de la migration, en particulier dans les environnements à fort trafic réseau, elle rend également le processus de migration dépendant de la disponibilité de ce réseau spécifique.
+
+Une panne sur le réseau de migration de VM peut affecter le processus de migration de la manière suivante{nbsp}:
+
+* Interruption brève{nbsp}: Le processus de migration s'interrompt brusquement. Une fois la connectivité rétablie, le processus reprend et peut être complété avec succès, bien qu'avec un retard.
+* Panne prolongée{nbsp}: L'opération de migration expire et échoue. La machine virtuelle source continue de fonctionner normalement sur le nœud source.
+
+Le processus de migration fonctionne en mode pair à pair, ce qui signifie que le démon libvirt (libvirtd) sur le nœud source contrôle la migration en appelant directement le démon de destination. Un mécanisme intégré de maintien de connexion garantit que la connexion client reste active pendant le processus de migration. Si la connexion reste inactive pendant une période spécifique, elle est fermée et le processus de migration est annulé.
+
+Par défaut, l'intervalle de maintien de connexion est fixé à 5 secondes, et le nombre de tentatives est fixé à 5. Étant donné ces valeurs par défaut, le processus de migration est annulé si la connexion est inactive pendant 30 secondes. Cependant, la migration peut échouer plus tôt ou plus tard, en fonction des conditions réelles du cluster.

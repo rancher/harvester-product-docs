@@ -1,0 +1,160 @@
+= Subir imágenes
+:revdate: 2025-11-12
+:page-revdate: {revdate}
+
+Actualmente, hay tres formas que se admiten para crear una imagen: subir imágenes a través de URL, subir imágenes a través de archivos locales y crear imágenes a través de volúmenes.
+
+== Subir imágenes a través de URL
+
+[tabs]
+======
+INTERFAZ DE USUARIO::
++
+Para importar imágenes de máquinas virtuales en la página de *Imágenes*, introduce una URL que pueda ser accedida desde el clúster. La descripción y las etiquetas son opcionales.
++
+[NOTE]
+====
+* El nombre de la imagen se completa automáticamente utilizando el nombre del archivo en la dirección URL. Puedes personalizar el nombre de la imagen en cualquier momento.
+* Evita usar una URL de compilación diaria (por ejemplo, el https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[compilación diaria de Ubuntu Jammy]). Cuando se pierden todas las réplicas de una imagen de respaldo de Longhorn, Longhorn intenta descargar el archivo nuevamente para fines de auto-reparación. Usar una URL de compilación diaria es problemático porque la URL en sí cambia, causando un desajuste de suma de comprobación y un conflicto que resulta en réplicas perdidas.
+====
++
+[CAUTION]
+====
+Los archivos de imagen grandes pueden causar problemas de memoria en {harvester-product-name} cuando utilizas clases de almacenamiento de terceros con URLs de descarga que están alojadas en servidores que no soportan solicitudes de rango HTTP (por ejemplo, el `http.server` de Python). Para descargas fiables, utiliza NGINX o Apache en su lugar. (Este problema se ha corregido en v1.6.1.)
+====
++
+image::upload-image.png[]
+
+API::
++
+Para importar una imagen de máquina virtual de un repositorio utilizando la API, crea un objeto `VirtualMachineImage`. Debes especificar una URL que pueda ser accedida desde el clúster. 
++
+Ejemplo:
++
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: VirtualMachineImage
+metadata:
+  name: opensuse-leap
+  namespace: default
+spec:
+  description: A human-readable description for the VM image
+  displayName: openSUSE-Leap
+  sourceType: download
+  url: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.5/images/openSUSE-Leap-15.5.x86_64-NoCloud.qcow2"
+  checksum: 80c27afb7cd791ac86ee1b0b0c572a242f6142579db5beac841e71151d370cd6
+----
++
+Para más información, consulta la xref:api.adoc[referencia de la API]. 
+
+Terraform::
++
+[,json]
+----
+resource "harvester_image" "opensuse154" {
+  name      = "opensuse154"
+  namespace = "harvester-public"
+
+  display_name = "openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+  source_type  = "download"
+  url          = "https://downloadcontent-us1.opensuse.org/repositories/Cloud:/Images:/Leap_15.4/images/openSUSE-Leap-15.4.x86_64-NoCloud.qcow2"
+}
+----
+======
+
+== Subir imágenes a través de archivo local
+
+Actualmente, se admiten imágenes qcow2, raw e ISO.
+
+[NOTE]
+====
+* Por favor, no actualices la página hasta que la carga del archivo haya finalizado.
+====
+
+image::upload-image-local.png[]
+
+=== Error HTTP 413 en {rancher-product-name} Gestión de Múltiples Clústeres
+
+Puedes subir imágenes desde la pantalla xref:/integrations/rancher/virtualization-management.adoc#_importing_harvester_cluster[*Gestión de Múltiples Clústeres*] en la interfaz *{rancher-product-name} UI*. Cuando el estado de una imagen es _Subiendo_ pero el indicador de progreso muestra _0%_ durante un período prolongado, verifica el código de estado de la respuesta HTTP. _413_ indica que el tamaño del cuerpo de la solicitud excede el límite.
+
+image::img-413-code.png[]
+
+El tamaño máximo del cuerpo de la solicitud debe ser específico para el clúster que está alojando {rancher-product-name} (por ejemplo, los clústeres RKE2 tienen un límite predeterminado de 1 MB, pero no existe tal límite en los clústeres K3s).
+
+La solución actual es subir imágenes desde la interfaz *{harvester-product-name} UI*. Si eliges subir imágenes desde la interfaz {rancher-product-name} UI, es posible que necesites configurar ajustes relacionados en el servidor de ingreso (por ejemplo, https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/annotations/#custom-max-body-size[`proxy-body-size`] en NGINX).
+
+Si {rancher-product-name} está desplegado en un clúster RKE2, realiza los siguientes pasos:
+
+. Edita el ingreso de {rancher-product-name}.
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. Especifica un valor para `nginx.ingress.kubernetes.io/proxy-body-size`.
++
+Ejemplo:
++
+image:img-ingress-client-body.png[]
+
+. Elimina la imagen atascada y luego reinicia el proceso de carga.
+
+=== Subida Prolongada de Imágenes Grandes en {rancher-product-name} Gestión de Múltiples Clústeres
+
+Si subes una imagen grande (más de 10 GB) desde la pantalla *Gestión de Múltiples Clústeres* en la interfaz {rancher-product-name} UI, la operación puede tardar más de lo habitual y el estado de la imagen (Subiendo) puede no cambiar.
+
+Este comportamiento está relacionado con _proxy-request-buffering_ en la configuración de ingress, que también es específica para el clúster que está alojando {rancher-product-name}.
+
+La solución actual es subir imágenes desde la interfaz *{harvester-product-name} UI*. Si eliges subir imágenes desde la interfaz {rancher-product-name} UI, es posible que necesites configurar ajustes relacionados en el servidor de ingreso (por ejemplo, https://nginx.org/en/docs/http/ngx_http_proxy_module.html#proxy_request_buffering[`proxy-request-buffering`] en NGINX).
+
+Si {rancher-product-name} está desplegado en un clúster RKE2, realiza los siguientes pasos:
+
+. Edita el ingreso de {rancher-product-name}.
++
+[,sh]
+----
+kubectl -n cattle-system edit ingress rancher
+----
+
+. Desactiva `nginx.ingress.kubernetes.io/proxy-request-buffering`.
++
+Ejemplo:
++
+image:img-ingress-request-proxy-buffering.png[]
+
+. Elimina la imagen atascada y luego reinicia el proceso de carga.
+
+=== Subiendo imágenes previamente descargadas desde {harvester-product-name}
+
+A partir de *v1.5.5*, Longhorn https://github.com/longhorn/backing-image-manager/pull/153[comprime imágenes de respaldo para descargar]. Si intentas subir una imagen de respaldo comprimida, {harvester-product-name} rechaza el intento y muestra el mensaje *La carga falló: el tamaño del archivo subido xxxx debe ser un múltiplo de 512 bytes ya que Longhorn utiliza directIO por defecto* porque los datos comprimidos violan la alineación de datos de Longhorn.
+
+Antes de subir, descomprime las imágenes de respaldo utilizando el comando `gzip -d <file name>`.
+
+== Crea Imágenes a través de Volúmenes
+
+En la página de *Volúmenes*, haz clic en *Exportar Imagen*. Introduce el nombre de la imagen y selecciona una Clase de Almacenamiento para crear una imagen.
+
+image::volume/export-volume-to-image-1.png[]
+
+== Clase de Almacenamiento de Imagen
+
+Al crear una imagen, puedes seleccionar una xref:/storage/storageclass.adoc[Clase de Almacenamiento] y utilizar sus parámetros predefinidos como réplicas, selectores de nodo y selectores de disco.
+
+[NOTE]
+====
+La imagen no utiliza directamente la `StorageClass` seleccionada aquí. Es solo una plantilla de `StorageClass`.
+
+En su lugar, crea una Clase de Almacenamiento especial en segundo plano con un nombre de prefijo de `longhorn-`. Esto lo hace automáticamente el sistema secundario de {harvester-product-name}, pero hereda los parámetros de la Clase de Almacenamiento que has seleccionado.
+====
+
+image::image-storageclass.png[]
+
+== Etiquetas de Imagen
+
+Puedes añadir etiquetas a la imagen, lo que ayuda a identificar el tipo de SO con mayor precisión. Además, puedes añadir cualquier etiqueta personalizada para filtrar si es necesario.
+
+Si el nombre de tu imagen o URL contiene información válida, la interfaz de usuario reconoce automáticamente el tipo de SO y la categoría de imagen por ti. Si no, también puedes especificar manualmente esas etiquetas correspondientes en la interfaz de usuario.
+
+image::image-labels.png[]

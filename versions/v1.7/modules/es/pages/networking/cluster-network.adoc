@@ -1,0 +1,573 @@
+= Red de clúster
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== conceptos
+
+=== Red de clúster
+
+El siguiente diagrama describe una arquitectura de red típica que separa el tráfico del centro de datos (DC) del tráfico fuera de banda (OOB).
+
+image::networking/traffic-isolation.png[Aislamiento del tráfico de red]
+
+Abstraemos la suma de dispositivos, enlaces y configuraciones en una ruta de reenvío aislada por tráfico en {harvester-product-name} como una red de clúster.
+
+En el caso anterior, habrá dos redes de clúster correspondientes a dos rutas de reenvío aisladas por tráfico.
+
+=== configuración de la red
+
+Las especificaciones que incluyen dispositivos de red de los {harvester-product-name} hosts pueden ser diferentes. Para ser compatible con un clúster heterogéneo, diseñamos la configuración de red.
+
+La configuración de red solo funciona bajo una cierta red de clúster. Cada configuración de red corresponde a un conjunto de hosts con especificaciones de red uniformes. Por lo tanto, se requieren múltiples configuraciones de red para una red de clúster en hosts no uniformes.
+
+=== Red de VM
+
+Una red de VM es una interfaz en una máquina virtual que se conecta a la red del host. Al igual que con una configuración de red, cada red excepto la xref:./vm-network.adoc#_management_network[red de gestión] integrada debe estar bajo una red de clúster.
+
+{harvester-product-name} admite la adición de múltiples redes a una VM. Si la red de clúster de una red no está habilitada en algunos hosts, la VM que posee esta red no será programada en esos hosts.
+
+Por favor, consulta xref:./vm-network.adoc[parte de red] para más detalles sobre redes.
+
+=== Relación entre Red de Clúster, Configuración de Red, Red de VM
+
+El siguiente diagrama muestra la relación entre una red de clúster, una configuración de red y una red de VM.
+
+image::networking/relation.png[{harvester-product-name} conceptos de redes]
+
+Todos `Network Configs` y `VM Networks` están agrupados bajo una red de clúster.
+
+* Se puede asignar una etiqueta a cada host para categorizar los hosts según sus especificaciones de red.
+* Se puede añadir una configuración de red para cada grupo de hosts utilizando un selector de nodos.
+
+Por ejemplo, en el diagrama anterior, los hosts en `ClusterNetwork-A` se dividen en tres grupos de la siguiente manera:
+
+* El primer grupo incluye host0, que corresponde a `network-config-A`.
+* El segundo grupo incluye host1 y host2, que corresponden a `network-config-B`.
+* El tercer grupo incluye los hosts restantes (host3, host4 y host5), que no tienen ninguna configuración de red relacionada y, por lo tanto, no pertenecen a `ClusterNetwork-A`.
+
+La red de clúster solo es efectiva en los hosts que están cubiertos por la configuración de red. Una VM que utiliza un `VM network` bajo una red de clúster específica solo puede ser programada en un host donde la red de clúster esté activa.
+
+En el diagrama anterior, podemos ver que:
+
+* `ClusterNetwork-A` está activa en host0, host1 y host2. `VM0` utiliza `VM-network-A`, por lo que puede ser programada en cualquiera de estos hosts.
+* `VM1` utiliza tanto `VM-network-B` como `VM-network-C`, por lo que solo puede ser programada en host2 donde tanto `ClusterNetwork-A` como `ClusterNetwork-B` están activos.
+* `VM0`, `VM1` y `VM2` no pueden ejecutarse en host3 donde las dos redes de clúster están inactivas.
+
+En general, este diagrama proporciona una visualización clara de la relación entre las redes de clúster, las configuraciones de red y las redes de VM, así como de cómo impactan en la programación de VM en los hosts.
+
+== Detalles de la red de clúster
+
+Las redes de clúster son rutas de reenvío aisladas por tráfico para la transmisión de tráfico de red dentro de un {harvester-product-name} clúster.
+
+Una red de clúster llamada `mgmt` se crea automáticamente cuando se despliega un {harvester-product-name} clúster. También puedes crear redes de clúster personalizadas que pueden estar dedicadas al tráfico de máquinas virtuales.
+
+=== Red de clúster integrada
+
+Cuando se despliega un {harvester-product-name} clúster, se crea automáticamente una red de clúster llamada `mgmt` para las comunicaciones intra-clúster. `mgmt` consiste en el mismo puente, vinculación y NICs que la red de infraestructura externa a la que cada {harvester-product-name} host se conecta con NICs de gestión. Debido a este diseño, `mgmt` también permite que las máquinas virtuales sean accesibles desde la red de infraestructura externa para fines de gestión de clústeres.
+
+`mgmt` no requiere una configuración de red y está siempre habilitado en todos los hosts. No puedes deshabilitar y eliminar `mgmt`.
+
+[NOTE]
+====
+En {harvester-product-name} v1.5.x y versiones anteriores, todo el rango de ID de VLAN (2 a 4094) se asignaba a las interfaces de `mgmt`. Sin embargo, esto superó el límite superior de VLANs soportadas en ciertas tarjetas de red, por lo que la descarga de VLAN por hardware dejó de funcionar correctamente.
+
+Para obtener más información, consulta https://github.com/harvester/harvester/issues/7650[issue #7650].
+====
+
+A partir de v1.6.0, solo el xref:installation-setup/config/configuration-file.adoc#_install_management_interface[ID de VLAN primario] proporcionado durante la instalación se añade automáticamente al puente `mgmt-br` y a la interfaz `mgmt-bo`. Puedes <<Add secondary VLAN interfaces,añadir interfaces de VLAN secundarias>> después de que se complete la instalación.
+
+Durante la instalación del primer nodo del clúster, puedes configurar el valor MTU para `mgmt` utilizando la configuración xref:../installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`]. El valor predeterminado del campo `mtu` es `1500`, que es lo que `mgmt` utiliza típicamente. Sin embargo, si especificas un valor MTU diferente a `0` o `1500`, debes xref:#_annotate_a_non_default_mtu_value_to_mgmt_after_installation[añadir una anotación correspondiente] después de que se despliegue el clúster.
+
+[CAUTION]
+====
+* Ciertos https://www.kernel.org/doc/Documentation/networking/ip-sysctl.txt[configuraciones de ARP] pueden romper las comunicaciones del clúster. Con `arp_ignore=2`, por ejemplo, las respuestas se envían solo si la dirección IP del remitente está en la misma subred que la dirección IP de destino para la cual se solicita la dirección MAC. Este no es el caso en un clúster {harvester-product-name}, por lo que usar `arp_ignore=2` en todas las interfaces resulta en fallos en las comprobaciones de conectividad y evita que los pods {longhorn-product-name} (específicamente, `backing-image` y `instance-manager`) pasen al estado `Ready`. Los volúmenes no pueden ser adjuntados a máquinas virtuales si estos pods {longhorn-product-name} no están listos.
+* Todos los nodos en un clúster {harvester-product-name} deben usar el mismo valor MTU. Debido a que {harvester-product-name} no detecta automáticamente discrepancias cuando se unen nodos, debes asegurarte manualmente de que los valores sean idénticos para evitar un comportamiento inesperado del sistema.
+====
+
+=== Añadir interfaces de VLAN secundarias
+
+. Verifica la configuración actual de VLAN para los perfiles de conexión `bond-mgmt` y `bridge-mgmt`.
++
+Ejemplo (donde el ID de VLAN primario es 2017):
++
+[,shell]
+----
+$ nmcli -f bridge-port.vlans con show bond-mgmt
+bridge-port.vlans:                      1 pvid untagged, 2017
+$ nmcli -f bridge.vlans con show bridge-mgmt
+bridge.vlans:                           2017
+----
+
+. Actualiza los perfiles de conexión `bond-mgmt` y `bridge-mgmt` para añadir el ID de VLAN secundario.
++
+Ejemplo (donde el ID de VLAN primario es 2017 y el ID de VLAN secundario es 2018):
++
+[,shell]
+----
+$ nmcli con modify bond-mgmt bridge-port.vlans '1 pvid untagged, 2017, 2018'
+$ nmcli con modify bridge-mgmt bridge.vlans 2017,2018
+----
+
+. Reinicia cada nodo para aplicar el cambio.
+
+=== Anota un valor MTU no predeterminado a `mgmt` después de la instalación. 
+
+Si especificaste un valor diferente a `0` o `1500` en el campo `mtu` de la configuración xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`], debes anotar este valor al `mgmt` `clusternetwork` objeto. Sin la anotación, todas las xref:./vm-network.adoc#_create_a_vm_network[redes de VM] creadas utilizan el valor MTU predeterminado `1500` en lugar de heredar automáticamente el valor que especificaste.
+
+*Ejemplo*
+
+[bash, shell]
+----
+$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
+
+[CAUTION]
+====
+Debes asegurarte de lo siguiente:
+
+* El `uplink-mtu` valor en la anotación es idéntico al `mtu` valor en la configuración xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`].
+* Todos los nodos del clúster utilizan el mismo valor MTU.
+====
+
+=== Cambia el valor MTU de `mgmt` después de la instalación.
+
+. Detén todas las máquinas virtuales que están conectadas a la `mgmt` red.
+
+. (Opcional) Desactiva la xref:networking/storage-network.adoc#_storage_network_setting[red de almacenamiento] si utiliza `mgmt` y está habilitada.
+
+. Cambia el valor MTU para los perfiles de conexión `bond-mgmt`, `bridge-mgmt` y `vlan-mgmt` (si estás utilizando una VLAN).
++
+Ejemplo:
++
+[,shell]
+----
+$ nmcli con modify bond-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify bridge-mgmt 802-3-ethernet.mtu 9000
+$ nmcli con modify vlan-mgmt 802-3-ethernet.mtu 9000
+$ nmcli device reapply mgmt-bo
+$ nmcli device reapply mgmt-br
+----
+
+. Verifica los valores MTU utilizando el comando `ip link`.
+
+. Anota el `mgmt` `clusternetwork` objeto con el nuevo valor MTU.
++
+Ejemplo:
++
+[,shell]
+----
+$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
++
+Todas las redes de VM que están conectadas a `mgmt` heredan automáticamente el nuevo valor MTU.
+
+. (Opcional) Habilita la xref:networking/storage-network.adoc#_storage_network_setting[red de almacenamiento] que desactivaste antes de cambiar el valor MTU.
+
+. Inicia todas las máquinas virtuales que están conectadas a `mgmt`.
+
+. Verifica que las cargas de trabajo de las máquinas virtuales estén funcionando normalmente.
+
+Para obtener más información, consulte el <<Change the MTU of a network configuration with an attached storage network>>.
+
+=== Red de clúster personalizada
+
+Si hay más de una interfaz de red conectada a cada host, puedes crear redes de clúster personalizadas para un mejor aislamiento del tráfico. Cada red de clúster debe tener al menos una configuración de red con un alcance definido y un modo de vinculación.
+
+[NOTE]
+====
+El xref:../hosts/witness-node.adoc[witness node] generalmente no está involucrado en la red de clúster personalizada.
+====
+
+== Configuración
+
+=== Crear una nueva red de clúster
+
+[TIP]
+====
+Para simplificar el mantenimiento del clúster, crea una configuración de red para cada nodo o grupo de nodos. Sin configuraciones de red dedicadas, ciertas tareas de mantenimiento (por ejemplo, reemplazar NICs antiguos por NICs en diferentes ranuras) requerirán que detengas y/o migres las máquinas virtuales afectadas antes de actualizar la configuración de red.
+====
+
+. Asegúrate de que se cumplen los xref:../installation-setup/requirements.adoc#_hardware_requirements[requisitos de hardware].
+
+. Ve a *Redes -> ClusterNetworks/Configs*, y luego haz clic en *Crear*.
+
+. Especifica un nombre para la red del clúster.
++
+image::networking/create-clusternetwork.png[Crear una red de clúster]
+
+. En la pantalla *ClusterNetworks/Configs*, haz clic en el botón *Crear configuración de red* de la red de clúster que creaste.
++
+image::networking/create-network-config-button.png[Crear una configuración de red]
+
+. En la pantalla *Configuración de red:Crear*, especifica un nombre para la configuración.
+
+. En la pestaña *Selector de nodos*, selecciona el método para definir el alcance de esta configuración de red específica.
++
+image::networking/select-nodes.png[Selector de nodos de configuración de red]
++
+[NOTE]
+====
+* El método *Seleccionar todos los nodos* solo funciona cuando todos los nodos utilizan las mismas NICs dedicadas para esta red de clúster personalizada específica. En otras situaciones (por ejemplo, cuando el clúster tiene un xref:../hosts/witness-node.adoc[nodo testigo]), debes seleccionar cualquiera de los métodos restantes.
+* Si deseas que la configuración se aplique a nodos que no están cubiertos por el método seleccionado, debes crear otra configuración de red.
+====
+
+. En la pestaña *Uplink*, configura los siguientes ajustes:
++
+** *NICs*: La lista contiene NICs que son comunes a todos los nodos seleccionados. Las NICs que no se pueden seleccionar no están disponibles en uno o más nodos y deben ser configuradas. Una vez completada la resolución de problemas, actualiza la pantalla y verifica que las NICs se puedan seleccionar.
+** *Opciones de vinculación*: El modo de vinculación predeterminado es `active-backup`.
+** *Atributos*: Debes usar el mismo MTU en todas las configuraciones de red de una red de clúster personalizada. Si no especificas un MTU, se utiliza el valor predeterminado `1500`. El webhook {harvester-product-name} rechaza una nueva configuración de red si su MTU no coincide con el MTU de las configuraciones de red existentes.
++
+image::networking/config-uplink.png[Ajustes de uplink de la configuración de red]
++
+[NOTE]
+====
+Los switches físicos conectados a las interfaces de enlace deben configurarse como puertos trunk. Estos puertos deben aceptar tráfico etiquetado y enviar tráfico etiquetado con el ID de VLAN utilizado por la red de la VM.
+====
+
+. Haz clic en *Guardar*.
+
+=== Cambiar una configuración de red
+
+Los cambios en las configuraciones de red existentes pueden afectar a {harvester-product-name} máquinas virtuales y cargas de trabajo, así como a dispositivos externos como switches y routers. Para más información, consulta xref:./deep-dive.adoc#_network_topology[Topología de red].
+
+[IMPORTANT]
+====
+Debes detener todas las máquinas virtuales afectadas antes de cambiar una configuración de red.
+====
+
+Las siguientes secciones describen los pasos que debes realizar para cambiar el MTU de una configuración de red. La red de clúster de muestra utilizada en estas secciones tiene `cn-data` que fue construida con un valor de MTU de `1500` y se pretende cambiar a `9000`.
+
+image::networking/set-a-new-mtu-value.png[Nuevo valor de MTU]
+
+==== Cambios generales
+
+. Localiza la red del clúster objetivo y la configuración de red.
++
+En el siguiente ejemplo, la red del clúster es `cn-data` y la configuración de red es `nc-1`.
++
+image::networking/network-configuration-1.png[Configuración de red de ejemplo]
+
+. Selecciona *⋮ -> Editar Config*, y luego cambia los campos relevantes.
++
+** Pestaña *Selector de nodos*:
++
+image::networking/network-configuration-2.png[Selector de nodos de configuración de red]
++
+** Pestaña *Uplink*:
++
+image::networking/network-configuration-3.png[Ajustes de uplink de la configuración de red]
++
+[IMPORTANT]
+====
+Debes usar los mismos valores para los campos *Opciones de vinculación* y *Atributos* en todas las configuraciones de red de una red de clúster personalizada.
+====
+
+. Haz clic en *Guardar*.
+
+==== Cambia el MTU de una configuración de red sin red de almacenamiento adjunta
+
+En este escenario, la xref:./storage-network.adoc#_storage_network_setting[configuración de red de almacenamiento] no está habilitada ni adjunta a la red del clúster objetivo.
+
+[CAUTION]
+====
+* El MTU afecta a {harvester-product-name} nodos y dispositivos de red como switches y routers. Se requiere una planificación y pruebas cuidadosas para asegurar que cambiar el MTU no afecte negativamente al sistema. Para más información, consulta xref:./deep-dive.adoc#_network_topology[Topología de red].
+* Debes usar el mismo MTU en todas las configuraciones de red de una red de clúster personalizada.
+* Las operaciones del clúster se interrumpen durante el cambio de configuración.
+* La información en esta sección no se aplica a la red de clúster `mgmt` integrada.
+====
+
+Si debes cambiar el MTU, realiza los siguientes pasos:
+
+. Detén todas las máquinas virtuales que están adjuntas a la red del clúster objetivo.
++
+Puedes comprobar esto utilizando la xref:./vm-network.adoc#_create_a_vm_network[red de máquina virtual] y cualquier xref:../virtual-machines/create-vm.adoc#_secondary_network[red secundaria] que puedas haber utilizado. No cambies el MTU mientras cualquiera de las máquinas virtuales conectadas siga en funcionamiento.
+
+. Revisa las configuraciones de red de la red del clúster objetivo.
++
+Si existen múltiples configuraciones de red, registra el selector de nodo para cada una y elimina configuraciones hasta que solo quede una.
+
+. <<General changes,Cambia el MTU>> de la configuración de red restante.
++
+[IMPORTANT]
+====
+También debes cambiar el MTU en el conmutador o router externo.
+====
+
+. Verifica que el MTU se haya cambiado utilizando el comando de Linux `ip link`.
++
+Si la configuración de red selecciona múltiples nodos {harvester-product-name}, ejecuta el comando en cada nodo.
++
+La salida debe mostrar el nuevo MTU del dispositivo `*-br` relacionado y el estado `UP`. En el siguiente ejemplo, el dispositivo es `cn-data-br` y el nuevo MTU es `9000`.
++
+[,console]
+----
+Harvester node $ ip link show dev cn-data-br
+                                              |new MTU|              |state UP|
+3: cn-data-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:6e:5c:2a brd ff:ff:ff:ff:ff:ff
+----
++
+[NOTE]
+====
+Cuando el estado es `UNKNOWN`, es probable que los valores de MTU en {harvester-product-name} y el conmutador o router externo no coincidan.
+====
+
+. Prueba el nuevo MTU en los nodos {harvester-product-name} utilizando comandos como `ping`.
++
+Debes enviar los mensajes a un nodo {harvester-product-name} con el nuevo MTU o a un nodo con una IP externa.
++
+En el siguiente ejemplo, la red es `cn-data`, el CIDR es `192.168.100.0/24` y el gateway es `192.168.100.1`.
++
+.. Establece la IP `192.168.100.100` en el dispositivo puente.
++
+[,console]
+----
+$ ip addr add dev cn-data-br 192.168.100.100/24
+----
++
+.. Añade una ruta para la IP de destino (por ejemplo, `8.8.8.8`) a través del gateway.
++
+[,console]
+----
+$ ip route add 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. Haz ping a la IP de destino desde la nueva IP `192.168.100.100`.
++
+[,console]
+----
+$ ping 8.8.8.8 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=59 time=8.52 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=59 time=8.90 ms
+...
+----
++
+.. Haz ping a la IP de destino con un tamaño de paquete diferente para validar el nuevo MTU.
++
+[,console]
+----
+$ ping 8.8.8.8 -s 8800 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 8800(8828) bytes of data
+The param `-s` specify the ping packet size, which can test if the new MTU really works
+----
++
+.. Elimina la ruta que usaste para las pruebas.
++
+[,console]
+----
+$ ip route delete 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. Elimina la IP que usaste para las pruebas.
++
+[,console]
+----
+$ ip addr delete 192.168.100.100/24 dev cn-data-br
+----
+
+. Vuelve a añadir las configuraciones de red que eliminaste.
++
+[IMPORTANT]
+====
+Debes cambiar el MTU en cada configuración de red y verificar que se haya aplicado el nuevo MTU. El webhook {harvester-product-name} rechaza una nueva configuración de red si su MTU no coincide con el MTU de las configuraciones de red existentes.
+====
+
+Todas las redes de máquinas virtuales que están conectadas a la red del clúster de destino heredan automáticamente el nuevo valor de MTU.
+
+En el siguiente ejemplo, el nombre de la red es `vm100`. Ejecuta el comando `kubectl get NetworkAttachmentDefinition.k8s.cni.cncf.io vm100 -oyaml` para verificar que el valor de MTU se ha actualizado:
++
+[,console]
+----
+    apiVersion: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition
+    metadata:
+      annotations:
+        network.harvesterhci.io/route: '{"mode":"auto","serverIPAddr":"","cidr":"","gateway":""}'
+      creationTimestamp: '2025-04-25T10:21:01Z'
+      finalizers:
+        - wrangler.cattle.io/harvester-network-nad-controller
+        - wrangler.cattle.io/harvester-network-manager-nad-controller
+      generation: 1
+      labels:
+        network.harvesterhci.io/clusternetwork: cn-data
+        network.harvesterhci.io/ready: 'true'
+        network.harvesterhci.io/type: L2VlanNetwork
+        network.harvesterhci.io/vlan-id: '100'
+      name: vm100
+      namespace: default
+      resourceVersion: '1525839'
+      uid: 8dacf415-ce90-414a-a11b-48f041d46b42
+    spec:
+      config: >-
+        {"cniVersion":"0.3.1","name":"vm100","type":"bridge","bridge":"cn-data-br","promiscMode":true,"vlan":100,"ipam":{},"mtu":9000} // MTU has been updated
+----
+
+. Inicia todas las máquinas virtuales que están conectadas a la red del clúster de destino.
++
+Las máquinas virtuales deberían haber heredado el nuevo MTU. Puedes verificar esto en el sistema operativo invitado utilizando los comandos `ip link` y `ping 8.8.8.8 -s 8800`.
+
+. Verifica que las cargas de trabajo de las máquinas virtuales estén funcionando normalmente.
+
+[IMPORTANT]
+====
+{harvester-product-name} no puede ser responsable de ningún daño o pérdida de datos que pueda ocurrir cuando se cambie el valor de MTU.
+====
+
+==== Cambia el MTU de una configuración de red con una red de almacenamiento adjunta.
+
+En este escenario, la xref:./storage-network.adoc#_storage_network_setting[configuración de red de almacenamiento] está habilitada y conectada a la red del clúster de destino.
+
+La red de almacenamiento es utilizada por `driver.longhorn.io`, que es el controlador CSI predeterminado de {harvester-product-name}. {longhorn-product-name} es responsable de aprovisionar xref:../virtual-machines/create-vm.adoc#_volumes[volúmenes raíz], por lo que cambiar el MTU afecta a todas las máquinas virtuales.
+
+[CAUTION]
+====
+* El MTU afecta a {harvester-product-name} nodos y dispositivos de red como switches y routers. Se requiere una planificación y pruebas cuidadosas para asegurar que cambiar el MTU no afecte negativamente al sistema. Para más información, consulta xref:./deep-dive.adoc#_network_topology[Topología de red].
+* Debes usar el mismo MTU en todas las configuraciones de red de una red de clúster personalizada.
+* Todas las operaciones del clúster se interrumpen durante el cambio de configuración.
+* La información en esta sección no se aplica a la red de clúster `mgmt` integrada.
+====
+
+Si debes cambiar el MTU, realiza los siguientes pasos:
+
+. Detén todas las máquinas virtuales.
+
+. Desactiva la xref:./storage-network.adoc#_storage_network_setting[configuración de red de almacenamiento].
++
+Permite un tiempo para que la configuración se desactive, y luego xref:./storage-network.adoc#_verify_configuration_is_completed[verifica que el cambio se haya aplicado].
+
+. Revisa las configuraciones de red de la red del clúster objetivo.
++
+Si existen múltiples configuraciones de red, registra el selector de nodo para cada una y elimina configuraciones hasta que solo quede una.
+
+. <<General changes,Cambia el MTU>> de la configuración de red restante.
++
+[IMPORTANT]
+====
+También debes cambiar el MTU en el conmutador o router externo.
+====
+
+. Verifica que el MTU se haya cambiado utilizando el comando `ip link`.
++
+Si la configuración de red selecciona múltiples nodos {harvester-product-name}, ejecuta el comando en cada nodo.
++
+La salida debe mostrar el nuevo MTU del dispositivo `*-br` relacionado y el estado `UP`. En el siguiente ejemplo, el dispositivo es `cn-data-br` y el nuevo MTU es `9000`.
++
+[,console]
+----
+Harvester node $ ip link show dev cn-data-br
+                                              |new MTU|              |state UP|
+3: cn-data-br: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 9000 qdisc noqueue state UP mode DEFAULT group default qlen 1000
+    link/ether 52:54:00:6e:5c:2a brd ff:ff:ff:ff:ff:ff
+----
++
+[NOTE]
+====
+Cuando el estado es `UNKNOWN`, es probable que los valores de MTU en {harvester-product-name} y el conmutador o router externo no coincidan.
+====
+
+. Prueba el nuevo MTU en nodos {harvester-product-name} utilizando comandos como `ping`.
++
+Debes enviar los mensajes a un nodo {harvester-product-name} con el nuevo MTU o a un nodo con una IP externa.
++
+En el siguiente ejemplo, la red es `cn-data`, el CIDR es `192.168.100.0/24` y el gateway es `192.168.100.1`.
++
+.. Establece la IP `192.168.100.100` en el dispositivo puente.
++
+[,console]
+----
+$ ip addr add dev cn-data-br 192.168.100.100/24
+----
++
+.. Añade una ruta para la IP de destino (por ejemplo, `8.8.8.8`) a través del gateway.
++
+[,console]
+----
+$ ip route add 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. Haz ping a la IP de destino desde la nueva IP `192.168.100.100`.
++
+[,console]
+----
+$ ping 8.8.8.8 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 56(84) bytes of data.
+64 bytes from 8.8.8.8: icmp_seq=1 ttl=59 time=8.52 ms
+64 bytes from 8.8.8.8: icmp_seq=2 ttl=59 time=8.90 ms
+...
+----
++
+.. Haz ping a la IP de destino con un tamaño de paquete diferente para validar el nuevo MTU.
++
+[,console]
+----
+$ ping 8.8.8.8 -s 8800 -I 192.168.100.100
+PING 8.8.8.8 (8.8.8.8) from 192.168.100.100 : 8800(8828) bytes of data
+The param `-s` specify the ping packet size, which can test if the new MTU really works
+----
++
+.. Elimina la ruta que utilizaste para las pruebas.
++
+[,console]
+----
+$ ip route delete 8.8.8.8 via 192.168.100.1 dev cn-data-br
+----
++
+.. Elimina la IP que utilizaste para las pruebas.
++
+[,console]
+----
+$ ip addr delete 192.168.100.100/24 dev cn-data-br
+----
+
+. Vuelve a añadir las configuraciones de red que eliminaste.
++
+[IMPORTANT]
+====
+Debes cambiar el MTU en cada configuración de red y verificar que se haya aplicado el nuevo MTU. El webhook {harvester-product-name} rechaza una nueva configuración de red si su MTU no coincide con el MTU de las configuraciones de red existentes.
+====
+
+. Habilita y configura la xref:./storage-network.adoc#_storage_network_setting[configuración de red de almacenamiento], asegurándote de que se cumplan los xref:./storage-network.adoc#_prerequisites[requisitos previos].
+
+. Permite un tiempo para que la configuración se habilite, y luego xref:./storage-network.adoc#_prerequisites[verifica que el cambio se haya aplicado]. El `storagenetwork` funciona con el nuevo valor de MTU.
+
+Todas las redes VM que están adjuntas a la red del clúster de destino heredan automáticamente el nuevo valor de MTU.
++
+En el siguiente ejemplo, el nombre de la red es `vm100`. Ejecuta el comando `kubectl get NetworkAttachmentDefinition.k8s.cni.cncf.io vm100 -oyaml` para verificar que el valor de MTU se ha actualizado.
++
+[console]
+----
+    apiVersion: k8s.cni.cncf.io/v1
+    kind: NetworkAttachmentDefinition +
+    metadata: +
+      annotations: +
+        network.harvesterhci.io/route: '{"mode":"auto","serverIPAddr":"","cidr":"","gateway":""}' +
+      creationTimestamp: '2025-04-25T10:21:01Z' +
+      finalizers: +
+        - wrangler.cattle.io/harvester-network-nad-controller +
+        - wrangler.cattle.io/harvester-network-manager-nad-controller +
+      generation: 1 +
+      labels: +
+        network.harvesterhci.io/clusternetwork: cn-data +
+        network.harvesterhci.io/ready: 'true' +
+        network.harvesterhci.io/type: L2VlanNetwork
+        network.harvesterhci.io/vlan-id: '100' +
+      name: vm100 +
+      namespace: default +
+      resourceVersion: '1525839' +
+      uid: 8dacf415-ce90-414a-a11b-48f041d46b42 +
+    spec: +
+      config: >- +
+        {"cniVersion":"0.3.1","name":"vm100","type":"bridge","bridge":"cn-data-br","promiscMode":true,"vlan":100,"ipam":{},"mtu":9000} // MTU ha sido actualizado
+----
+
+. Inicia todas las máquinas virtuales que están adjuntas a la red del clúster de destino.
++
+Las máquinas virtuales deberían haber heredado el nuevo MTU. Puedes verificar esto en el sistema operativo invitado utilizando el comando Linux `ip link` y el comando `ping 8.8.8.8 -s 8800`.
+
+. Verifica que las cargas de trabajo de las máquinas virtuales estén funcionando normalmente.
+
+[IMPORTANT]
+====
+{harvester-product-name} no puede ser responsable de ningún daño o pérdida de datos que pueda ocurrir cuando se cambie el valor de MTU.
+====

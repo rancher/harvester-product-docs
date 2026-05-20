@@ -1,0 +1,247 @@
+= Hardware- und Netzwerkanforderungen
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+Als HCI-Lösung auf Bare-Metal-Servern gibt es Mindestanforderungen an die Hardware und das Netzwerk für die Installation und den Betrieb von {harvester-product-name}.
+
+Ein Cluster mit drei Knoten ist erforderlich, um die Funktionen mit mehreren Knoten vollständig zu nutzen. Der erste Knoten, der dem Cluster hinzugefügt wird, ist standardmäßig der Verwaltungsknoten. Wenn das Cluster drei oder mehr Knoten hat, werden die zwei Knoten, die nach dem ersten hinzugefügt werden, automatisch zu Verwaltungsknoten befördert, um ein Hochverfügbarkeitscluster (HA) zu bilden.
+
+Die neuesten Versionen unterstützen die Bereitstellung von xref:installation-setup/single-node-clusters.adoc[Einzelknoten-Clustern]. Solche Cluster unterstützen keine hohe Verfügbarkeit, mehrere Replikate und Live-Migration.
+
+== Hardwareanforderungen
+
+{harvester-product-name} Knoten haben die folgenden Hardwareanforderungen und Empfehlungen für Installation und Tests.
+
+|===
+| Hardware | Entwicklung/Tests | Produktions-
+
+| PROZESSOR
+| AMD64 oder ARM64 (mit hardwareunterstützter Virtualisierung); mindestens 8 Kerne
+| AMD64 oder ARM64 (mit hardwareunterstützter Virtualisierung); mindestens 16 Kerne
+
+| Arbeitsspeicher
+| Mindestens 32 GB
+| Mindestens 64 GB
+
+| Festplattenspeicher
+| Mindestens 250 GB (mindestens 180 GB für xref:hosts/witness-node.adoc[witness nodes] oder bei Verwendung mehrerer Festplatten)
+| Mindestens 500 GB; 1 TB oder mehr empfohlen
+
+| Festplattenleistung
+| 5.000+ zufällige IOPS pro Festplatte (SSD/NVMe); der Speicher des Verwaltungsknotens muss die Geschwindigkeitsanforderungen von https://support.scc.suse.com/s/kb/360045276411[etcd] erfüllen. Es werden nur lokale Festplatten und Hardware-RAID unterstützt.
+| 5.000+ zufällige IOPS pro Festplatte (SSD/NVMe); der Speicher des Verwaltungsknotens muss die Geschwindigkeitsanforderungen von https://support.scc.suse.com/s/kb/360045276411[etcd] erfüllen. Es werden nur lokale Festplatten und Hardware-RAID unterstützt.
+
+| Anzahl der Netzwerkkarten
+| Management-Cluster-Netzwerk: 1 NIC erforderlich, 2 NICs empfohlen; VM-Workload-Netzwerk: 1 NIC erforderlich, mindestens 2 NICs empfohlen (gilt nicht für den xref:hosts/witness-node.adoc[witness node])
+| Management-Cluster-Netzwerk: 1 NIC erforderlich, 2 NICs empfohlen; VM-Workload-Netzwerk: 1 NIC erforderlich, mindestens 2 NICs empfohlen (gilt nicht für den xref:hosts/witness-node.adoc[witness node])
+
+| Netzwerkkartengeschwindigkeit
+| Mindestens 1 Gbps Ethernet
+| Mindestens 10 Gbps Ethernet
+
+| Netzwerkswitch
+| Port-Trunking zur Unterstützung von VLANs
+| Port-Trunking zur Unterstützung von VLANs
+|===
+
+[IMPORTANT]
+====
+* Gemischte Architekturen werden nicht unterstützt. Stellen Sie separate Cluster bereit, um unerwartetes Systemverhalten zu vermeiden.
+* Für die besten Ergebnisse verwenden Sie https://www.suse.com/yesCertified/home#search?platforms=1361&platforms=1360&platforms=1355[YES-zertifizierte Hardware] für SUSE Linux Micro 5.5/6.0/6.1. {harvester-product-name} basiert auf SUSE Linux Enterprise-Technologie und YES-zertifizierte Hardware hat eine zusätzliche Validierung der Treiber- und Systemplatinenkompatibilität. Laptops und verschachtelte Virtualisierung werden nicht unterstützt.
+* Verschachtelte Virtualisierung wird auf virtuellen Maschinen, die auf {harvester-product-name} laufen, nicht unterstützt.
+* Jeder Knoten muss eine eindeutige `product_uuid` (abgerufen von `/sys/class/dmi/id/product_uuid`) haben, um Fehler während der Live-Migration von VMs und anderen Vorgängen zu vermeiden. Für weitere Informationen siehe https://github.com/harvester/harvester/issues/4025[Issue #4025].
+* {harvester-product-name} hat ein xref:networking/cluster-network.adoc#_built_in_cluster_network[integriertes Management-Cluster-Netzwerk] (`mgmt`). Um hohe Verfügbarkeit und die beste Leistung in Produktionsumgebungen zu erreichen, verwenden Sie mindestens zwei NICs in jedem Knoten, um eine gebündelte NIC für das Management-Netzwerk einzurichten (siehe Schritt 6 in xref:installation-setup/methods/iso-install.adoc#_installation_steps[ISO-Installation]). Sie können auch xref:networking/cluster-network.adoc#_custom_cluster_network[benutzerdefinierte Cluster-Netzwerke] für VM-Workloads erstellen. Jedes benutzerdefinierte Cluster-Netzwerk benötigt mindestens zwei zusätzliche NICs, um eine gebündelte NIC in jedem beteiligten Knoten des Clusters einzurichten. Der xref:hosts/witness-node.adoc[witness node] benötigt keine zusätzlichen NICs. Für weitere Informationen siehe xref:networking/cluster-network.adoc#_concepts[Cluster-Netzwerk].
+* Während der Tests können Sie nur eine NIC für das xref:networking/cluster-network.adoc#_built_in_cluster_network[integrierte Management-Cluster-Netzwerk] (`mgmt`) verwenden und zum Testen des xref:networking/vm-network.adoc#_create_a_vm_network[VM-Netzwerks], das ebenfalls von `mgmt` getragen wird. Hohe Verfügbarkeit und optimale Leistung sind nicht garantiert.
+* Wenn die Festplatte nur die minimal erforderliche Kapazität erfüllt, können während des Upgrades Probleme im Zusammenhang mit dem xref:upgrades/upgrades.adoc#_free_system_partition_space_requirement[freien Speicherplatzbedarf der Systempartition] auftreten.
+* Die Unterstützung für das Booten mit Legacy-BIOS läuft in v1.7.0 aus und wird in einer späteren Version entfernt. Bestehende {harvester-product-name} Cluster, die diesen Bootmodus verwenden, werden weiterhin funktionieren, aber ein Upgrade auf spätere Versionen kann eine Neuinstallation im UEFI-Modus erfordern. Um Probleme und Unterbrechungen zu vermeiden, verwenden Sie UEFI bei neuen Installationen.
+====
+
+
+=== CPU-Spezifikationen
+
+xref:virtual-machines/live-migration.adoc[Live-Migration] funktioniert nur korrekt, wenn die CPUs aller physischen Server im Cluster die gleichen Spezifikationen haben. Dieses Erfordernis gilt für alle Vorgänge, die auf der Live-Migrationsfunktionalität basieren, wie z.B. die automatische VM-Migration, wenn xref:hosts/hosts.adoc#_node_maintenance[Wartungsmodus] aktiviert ist.
+
+Neuere CPUs (auch solche vom gleichen Anbieter, Generation und Familie) können unterschiedliche Fähigkeiten haben, die möglicherweise den VM-Betriebssystemen zur Verfügung stehen. Um die Stabilität der VM zu gewährleisten, überprüft die Live-Migration, ob die CPU-Fähigkeiten konsistent sind, und blockiert Migrationsversuche, wenn die Quelle und das Ziel inkompatibel sind.
+
+Beim Erstellen von Clustern, Hinzufügen weiterer Hosts zu einem Cluster und Ersetzen von Hosts sollten Sie immer CPUs mit den gleichen Spezifikationen verwenden, um betriebliche Einschränkungen zu vermeiden.
+
+== Netzwerkvoraussetzungen
+
+Knoten haben die folgenden Netzwerkanforderungen für die Installation.
+
+=== Portanforderungen für Knoten
+
+Knoten benötigen die folgenden Portverbindungen oder eingehenden Regeln. Typischerweise ist sämtlicher ausgehender Verkehr erlaubt.
+
+|===
+| Protokoll | Port | Quelle | Beschreibung
+
+| TCP
+| 2379
+| Verwaltungsknoten
+| Etcd-Client-Port
+
+| TCP
+| 2381
+| Verwaltungsknoten
+| Etcd-Metrik-Sammlung
+
+| TCP
+| 2380
+| Verwaltungsknoten
+| Etcd-Peer-Port
+
+| TCP
+| 2382
+| Verwaltungsknoten
+| Etcd-Client-Port (nur HTTP)
+
+| TCP
+| 10010
+| Management- und Compute-Knoten
+| Containerd
+
+| TCP
+| 6443
+| Verwaltungsknoten
+| Kubernetes API
+
+| TCP
+| 9345
+| Verwaltungsknoten
+| Kubernetes API
+
+| TCP
+| 10252
+| Verwaltungsknoten
+| Kube-Controller-Manager-Gesundheitsprüfungen
+
+| TCP
+| 10257
+| Verwaltungsknoten
+| Sicherer Port des Kube-Controller-Managers
+
+| TCP
+| 10251
+| Verwaltungsknoten
+| Kube-Scheduler-Gesundheitsprüfungen
+
+| TCP
+| 10259
+| Verwaltungsknoten
+| Sicherer Port des Kube-Schedulers
+
+| TCP
+| 10250
+| Management- und Compute-Knoten
+| Kubelet
+
+| TCP
+| 10256
+| Management- und Compute-Knoten
+| Kube-Proxy-Gesundheitsprüfungen
+
+| TCP
+| 10258
+| Verwaltungsknoten
+| cloud-controller-manager
+
+| TCP
+| 10260
+| Verwaltungsknoten
+| cloud-controller-manager
+
+| TCP
+| 9091
+| Management- und Compute-Knoten
+| Canal Calico-Node Felix
+
+| TCP
+| 9099
+| Management- und Compute-Knoten
+| Canal CNI-Gesundheitsprüfungen
+
+| UDP
+| 8472
+| Management- und Compute-Knoten
+| Canal CNI mit VxLAN
+
+| TCP
+| 2112
+| Verwaltungsknoten
+| Kube-vip
+
+| TCP
+| 6444
+| Management- und Compute-Knoten
+| RKE2-Agent
+
+| TCP
+| 10246/10247/10248/10249
+| Management- und Compute-Knoten
+| Nginx-Arbeitsprozess
+
+| TCP
+| 8181
+| Management- und Compute-Knoten
+| Nginx-ingress-controller
+
+| TCP
+| 8444
+| Management- und Compute-Knoten
+| Nginx-ingress-controller
+
+| TCP
+| 10245
+| Management- und Compute-Knoten
+| Nginx-ingress-controller
+
+| TCP
+| 80
+| Management- und Compute-Knoten
+| Nginx
+
+| TCP
+| 9796
+| Management- und Compute-Knoten
+| Node-Exporter
+
+| TCP
+| 30000-32767
+| Management- und Compute-Knoten
+| NodePort-Portbereich
+
+| TCP
+| 22
+| Management- und Compute-Knoten
+| sshd
+
+| UDP
+| 68
+| Management- und Compute-Knoten
+| NetworkManager
+
+| TCP
+| 3260
+| Management- und Compute-Knoten
+| iscsid
+|===
+
+=== Portanforderungen für die Integration mit {rancher-product-name}
+
+Wenn Sie xref:integrations/rancher/rancher-integration.adoc[mit {rancher-product-name} integrieren] möchten, müssen Sie sicherstellen, dass alle {harvester-product-name} Knoten eine Verbindung zum TCP-Port *443* des {rancher-product-name} Load Balancers herstellen können.
+
+Beim Bereitstellen von VMs mit Kubernetes-Clustern von {rancher-product-name} nach {harvester-product-name} müssen Sie in der Lage sein, eine Verbindung zum TCP-Port *443* des {rancher-product-name} Load Balancers herzustellen. Andernfalls kann der Cluster nicht von {rancher-product-name} verwaltet werden. Für weitere Informationen siehe https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/about-rancher/architecture/communicating-with-downstream-clusters.html[Rancher-Architektur].
+
+=== Portanforderungen für K3s- und RKE2-Cluster
+
+Für die Portanforderungen für Gast-Cluster, die in {harvester-product-name} VMs bereitgestellt werden, siehe die folgenden Links:
+
+* https://documentation.suse.com/cloudnative/k3s/latest/en/networking/networking.html[K3s-Netzwerk]
+* https://documentation.suse.com/cloudnative/rke2/latest/en/install/requirements.html#_networking[RKE2-Netzwerk]
+
+== Zeitanforderungen
+
+Ein zuverlässiger Network Time Protocol (NTP)-Server ist entscheidend für die Aufrechterhaltung der korrekten Systemzeit über alle Knoten in einem Kubernetes-Cluster, insbesondere beim Betrieb von {harvester-product-name}. Kubernetes ist auf etcd angewiesen, einen verteilten Schlüssel-Wert-Speicher, der eine präzise Zeitsynchronisation erfordert, um die Datenkonsistenz sicherzustellen und Probleme mit der Führungswahl, der Protokollreplikation und der Clusterstabilität zu vermeiden.
+
+Die Gewährleistung einer genauen und konsistenten Zeit im gesamten Cluster ist entscheidend für Zuverlässigkeit, Sicherheit und die allgemeine Systemintegrität.

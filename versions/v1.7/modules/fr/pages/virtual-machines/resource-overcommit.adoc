@@ -1,0 +1,59 @@
+= Surallocation des ressources
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+{harvester-product-name} prend en charge la configuration globale des pourcentages de surcharge des ressources sur l'UC, la mémoire et le stockage. En définissant xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`], cela permettra la planification de machines virtuelles supplémentaires même lorsque les ressources physiques sont entièrement utilisées.
+
+{harvester-product-name} vous permet de surcommettre l'UC et la RAM sur les nœuds de calcul. Cela vous permet d'augmenter le nombre d'instances en cours d'exécution sur votre cloud au prix de réduire les performances des instances. Le service de calcul utilise par défaut les ratios suivants{nbsp}:
+
+* Ratio d'allocation de l'UC{nbsp}: 1600 %
+* Ratio d'allocation RAM{nbsp}: 150 %
+* Ratio d'allocation de stockage{nbsp}: 200 %
+
+[NOTE]
+====
+La surcharge classique de mémoire ou le ballooning de mémoire n'est pas encore pris en charge par cette fonctionnalité. En d'autres termes, la mémoire utilisée par une instance de machine virtuelle ne peut pas être restituée une fois allouée.
+====
+
+== Configurer le paramètre global xref:../installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`]
+
+Les utilisateurs peuvent modifier le `overcommit-config` global en suivant les étapes ci-dessous, et cela sera appliqué à chaque machine virtuelle nouvellement créée après le changement.
+
+. Allez à *Paramètres avancés ->*.
++
+image::vm/overcommit-page.png[page de surallocation]
++
+. Trouvez le paramètre `overcommit-config`.
+. Configurez le ratio souhaité de l'UC, de la mémoire et du stockage.
++
+image::vm/overcommit-panel.png[panneau de surallocation]
+
+== Configurez la surallocation pour une machine virtuelle unique
+
+Dans les situations où vous avez besoin de configurations spécifiques pour des machines virtuelles individuelles sans affecter les paramètres globaux, vous pouvez facilement y parvenir en modifiant la valeur `spec.template.spec.domain.resources.limits.<memory|cpu>` dans la spécification de la machine virtuelle correspondante directement.
+
+image::vm/vm-overcommit-config.png[configuration de surallocation de VM]
+
+== Réservez plus de mémoire pour la surcharge système
+
+Par défaut, le {harvester-product-name} réserve une certaine quantité de mémoire destinée aux frais de gestion du système dans la mémoire allouée à la machine virtuelle. Dans la plupart des cas, cela ne posera pas de problèmes. Cependant, certains systèmes d'exploitation, comme Windows 2022, demanderont plus de mémoire que celle qui est réservée.
+
+Pour résoudre le problème, {harvester-product-name} fournit une annotation `harvesterhci.io/reservedMemory` sur la ressource personnalisée VirtualMachine pour vous permettre de spécifier la quantité de mémoire à réserver. Par exemple, ajoutez `harvesterhci.io/reservedMemory: 200Mi` si vous décidez de réserver 200 MiB pour la surcharge système de la machine virtuelle.
+
+[,diff]
+----
+ apiVersion: kubevirt.io/v1
+ kind: VirtualMachine
+ metadata:
+   annotations:
++    harvesterhci.io/reservedMemory: 200Mi
+     kubevirt.io/latest-observed-api-version: v1
+     kubevirt.io/storage-observed-api-version: v1alpha3
+     network.harvesterhci.io/ips: '[]'
+   ...
+   ...
+----
+
+== Pourquoi mes machines virtuelles sont-elles planifiées de manière inégale{nbsp}?
+
+La planification des machines virtuelles dépend du comportement sous-jacent du kube-scheduler. Nous avons un article dédié expliquant les détails. Si vous souhaitez en savoir plus, consultez{nbsp}: https://harvesterhci.io/kb/vm-scheduling/[Planification des VM].

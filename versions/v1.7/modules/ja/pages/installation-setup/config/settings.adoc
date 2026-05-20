@@ -1,0 +1,935 @@
+= 設定
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+以下は、使用できる高度な設定のリストです。`settings.harvesterhci.io`カスタムリソースは、UIと`kubectl`コマンドの両方を使用して変更できます。
+
+== 一般的な設定
+
+=== `additional-ca`
+
+*定義*:外部サービスにアクセスするために{harvester-product-name}を有効にする追加の信頼されたCA証明書。
+
+[CAUTION]
+====
+この設定を変更すると、単一ノードクラスターが一時的に利用できなくなるか、アクセスできなくなる可能性があります。
+====
+
+*デフォルト値*:なし
+
+*例*：
+
+----
+-----BEGIN CERTIFICATE-----
+SOME-CA-CERTIFICATES
+-----END CERTIFICATE-----
+----
+
+=== `auto-disk-provision-paths` [実験的]
+
+*定義*:{harvester-product-name}指定されたグロブパターンに一致するディスクを自動的にVMストレージとして追加する設定。
+
+この設定は、システムにマウントされたフォーマット済みディスクのみを追加します。複数のパターンを指定する場合は、値をカンマで区切ります。
+
+[CAUTION]
+==== 
+この設定は、クラスター内の*すべてのノード*に適用されます。ストレージデバイス内のすべてのデータは*破壊されます*。
+====
+
+*デフォルト値*:なし
+
+*例*：
+
+以下の例は、グロブパターン`/dev/sd*`または`/dev/hd*`に一致するディスクを追加します:
+
+----
+/dev/sd*,/dev/hd*
+----
+
+=== `auto-rotate-rke2-certs`
+
+*定義*:{rke2-product-name}サービスのために証明書を自動的にローテーションする設定。デフォルトでこの設定はオフに設定されています。
+
+フィールド`expiringInHours`を使用して、各証明書の有効期間を指定します（`1`から`8759`時間）。証明書が指定された期間内に期限切れになると、{harvester-product-name}が自動的に証明書を置き換えます。
+
+詳細については、*証明書ローテーション*セクションを参照してください。 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/cluster-admin/manage-clusters/rotate-certificates.html[{rancher-product-name}]および https://documentation.suse.com/cloudnative/rke2/latest/en/advanced.html#_certificate_rotation[{rke2-product-name}]のドキュメント。
+
+証明書が期限切れの場合は、xref:hosts/hosts.adoc#_rotating_expired_certificates[手動でローテーションできます]。
+
+*デフォルト値*: `{"enable":false,"expiringInHours":240}`
+
+*例*：
+
+----
+{"enable":true,"expiringInHours":48}
+----
+
+=== `backup-target`
+
+*定義*:VMバックアップを保存するために使用されるカスタムバックアップターゲット。
+
+詳細については、 https://documentation.suse.com/cloudnative/storage/1.8/en/snapshots-backups/volume-snapshots-backups/configure-backup-target.html#_set_up_aws_s3_backupstore[{longhorn-product-name}のドキュメント]を参照してください。
+
+*デフォルト値*:なし
+
+*例*：
+
+[,json]
+----
+{
+  "type": "s3",
+  "endpoint": "https://s3.endpoint.svc",
+  "accessKeyId": "test-access-key-id",
+  "secretAccessKey": "test-access-key",
+  "bucketName": "test-bup",
+  "bucketRegion": "us‑east‑2",
+  "cert": "",
+  "virtualHostedStyle": false
+}
+----
+
+=== `cluster-registration-url`
+
+*定義*:{harvester-product-name}クラスターを{rancher-product-name}にインポートするために使用されるURL。
+
+この設定を構成すると、登録目的のためにネームスペース`cattle-system`に`cattle-cluster-agent-*`という新しいポッドが作成されます。このポッドは、{harvester-product-name} ISOにパッケージされていないコンテナイメージ`rancher/rancher-agent:related-version`を使用し、代わりに{rancher-product-name}によって決定されます。`related-version`は通常、{rancher-product-name}バージョンと同じです。例えば、{harvester-product-name}を{rancher-product-name} v2.7.9に登録すると、イメージは`rancher/rancher-agent:v2.7.9`になります。詳細については、 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/installation-and-upgrade/other-installation-methods/air-gapped/publish-images.html#_1_find_the_required_assets_for_your_rancher_version[お使いのRancherバージョンに必要なアセットを見つける]を参照してください。
+
+設定に応じて、イメージは次のいずれかの場所からダウンロードされます：
+
+* {harvester-product-name} containerd-registry：クラスター用の<<_containerd_registry,プライベートレジストリ>>を構成できます。
+* Docker Hub (docker.io)：{rancher-product-name}にプライベートレジストリを構成しない場合、これはデフォルトのオプションです。
+
+また、イメージのコピーを取得し、手動ですべてのノードにアップロードすることもできます。
+
+*デフォルト値*:なし
+
+*例*：
+
+----
+https://172.16.0.1/v3/import/w6tp7dgwjj549l88pr7xmxb4x6m54v5kcplvhbp9vv2wzqrrjhrc7c_c-m-zxbbbck9.yaml
+----
+
+=== `containerd-registry`
+
+*定義*:{harvester-product-name}クラスター用に作成されたプライベートレジストリの構成。
+
+値は各ノードの`registries.yaml`ファイルに保存されます（パス：`/etc/rancher/rke2/registries.yaml`）。詳細については、 https://documentation.suse.com/cloudnative/rke2/latest/en/install/containerd_registry_configuration.html[Containerdレジストリ構成]を{rke2-product-name}のドキュメントで参照してください。
+
+セキュリティ上の理由から、{harvester-product-name}はプライベートレジストリに構成されたユーザー名とパスワードを、これらの資格情報が`registries.yaml`ファイルに保存された後に自動的に削除します。
+
+*例*：
+
+image::advanced/containerd-registry.png[containerd-registry]
+
+[,json]
+----
+{
+  "Mirrors": {
+    "docker.io": {
+      "Endpoints": ["https://myregistry.local:5000"],
+      "Rewrites": null
+    }
+  },
+  "Configs": {
+    "myregistry.local:5000": {
+      "Auth": {
+        "Username": "testuser",
+        "Password": "testpassword"
+      },
+      "TLS": {
+        "InsecureSkipVerify": false
+      }
+    }
+  }
+}
+----
+
+=== `csi-driver-config`
+
+*定義*:クラスターにインストールされたサードパーティのCSIドライバーを使用するために必要な構成。
+
+バックアップおよびスナップショットに関連する機能を使用する前に、次の情報を構成する必要があります：
+
+* インストールされたサードパーティのCSIドライバーのプロビジョナー
+* `volumeSnapshotClassName`:ボリュームスナップショットまたはVMスナップショットを作成するために使用される`VolumeSnapshotClass`の名前。
+* `backupVolumeSnapshotClassName`:VMバックアップを作成するために使用される`VolumeSnapshotClass`の名前。
+
+*デフォルト値*:
+
+----
+{
+  "driver.longhorn.io": {
+    "volumeSnapshotClassName": "longhorn-snapshot",
+    "backupVolumeSnapshotClassName": "longhorn"
+  }
+}
+----
+
+=== `csi-online-expand-validation`
+
+*定義*:オンラインボリューム拡張を確認済みのストレージプロバイダーとしてマークすることを許可する設定。
+
+基盤となるストレージプロバイダーによっては、オンラインボリューム拡張機能を使用するために追加の手順が必要な場合があります。
+
+* *{longhorn-product-name}*: {harvester-product-name}{longhorn-product-name}は、Longhornデータエンジンのバージョン間に違いがあっても、オンラインボリューム拡張をサポートしていると見なします。現在、V1データエンジンはオンラインボリューム拡張を完全にサポートしていますが、V2データエンジンはボリューム拡張をまったくサポートしていません（ボリュームの接続状態に関係なく）。{harvester-product-name}ウェブフックは、これらのバージョン間の違いを管理します。
+
+* *サードパーティストレージ*: {harvester-product-name}は、デフォルトでサードパーティストレージに対するオンラインボリューム拡張リクエストを拒否します。ストレージプロバイダーがオンラインボリューム拡張をサポートしていることを確認した場合、この設定を使用してそのストレージプロバイダーを確認済みとしてマークし、{harvester-product-name}に関連するオンライン拡張リクエストを許可させることができます。
+
+*デフォルト値*: `{"driver.longhorn.io":true}`
+
+=== `default-vm-termination-grace-period-seconds`
+
+*定義*:UIを使用して停止されたVMを強制的にシャットダウンする前に、{harvester-product-name}が待機する秒数。
+
+{harvester-product-name}は、UIを使用して停止されたVMにグレースフルシャットダウン信号を送信します。優雅なシャットダウンプロセスが指定された秒数内に完了しない場合、{harvester-product-name}はVMを強制的にシャットダウンします。
+
+*デフォルト値*: `120`
+
+=== `http-proxy`
+
+*定義*:外部サービスにアクセスするために使用されるHTTPプロキシです。これには、画像のダウンロードやS3サービスへのバックアップが含まれます。
+
+[CAUTION]
+====
+この設定を変更すると、単一ノードクラスターが一時的に利用できなくなるか、アクセスできなくなる可能性があります。
+====
+
+*デフォルト値*: `{}`
+
+*サポートされているオプションと値*:
+
+* HTTPリクエスト用のプロキシURL: `"httpProxy": "http://<username>:<pswd>@<ip>:<port>"`
+* HTTPSリクエスト用のプロキシURL: `"httpsProxy": "https://<username>:<pswd>@<ip>:<port>"`
+* ホスト名および/またはCIDRのカンマ区切りリスト: `"noProxy": "<hostname | CIDR>"`
+
+以下のオプションまたは設定を構成した場合、`noProxy`フィールドに重要な情報を指定する必要があります:
+
+|===
+| 構成されたオプション/設定 | `noProxy`に必要な値| 理由
+
+| `httpProxy` および `httpsProxy`
+| ノードのCIDR
+| ノードのCIDRを指定しないと、クラスターが壊れる可能性があります。
+
+| `cluster-registration-url`
+| `cluster-registration-url`のホスト
+| ホスト情報により、{rancher-product-name}からクラスターにアクセスできます。
+|===
+
+{harvester-product-name}は、ユーザー指定の`noProxy`値に必要なアドレスを追加します（例えば、`localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`）。これにより、内部トラフィックが期待通りに流れることが保証されます。
+
+*例*：
+
+[,json]
+----
+{
+  "httpProxy": "http://my.proxy",
+  "httpsProxy": "https://my.proxy",
+  "noProxy": "some.internal.svc,172.16.0.0/16"
+}
+----
+
+=== `log-level`
+
+*定義*:ホストのログレベル。
+
+*デフォルト値*: `info`
+
+*サポートされているオプションと値*:
+
+* `panic`:最も冗長性の少ないログレベル
+* `fatal`
+* `error`
+* `warn`、`warning`
+* `info`
+* `debug`
+* `trace`:最も冗長性の高いログレベル
+
+*例*：
+
+----
+debug
+----
+
+=== `longhorn-v2-data-engine-enabled` [実験的]
+
+*定義*:Longhorn V2データエンジンを有効または無効にする設定。
+
+`true`に設定すると、{harvester-product-name}はLonghorn V2データエンジンに必要なカーネルモジュールを自動的にロードし、すべてのノードで1024 × 2 MiBサイズの巨大ページ（例えば、2 GiBのRAM）を割り当てようとします。
+
+この設定を変更すると、すべてのノードで{rke2-product-name}が自動的に再起動されますが、稼働中の仮想マシンのワークロードには影響しません。
+
+[TIP]
+====
+"not enough hugepages-2Mi capacity"というフレーズを含むエラーメッセージが表示された場合は、エラーが解決されるまでしばらくお待ちください。エラーが続く場合は、影響を受けたノードを再起動してください。
+
+特定のノード（例えば、処理能力とメモリリソースが少ないノード）でLonghorn V2データエンジンを無効にするには、*ホスト*画面に移動し、ターゲットノードに次のラベルを追加します：
+
+* ラベル：`node.longhorn.io/disable-v2-data-engine`
+* 値：`true`
+====
+
+*デフォルト値*: `false`
+
+*例*：
+
+```
+true
+```
+
+=== `max-hotplug-ratio`
+
+*定義*:稼働中の仮想マシンに利用可能なデフォルトの最大CPUおよびメモリリソースの量を決定する設定。この比率は、仮想マシンを作成した際に割り当てたCPUおよびメモリリソースの量に掛けられます。
+
+[sidebar]
+実行時の最大利用可能リソース = （仮想マシン作成時に割り当てたリソース）×（`max-hotplug-ratio`の値）
+
+*デフォルト値*: `4`
+
+*サポートされている値*: `1` から `20`
+
+*例*：
+
+`max-hotplug-ratio`は`4`に設定されています。
+
+|===
+| リソースの作成 | 割り当てられた量 | 最大利用可能量
+
+| CPUコア
+| `1`
+| `4`
+
+| メモリ（Gi）
+| `2`
+| `8`
+|===
+
+=== `ntp-servers`
+
+*定義*:ノードの時刻同期のためのNTPサーバー。
+
+xref:installation-setup/config/configuration-file.adoc#_os_ntp_servers[インストール]中にNTPサーバーを定義し、インストール後にアドレスを更新することができます。
+
+[CAUTION]
+====
+サーバーアドレスリストの変更はすべてのノードに適用されます。
+====
+
+*デフォルト値*: ""
+
+*例*：
+
+----
+{
+  "ntpServers": [
+    "0.suse.pool.ntp.org",
+    "1.suse.pool.ntp.org"
+  ]
+}
+----
+
+=== `overcommit-config`
+
+*定義*:VM使用のために割り当てることができる物理的な計算、メモリ、およびストレージリソースの割合。
+
+オーバーコミットは、物理リソースの割り当てを最適化するために使用され、特にVMがほとんどの時間に割り当てられたリソースを完全に消費しないと予想される場合に有効です。100%を超える値を設定することで、物理リソースが名目上完全に割り当てられている場合でも、複数のVMをスケジュールすることが可能になります。
+
+*デフォルト値*: `{ "cpu":1600, "memory":150, "storage":200 }`
+
+デフォルト値を使用すると、次のスケジュールが可能になります：
+
+* ホスト上の物理CPUの16倍
+* ホスト上の物理RAMの1.5倍
+* の物理ストレージの2倍{longhorn-product-name}
+
+2つのCPU（2,000ミリCPUに相当）を使用するように構成されたVMは、リソースが利用可能な限り、全割り当てを消費することができます。ただし、ホストが重いワークロードを実行しており、オーバーコミット値が設定されている場合（例えば、1600%）、{harvester-product-name}はKubernetesスケジューラから125ミリCPUのみを要求します（2000/16 = 125ミリCPU）。
+
+*例*：
+
+[,json]
+----
+{
+  "cpu": 1000,
+  "memory": 200,
+  "storage": 300
+}
+----
+
+=== `release-download-url`
+
+*定義*:アップグレードに必要なソフトウェアをダウンロードするためのURL。
+
+{harvester-product-name}は、設定されたURLを通じてアクセス可能な`${URL}/${VERSION}/version.yaml`ファイルから.iso URLとチェックサム値を取得します。
+
+*デフォルト値*: `https://releases.rancher.com/harvester`
+
+*例 (version.yaml)*：
+
+----
+apiVersion: harvesterhci.io/v1beta1
+kind: Version
+metadata:
+  name: ${VERSION}
+  namespace: harvester-system
+spec:
+  isoChecksum: ${ISO_CHECKSUM}
+  isoURL: ${ISO_URL}
+----
+
+=== `server-version`
+
+*定義*:ノードにインストールされている{harvester-product-name}のバージョン。
+
+*例*：
+
+----
+v1.0.0-abcdef-head
+----
+
+=== `ssl-certificates`
+
+*定義*:UIおよびAPIのSSL証明書
+
+[CAUTION]
+====
+この設定を変更すると、単一ノードクラスターが一時的に利用できなくなるか、アクセスできなくなる可能性があります。
+====
+
+*デフォルト値*: `{}`
+
+*例*：
+
+[,json]
+----
+{
+  "ca": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "publicCertificate": "-----BEGIN CERTIFICATE-----\nSOME-CERTIFICATE-ENCODED-IN-PEM-FORMAT\n-----END CERTIFICATE-----",
+  "privateKey": "-----BEGIN RSA PRIVATE KEY-----\nSOME-PRIVATE-KEY-ENCODED-IN-PEM-FORMAT\n-----END RSA PRIVATE KEY-----"
+}
+----
+
+=== `ssl-parameters`
+
+*定義*:UIおよびAPIで有効化されているSSL/TLSプロトコルおよび暗号スイート。
+
+[IMPORTANT]
+.重要
+====
+この設定を誤って構成し、UIおよびAPIにアクセスできなくなった場合は、xref:troubleshooting/cluster.adoc#_i_cant_access_suse_virtualization_after_i_changed_ssltls_enabled_protocols_and_ciphers[トラブルシューティング]を参照してください。
+====
+
+*デフォルト値*:なし
+
+*サポートされているオプションと値*:
+
+* `protocols`:有効化されているプロトコル。
+* `ciphers`:有効化されている暗号スイート。
+
+サポートされているオプションに関する詳細は、Ingress-Nginx Controllerのドキュメントにある https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-protocols[`ssl-protocols`]および https://kubernetes.github.io/ingress-nginx/user-guide/nginx-configuration/configmap/#ssl-ciphers[`ssl-ciphers`]を参照してください。
+
+値を指定しない場合、{harvester-product-name}は`TLSv1.2`と`ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305`を使用します。
+
+*例*：
+
+----
+{
+  "protocols": "TLSv1.2 TLSv1.3",
+  "ciphers": "ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-ECDSA-CHACHA20-POLY1305"
+}
+----
+
+=== `storage-network`
+
+*定義*:{longhorn-product-name}トラフィック用の分離されたストレージネットワーク。
+
+デフォルトでは、{longhorn-product-name}は管理ネットワークを使用し、これは単一のインターフェースに制限され、クラスター全体のワークロードと共有されます。実装にネットワークの分離が必要な場合は、xref:networking/storage-network.adoc[ストレージネットワーク]を使用して{longhorn-product-name}のクラスター内データトラフィックを隔離できます。
+
+[IMPORTANT]
+.重要
+====
+この設定を構成する前に、すべてのVMをシャットダウンしてください。
+
+IPv4 CIDR形式でIP範囲を指定してください。IPの数は、クラスターのノード数の4倍でなければなりません。
+====
+
+*デフォルト値*: ""
+
+*例*：
+
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "storage",
+  "range": "192.168.0.0/24"
+}
+----
+
+=== `support-bundle-image`
+
+*定義*:サポートバンドルイメージ、 https://hub.docker.com/r/rancher/support-bundle-kit/tags[`rancher/support-bundle-kit`]にさまざまなバージョンが利用可能です。
+
+*デフォルト値*: `support-bundle-kit` は {harvester-product-name} ISO にパッケージされ、各 {harvester-product-name} リリースに特有のイメージです。
+
+*サポートされているオプションと値*:
+
+値は、次のキーと値のペアを含む JSON オブジェクトリテラルです：
+
+* `repository`:サポートバンドルイメージを保存するリポジトリの名前。
++
+* `tag`: サポートバンドルイメージに割り当てられたタグ。
++
+* `imagePullPolicy`:サポートバンドルイメージのプルポリシー。サポートされている値は `IfNotPresent`、`Always`、および `Never` です。詳細については、Kubernetes ドキュメントの https://kubernetes.io/docs/concepts/containers/images/#image-pull-policy[イメージプルポリシー] を参照してください。
+
+*例*：
+
+----
+{
+  "repository": "rancher/support-bundle-kit",
+  "tag": "v0.0.25",
+  "imagePullPolicy": "IfNotPresent"
+}
+----
+
+この例では、クラスターのデフォルトイメージタグは `v0.0.25` です。
+
+CLI は次の `support-bundle-image` 設定オブジェクトを表示します：
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'  // default value, automatically set
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+しばらくすると、UI を使用して `value` フィールドに新しいイメージタグ (`v0.0.36`) が指定されます。
+
+image::advanced/support-bundle-image-set-customized-value.png[]
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.25","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value
+```
+
+最終的に、このクラスターはアップグレードされ、オブジェクトは再び変更されます。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default value, automatically updated after upgrade
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.36","imagePullPolicy":"IfNotPresent"}'  // your setting value is kept unchanged
+```
+
+`value` フィールドの `tag` の値は `v0.0.36` であり、`default` フィールドの `tag` の値は `v0.0.38` です。
+
+古い設定をクリアし、デフォルトのイメージタグを使用するには、次のコマンドを実行し、`value` フィールドを削除して変更を保存してください。
+
+```
+$ kubectl edit settings.harvesterhci.io support-bundle-image
+```
+
+`value` フィールドが削除された後、オブジェクトは次のように表示されます。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+```
+
+UI の *デフォルト値を使用* ボタンを使用して、`default` フィールドの内容を `value` フィールドにコピーできます。
+
+image::advanced/support-bundle-image-set-use-default-value.png[]
+
+変更が保存された後、オブジェクトは次のように表示されます。
+
+```
+apiVersion: harvesterhci.io/v1beta1
+default: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // default
+kind: Setting
+metadata:
+  name: support-bundle-image
+...
+status: {}
+value: '{"repository":"rancher/support-bundle-kit","tag":"v0.0.38","imagePullPolicy":"IfNotPresent"}'  // copied from default
+```
+
+将来的にクラスターがアップグレードされると、デフォルトのイメージタグが変更される可能性があるため、`value` フィールドの内容は再び古くなる可能性があります。
+
+[NOTE]
+====
+* `default` フィールドの `tag` の値は、常に {harvester-product-name}.iso にパッケージされているイメージに基づいています。このフィールドは、クラスターがアップグレードされるたびに自動的に更新されます。
++
+* `value` フィールドが設定されていないか、空のままの場合、`default` フィールドが使用されます。{harvester-product-name} は、デフォルトのイメージがクラスターに保存されていて最新であるかどうかを確認します。
++
+* この設定を構成する必要はありません。`value` フィールドに異なるイメージタグを指定することにした場合、クラスターがアップグレードされるとこのタグが古くなる可能性があることを忘れないでください。
++
+* `value` フィールドをクリアするには、コマンド `$ kubectl edit settings.harvesterhci.io support-bundle-image` を使用してください。
++
+* UI の *デフォルト値を使用* ボタンは、`default` フィールドの内容を `value` フィールドにコピーするだけです。これを使用して古いイメージタグを置き換えることができますが、コピーされたタグも最終的には古くなります（クラスターがアップグレードされ、`default` フィールドが更新されるとき）。
++
+* クラスターがエアギャップ(された)環境にあり、`value` フィールドに非デフォルトのイメージタグを指定した場合、イメージがローカルの containerd レジストリに存在することを確認してください。イメージが利用できない場合、{harvester-product-name} は xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[サポートバンドルを生成] しません。
+====
+
+=== `support-bundle-namespaces`
+
+*定義*:xref:troubleshooting/cluster.adoc#_generate_a_support_bundle[サポートバンドルを生成] する際に使用できる追加のネームスペース。
+
+デフォルトでは、サポートバンドルは以下の事前定義されたネームスペースからのみリソースを収集します：
+
+* cattle-dashboards
+* cattle-fleet-local-system
+* cattle-fleet-system
+* cattle-fleet-clusters-system
+* cattle-monitoring-system
+* fleet-local
+* harvester-system
+* local
+* longhorn-system
+* cattle-logging-system
+
+選択したネームスペースは、事前定義されたネームスペースリストに追加されます。
+
+*デフォルト値*:なし
+
+=== `support-bundle-timeout`
+
+*定義*:{harvester-product-name} がサポートバンドル生成処理の完了を許可する分数です。
+
+データ収集とファイルパッキングタスクが設定された分数内に完了しない場合、処理は失敗したと見なされます。{harvester-product-name} はタイムアウトしたサポートバンドル生成処理を続行または再試行しません。値が `0` の場合、タイムアウト機能は無効になります。
+
+*デフォルト値*: `10`
+
+=== `support-bundle-expiration`
+
+*定義*:{harvester-product-name} が、パッケージ化されたがダウンロードされていない（意図的または不成功の場合）または保持されているサポートバンドルが削除されるまでの待機時間（分）です。
+
+0以上の値を指定できます。値が0の場合、{harvester-product-name} はデフォルト値を使用します。
+
+*デフォルト値*: `30`
+
+=== `support-bundle-node-collection-timeout`
+
+*定義*:サポートバンドルのためにノード上でログと設定を収集するために{harvester-product-name}が許可する時間（分）です。
+
+収集処理が指定された時間内に完了しない場合でも、{harvester-product-name} は未収集のデータを除いたサポートバンドルのダウンロードを許可します。0以上の値を指定できます。値が0の場合、{harvester-product-name} はデフォルト値を使用します。
+
+*デフォルト値*: `30`
+
+=== `upgrade-checker-enabled`
+
+*定義*:利用可能なアップグレードを自動的にチェックする設定です。
+
+*デフォルト値*: `true`
+
+*例*：
+
+----
+false
+----
+
+=== `upgrade-checker-url`
+
+*定義*:利用可能なアップグレードをチェックするために使用されるURLです。
+
+この設定は、`upgrade-checker-enabled` 設定が `true` に設定されている場合にのみ使用できます。
+
+*デフォルト値*: `https://harvester-upgrade-responder.rancher.io/v1/checkupgrade`
+
+*例*：
+
+----
+https://your.upgrade.checker-url/v99/checkupgrade
+----
+
+=== `upgrade-config`
+
+*定義*:アップグレード関連の設定です。
+
+*デフォルト値*:
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "sequential"
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "auto"
+    }
+  },
+  "restoreVM": false,
+  "logReadyTimeout": "5"
+}
+----
+
+*サポートされているオプションとフィールド*：
+
+* `imagePreloadOption`:イメージプリロードフェーズのオプションです。
++
+完全なISOには、コアオペレーティングシステムコンポーネントとすべての必要なコンテナイメージが含まれています。{harvester-product-name} は、インストールおよびアップグレード中にこれらのコンテナイメージを各ノードにプリロードできます。ワークロードが管理ノードとワーカーノードにスケジュールされると、コンテナイメージは使用可能になります。
++
+** `strategy`:イメージプリロード戦略です。
++
+*** `type`:イメージプリロード戦略のタイプです。
++
+**** `sequential`:ターゲットISOからのコンテナイメージが各ノードにプリロードされます。これがデフォルトのオプションです。
++
+**** `skip`:コンテナイメージは各ノードにプリロードされません。*本番環境でこのオプションを使用しないでください。*
++
+[IMPORTANT]
+====
+`skip` を使用することに決めた場合は、次の要件が満たされていることを確認してください：
+
+* プライベートコンテナレジストリには、必要なすべてのイメージが含まれています。
+* クラスターは高速インターネットアクセスを持ち、必要に応じてDocker Hubからすべてのイメージをプルできます。
+
+インターネットサービスの中断の可能性や、 https://www.docker.com/increase-rate-limits/[Docker Hubのレート制限]にどれだけ近づいているかに注意してください。必要なイメージのダウンロードに失敗すると、アップグレードが失敗し、クラスターが中途半端な状態になる可能性があります。
+====
++
+**** `parallel` (*実験的*):ノードはイメージをバッチでプリロードします。これを`concurrency`オプションを使用して調整できます。
++
+*** `concurrency`:同時にイメージをプリロードできるノードの数。このオプションは、`type`が`parallel`に設定されている場合にのみ有効です。
++
+デフォルト値は`0`で、クラスターのノード数に従うことと同等です。`0`を使用すると、システムはクラスターのスケールに動的に従うことができます。クラスターのノード数を超える値は`0`として扱われ、低い値は無効と見なされて拒否されます。
++
+[NOTE]
+====
+{harvester-product-name}は、コンテナイメージをプリロードする必要があるノードのためのHTTPサーバーとして機能するアップグレードリポサービスをクラスターにデプロイします。`concurrency`の値が設定されると、各バッチのノードはこのアップグレードリポからコンテナイメージを並行してダウンロードします。このため、{harvester-product-name}管理ネットワークの速度と{longhorn-product-name}のデフォルトディスクの読み取り速度を考慮する必要があります。
+====
+
+* `nodeUpgradeOption`:{harvester-product-name}がノードのアップグレードをどのように実行するかの定義。
++
+ノードのアップグレードは原子的な操作であり、ノードのRKE2コンポーネントとオペレーティングシステムのアップグレードを含みます。アップグレードは完全に完了するか失敗するかのいずれかであり、中途半端な状態はありません。
++
+ターゲットノードをアップグレードの準備をするために、{harvester-product-name}は最初にすべての実行中の仮想マシンを他のノードにライブマイグレーションしようとします。ライブマイグレーションできない仮想マシンは、潜在的な中断や問題を避けるために自動的にシャットダウンされます。
++
+** `strategy`:ノードアップグレード戦略。
++
+*** `mode`:ノードアップグレード戦略のモード。
++
+**** `auto`:ノードのアップグレードは自動的に開始されます。これはデフォルト値です。
+**** `manual`:ノードのアップグレード処理は、再開するための特定の操作が行われるまで一時停止されます。
++
+*** `pauseNodes`:自動アップグレードから除外する必要があるノードのリスト。
++
+`mode`フィールドが`manual`に設定されていて、このフィールドにノード名を指定しない場合、すべてのノードのアップグレードは一時停止されます。`mode`フィールドが`auto`に設定されている場合、このフィールドに指定されたノード名は無視され、ノードのアップグレードは自動的に開始されます。
++
+[IMPORTANT]
+====
+このフィールドにリストされたノードのアップグレードは、特定の操作を行ってxref:upgrades/upgrades.adoc#_resuming_a_paused_node_upgrade[再開する]まで、_完全に一時停止_されます。{harvester-product-name}がノードを順次アップグレードするため、全体のアップグレードも一時停止されることを意味します。
+====
++
+例:
++
+[,json]
+----
+"pauseNodes": ["node-0", "node-2"]
+----
+
+* `restoreVM`:アップグレードが*正常に*完了した後、{harvester-product-name}が以前に実行されていたxref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[移行不可能な仮想マシン]を自動的に復元することを可能にするオプション。次のいずれかの値を指定できます：
++
+** `true`: {harvester-product-name}は、各ノードで*実行中*および*一時停止中*の移行不可能な仮想マシンを強制的にシャットダウンします。アップグレードが完了した後、以前に実行されていた仮想マシンは自動的に再起動され、一時停止中の仮想マシンはシャットダウンされたままになります。
+** `false`:これはデフォルト値です。マルチノード環境では、アップグレードを進めるためにすべての移行不可能な仮想マシンを停止する必要があります。{harvester-product-name}は、アップグレードが完了した後にこれらの仮想マシンを再起動しません。
++
+[NOTE]
+====
+シングルノード環境では、すべての仮想マシンは移行不可能と見なされます。{harvester-product-name}は、アップグレード処理を開始する前にすべての仮想マシンを強制的にシャットダウンします。
+====
+
+* `logReadyTimeout`:アップグレードログインフラストラクチャの作成に{harvester-product-name}が許可する分数。
++
+** デフォルト値: `"5"`
+** 有効な値: `""`, `"1"`から`"20"`（二重引用符で囲まれています）
+
+*例*：
+
+[,json]
+----
+{
+  "imagePreloadOption": {
+    "strategy": {
+      "type": "parallel",
+      "concurrency": 2
+    }
+  },
+  "nodeUpgradeOption": {
+    "strategy": {
+      "mode": "manual",
+      "pauseNodes": [
+        "node-3"
+      ]
+    }
+  }
+  "restoreVM": true,
+  "logReadyTimeout": "5"
+}
+----
+
+=== `vip-pools`
+
+*バージョン*：v1.2.0以降非推奨（代わりにxref:networking/ip-pool.adoc[IPプール]を使用してください。）
+
+*定義*:VIPのグローバルまたはネームスペース特有のIPアドレスプール（CIDRまたはIP範囲）です。
+
+*デフォルト値*: `{}`
+
+*例*：
+
+[,json]
+----
+{
+  "default": "172.16.0.0/24,172.16.1.0/24",
+  "demo": "172.16.2.50-172.16.2.100,172.16.2.150-172.16.3.200"
+}
+----
+
+=== `vm-force-reset-policy`
+
+*定義*:ノードが利用できなくなったときに、仮想マシンの再スケジュールを強制する設定です。
+
+ノードの状態が`Not Ready`に変わると、仮想マシンは強制的に削除され、設定された秒数後に利用可能なノードに再スケジュールされます。
+
+ノードが利用できなくなるか、電源がオフになると、仮想マシンは再起動するだけで、移行は行われません。
+
+*サポートされるオプション*：
+
+* `period`:失敗したノードに`kubevirt.io/drain`の汚染を追加する前に{harvester-product-name}が待機する秒数です。このオプションは、仮想マシンの移行をトリガーします。
+* `vmMigrationTimeout`:失敗したノードに{harvester-product-name}の汚染を追加する前に`node.kubernetes.io/out-of-service`が待機する秒数です。このオプションは、孤立したリソースのクリーンアップを強制します。
+
+*デフォルト値*: `{"enable":true, "period":15, "vmMigrationTimeout": 180}`
+
+*例*：
+
+[,json]
+----
+{
+  "enable": "true",
+  "period": 15,
+  "vmMigrationTimeout": 180
+}
+----
+
+=== `vm-migration-network`
+
+*定義*:仮想マシン移行トラフィック用の分離されたネットワークです。
+
+デフォルトでは、{harvester-product-name}は仮想マシン移行のためにビルトインのクラスターネットワーク`mgmt`を使用します。`mgmt`は単一のインターフェースに制限され、クラスター全体のワークロードと共有されます。実装にネットワークの分離が必要な場合は、移行トラフィックを隔離するためにxref:networking/vm-migration-network.adoc[VM移行ネットワーク]を使用できます。
+
+[IMPORTANT]
+====
+IPv4 CIDR形式でIP範囲を指定してください。IPアドレスの数は、クラスターのノード数以上でなければなりません。
+====
+
+*デフォルト値*: ""
+
+*例*：
+
+[,json]
+----
+{
+  "vlan": 100,
+  "clusterNetwork": "vm-migration",
+  "range": "192.168.1.0/24"
+}
+----
+
+=== `volume-snapshot-class`
+
+*定義*:ソースVMを含まない名前空間にVMを復元する際のVolumeSnapshotおよびVolumeSnapshotContentのVolumeSnapshotClassNameです。
+
+*デフォルト値*: `longhorn`
+
+*例*：
+
+`longhorn`
+
+== UIの設定
+
+=== `branding`
+
+*定義*:この設定により、製品名、ロゴ、カラースキームをカスタマイズすることで、UIをグローバルにリブランドできます。
+
+*デフォルト値*:*Harvester*
+
+[CAUTION]
+====
+この設定は`settings.management.cattle.io`カスタムリソースの一部であるため、xref:installation-setup/config/configuration-file.adoc#_system_settings[設定ファイル]を使用してサポートされているオプション（例えば、`Logo`や`Primary Color`）を構成することはできません。
+====
+
+image::advanced/branding.png[containerd-registry]
+
+*サポートされているオプションと値*:
+
+* *プライベートラベル*:UIのほとんどの場所で「Harvester」を置き換える製品名またはその他のテキストです。
+* *ロゴ*:トップレベルのナビゲーションヘッダーにあるロゴ画像です。ライトモードとダークモードの両方のロゴをアップロードする必要があります。
+* *ファビコン*:ブラウザタブのページタイトルの横に表示される小さな画像。
+* *プライマリカラー*:UI全体で使用されるメインカラー。
+* *リンクカラー*:UI全体でリンクテキストに使用される色。
+
+=== `ui-index`
+
+*定義*:UIのHTMLインデックス位置。
+
+*デフォルト値*: `https://releases.rancher.com/harvester-ui/dashboard/latest/index.html`
+
+*例*：
+
+----
+https://your.static.dashboard-ui/index.html
+----
+
+=== `ui-path`
+
+*定義*:UIにアクセスするために使用される`index.html`の位置を示すパス。
+
+`ui-path`はUIへのエントリーポイントとして機能し、以下の状況でのみアクティブです:
+
+* `ui-source`の値は`bundled`です。
+* `ui-source`の値は`auto`ですが、`ui-index`はHTMLファイルを取得できません。
+
+*デフォルト値*: `/usr/share/harvester/harvester`
+
+*例*:
+
+`index.html`は`/home/samplefolder`内のコンテナに保存されています。`ui-source`の値は`bundled`です。
+
+シナリオ1:`ui-path`の値は`/home/samplefolder`です。UIにアクセスするたびに、`/home/samplefolder/index.html`の内容が表示されます。
+
+シナリオ2:`ui-index`の値は、利用できないか存在しないページ（例えば、`notexist-example.com/index.html`）を指しています。UIに初めてアクセスすると、`/home/samplefolder/index.html`の内容が表示されます。ただし、`ui-index`の設定をデフォルト値に変更し、再度UIにアクセスすると、`/home/samplefolder/index.html`の内容が依然として表示されます（新しい`ui-index`の値が利用可能なページを指していても）。詳細については、 https://github.com/harvester/harvester/issues/6066[Issue #6066]を参照してください。
+
+=== `ui-source`
+
+*定義*:UIソースの読み込み方法を設定するための設定。
+
+*デフォルト値*: `auto`
+
+*サポートされている値*:
+
+* `auto`:自動的にバンドルされたUIを使用するかどうかを検出します。
+* `external`:ui-index URLから外部UIソースを使用します。
+* `bundled`:ローカル{harvester-product-name}サーバーからバンドルされたUIソースを使用します。
+
+*例*：
+
+----
+external
+----

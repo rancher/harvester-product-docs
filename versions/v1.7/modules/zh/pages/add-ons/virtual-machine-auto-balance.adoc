@@ -1,0 +1,143 @@
+= 虚拟机自动平衡（实验性）
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*虚拟机自动平衡* 是一个 *实验性* 附加产品。有关实验性功能的更多信息，请参见 xref:introduction/document-conventions.adoc#_feature_labels[功能标签]。
+====
+
+*虚拟机自动平衡* 附加产品允许 {harvester-product-name} 使用 https://github.com/kubernetes-sigs/descheduler[Kubernetes 反调度器] 来重新平衡虚拟机工作负载。Kubernetes 反调度器通过驱逐不符合管理员定义策略的最佳放置的 Pod 来优化工作负载调度。此关键功能提高了资源利用率，平衡了节点间的工作负载，并改善了整体集群性能。
+
+== 启用附加产品
+
+启用后，附加产品将在 `kube-system` 名称空间中部署反调度器，并在 `kube-system/descheduler` 配置映射中部署相关配置。只有当集群中有多个节点时，您才能启用该附加产品。
+
+. 在 {harvester-product-name} 用户界面中，转到 *高级 -> 附加产品*。
+
+. 选择 *反调度器（实验性）*，然后选择 *⋮ -> 启用*。
+
+== 反调度器策略
+
+配置包含以下插件：
+
+* `DefaultEvictor`：在顶层提供通用驱逐配置。
+* `LowNodeUtilization`：监控节点资源使用情况，并根据定义的阈值从过度使用的节点驱逐 Pod 到使用不足的节点。
+
+在默认配置下，反调度器仅驱逐虚拟机 Pod。
+
+== 自定义反调度器策略
+
+选择 *⋮ -> 编辑 YAML* 以根据您的要求自定义反调度器策略。配置以 YAML 格式定义。
+
+[,yaml]
+----
+  - apiVersion: harvesterhci.io/v1beta1
+    kind: Addon
+    metadata:
+      name: descheduler
+      namespace: kube-system
+      labels:
+        addon.harvesterhci.io/displayName: "virtual-machine-auto-balance"
+        addon.harvesterhci.io/experimental: "true"
+    spec:
+      repo: http://harvester-cluster-repo.cattle-system.svc/charts
+      version: << .DESCHEDULER_CHART_VERSION >>
+      chart: descheduler
+      {{- if and .Addons .Addons.descheduler }}
+      enabled: {{ .Addons.descheduler.Enabled }}
+      {{- else }}
+      enabled: false
+      {{- end }}
+      valuesContent: |
+        kind: Deployment
+        image:
+          repository: registry.k8s.io/descheduler/descheduler
+          pullPolicy: IfNotPresent
+        deschedulingInterval: 5m
+        replicas: 1
+        cmdOptions:
+          v: 3
+          feature-gates: EvictionsInBackground=true
+        deschedulerPolicy:
+          maxNoOfPodsToEvictPerNode: 5
+          profiles:
+          - name: default
+            pluginConfig:
+            - name: DefaultEvictor
+              args:
+                nodeFit: true
+                ignorePvcPods: false
+                evictLocalStoragePods: true
+                labelSelector:
+                  matchExpressions:
+                    - key: "kubevirt.io"
+                      operator: "In"
+                      values:
+                        - "virt-launcher"
+            - name: LowNodeUtilization
+              args:
+                evictableNamespaces:
+                  exclude:
+                  - cattle-dashboards
+                  - cattle-fleet-clusters-system
+                  - cattle-fleet-local-system
+                  - cattle-fleet-system
+                  - cattle-logging-system
+                  - cattle-monitoring-system
+                  - cattle-provisioning-capi-system
+                  - cattle-system
+                  - fleet-local
+                  - harvester-system
+                  - kube-system
+                  - local
+                  - longhorn-system
+                thresholds:
+                  cpu: 30
+                  memory: 30
+                targetThresholds:
+                  cpu: 50
+                  memory: 50
+            plugins:
+              balance:
+                enabled:
+                - LowNodeUtilization
+----
+
+** `deschedulingInterval`：反调度器运行的频率。默认值为 `5m`（5 分钟）。
+** `maxNoOfPodsToEvictPerNode`：在单个去调度周期中可以驱逐的最大 Pod 数。默认值为 `5`。
+** `evictableNamespaces.exclude`：要排除在驱逐之外的命名空间。默认情况下，系统命名空间被排除，以保护关键系统组件。
+** `targetThresholds`：监控资源的上限利用率。使用超过此阈值的节点被标记为过度利用，从而触发 Pod 驱逐以减少其负载。处理器（`50`）和内存（`50`）的默认值会自动应用，但您可以为其他监控资源定义值。
+** `thresholds`：监控资源的下限利用率。从过度利用的节点驱逐的 Pod 仅会重新调度到当前使用率低于此阈值的节点。处理器（`30`）和内存（`30`）的默认值会自动应用，但您可以为其他监控资源定义值。
+
+== 禁用附加产品
+
+. 在 {harvester-product-name} 用户界面中，转到 *高级 -> 附加产品*。
+
+. 选择 *反调度器（实验性）*，然后选择 *⋮ -> 禁用*。
+
+== 节点使用情况
+
+检查反调度器日志以获取有关节点使用情况的信息。
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.067225       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-131-tink-system" usage={"cpu":"4583m","memory":"3075Mi","pods":"25"} usagePercentage={"cpu":20,"memory":2,"pods":13}
+I1209 02:06:21.067328       1 lownodeutilization.go:210] "Node has been classified" category="underutilized" node="hp-121-tink-system" usage={"cpu":"5198m","memory":"4023Mi","pods":"30"} usagePercentage={"cpu":23,"memory":3,"pods":15}
+I1209 02:06:21.067355       1 lownodeutilization.go:210] "Node has been classified" category="overutilized" node="hp-119-tink-system" usage={"cpu":"10490m","memory":"109333705514","pods":"81"} usagePercentage={"cpu":46,"memory":81,"pods":41}
+----
+
+== 查错
+
+反调度器在 Pod 上工作，而不是虚拟机。如果您期望被驱逐的虚拟机没有被驱逐，请检查反调度器日志。
+
+示例：
+
+[,shell]
+----
+> kubectl logs -n kube-system -l app.kubernetes.io/name=descheduler -f
+I1209 02:06:21.068059       1 defaultevictor.go:228] "pod does not fit on any other node because of nodeSelector(s), Taint(s), or nodes marked as unschedulable" pod="default/virt-launcher-vm-3-w866s"
+----
+
+在此示例中，虚拟机是手动迁移的，因此相关 pod 的规范包含限制性的节点选择器。反调度器无法驱逐此 Pod，因为节点选择器会阻止该 Pod 在集群中的任何其他可用节点上成功运行。

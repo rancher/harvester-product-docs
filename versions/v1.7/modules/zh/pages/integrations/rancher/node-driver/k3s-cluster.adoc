@@ -1,0 +1,92 @@
+= 创建 K3s Kubernetes 集群
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+您现在可以使用内置的 Harvester 节点驱动程序在 Rancher 的 Harvester 集群上配置 K3s Kubernetes 集群。
+
+image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+
+[NOTE]
+====
+* Harvester K3s 节点驱动程序处于 *技术预览* 状态。
+* 配置 K3s Kubernetes 集群涉及配置底层虚拟机的 IP 地址。您可以使用连接到虚拟机的 VLAN 网络上的 DHCP 服务器来完成此操作。如果网络上不存在这样的服务器，您可以使用 xref:../../../add-ons/vm-dhcp-controller.adoc[托管 DHCP] 功能来配置 IP 地址。
+* Harvester 节点驱动程序需要 xref:../../../networking/vm-network.adoc#_vlan_network[VLAN 网络]。
+* Harvester 节点驱动程序仅支持云镜像。
+* 有关在 Harvester 中部署的客户集群的端口要求，请参阅 xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[客户集群的端口要求]。
+====
+
+== 创建您的云凭据
+
+. 点击 *☰ > 集群管理*。
+. 点击 *云凭据*。
+. 单击*创建*。
+. 点击 *Harvester*。
+. 输入您的云凭据名称
+. 选择 "导入的 Harvester 集群"。
+. 单击*创建*。
+
+image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+
+== 创建 K3s Kubernetes 集群
+
+您可以通过 K3s 节点驱动程序从 *集群管理* 页面创建 K3s Kubernetes 集群。
+
+. 选择 *集群* 菜单。
+. 点击 *创建* 按钮。
+. 切换开关到 *RKE2/K3s*。
+. 选择 Harvester 节点驱动程序。
+. 选择一个 *云凭据*。
+. 输入 *集群名称*（必填）。
+. 输入 *名称空间*（必填）。
+. 输入 *镜像*（必填）。
+. 输入 *网络名称*（必填）。
+. 输入 *SSH 用户*（必填）。
+. 单击*创建*。
+
+image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+
+=== 添加节点亲和性
+
+Harvester 节点驱动程序现在支持通过节点亲和性规则将一组机器调度到特定节点。这提供了高可用性和更好的资源利用率。
+
+在集群创建期间，可以将节点亲和性添加到机器池：
+
+. 点击 `Show Advanced` 按钮，然后点击 `Add Node Selector`
+image:rancher/affinity-rke2-add-node-selector.png[affinity-add-node-selector]
+. 如果希望调度程序仅在满足规则时调度机器，请将优先级设置为 `Required`。
+. 点击 `Add Rule` 以指定节点亲和性规则，例如，对于 xref:./node-driver.adoc#_topology_spread_constraints[拓扑扩展约束] 用例，您可以添加 `region` 和 `zone` 标签，如下所示：
++
+[,yaml]
+----
+key: topology.kubernetes.io/region
+operator: in list
+values: us-east-1
+---
+key: topology.kubernetes.io/zone
+operator: in list
+values: us-east-1a
+----
++
+image::rancher/affinity-rke2-add-rules.png[添加规则]
+
+. 点击 `Create` 保存节点模板。集群安装后，您可以检查其机器节点是否根据亲和性规则进行调度。
+
+== 在隔离环境中使用 Harvester K3s 节点驱动程序
+
+K3s 配置依赖于 `qemu-guest-agent` 软件包以获取虚拟机的 IP。
+
+然而，在隔离环境中安装软件包可能不可行。
+
+您可以通过以下选项解决安装限制：
+
+* 选项 1。使用预配置了所需软件包的虚拟机镜像（例如，`iptables`，`qemu-guest-agent`）。
+* 选项 2。前往 *显示高级* > *用户数据* 以允许虚拟机通过 HTTP(S) 代理安装所需的软件包。
+
+在 Harvester 节点模板中 `user data` 的示例：
+
+----
+#cloud-config
+apt:
+  http_proxy: http://192.168.0.1:3128
+  https_proxy: http://192.168.0.1:3128
+----

@@ -1,0 +1,169 @@
+= Controlador CSI LVM (Experimental)
+:revdate: 2025-12-31
+:page-revdate: {revdate}
+
+[NOTE]
+====
+*harvester-csi-driver-lvm* es un *complemento experimental*. No está incluido en el ISO, pero puedes descargarlo desde el https://github.com/harvester/experimental-addons[`experimental-addons` repositorio]. Para más información sobre características experimentales, consulta xref:introduction/document-conventions.adoc#_feature_labels[Etiquetas de características].
+====
+
+{harvester-product-name} te permite utilizar almacenamiento local en el host para crear volúmenes persistentes para tus cargas de trabajo con mejor rendimiento y latencia. Esta funcionalidad es posible gracias a LVM, que proporciona funcionalidades de gestión de volúmenes lógicos en Linux.
+
+El **harvester-csi-driver-lvm** complemento es un controlador CSI que soporta la provisión de vía local a través de LVM.
+
+== Instalando y habilitando el complemento
+
+Si estás utilizando el archivo kubeconfig {harvester-product-name}, puedes instalar el complemento realizando los siguientes pasos:
+
+. Ejecute el comando siguiente:
++
+[,shell]
+----
+# kubectl apply -f https://raw.githubusercontent.com/harvester/experimental-addons/main/harvester-csi-driver-lvm/harvester-csi-driver-lvm.yaml
+----
++
+. En la interfaz de usuario {harvester-product-name}, ve a *Complementos Avanzados ->*.
++
+. Selecciona *harvester-csi-driver-lvm (Experimental)*, y luego selecciona *⋮ -> Habilitar*.
++
+image::csi-driver-lvm/enable-lvm-addon.png[]
+
+== Creando un grupo de volúmenes para LVM
+
+Un grupo de volúmenes combina volúmenes físicos para crear una única estructura de almacenamiento que puede dividirse en volúmenes lógicos.
+
+[NOTE]
+====
+{harvester-product-name} actualmente no te permite modificar la composición del grupo de volúmenes (añadir o quitar discos) después de crear un volumen lógico. Este problema se abordará en una futura versión.
+====
+
+. Verifica que el complemento *harvester-csi-driver-lvm* esté instalado.
+
+. En la interfaz de usuario {harvester-product-name}, ve a la pantalla de *Hosts*.
+
+. Selecciona el host objetivo, y luego selecciona *⋮ -> Editar Configuración*.
+
+. En la pestaña *Almacenamiento*, añade discos para el grupo de volúmenes.
++
+image::csi-driver-lvm/add-disk-to-vg-01.png[]
++
+Configura los siguientes ajustes para cada disco seleccionado:
++
+** *Proveedor*: Selecciona *LVM*.
++
+image::csi-driver-lvm/add-disk-to-vg-02.png[]
++
+** *Grupo de Volúmenes*: Selecciona un grupo de volúmenes existente o especifica un nombre para un nuevo grupo de volúmenes.
++
+image::csi-driver-lvm/add-disk-to-vg-03.png[]
++
+Para más información sobre cómo añadir discos, consulta xref:hosts/hosts.adoc#_multi_disk_management[Gestión de Múltiples Discos].
+
+. Haz clic en *Guardar*.
+
+. En la pantalla de detalles del host, verifica que los discos se hayan añadido y que el proveedor correcto esté configurado.
++
+image::csi-driver-lvm/add-disk-to-vg-04.png[]
+
+== Creando una StorageClass para LVM
+
+[NOTE]
+====
+Solo puedes usar un tipo de volumen local en cada grupo de volúmenes. Si es necesario, crea diferentes grupos de volúmenes para los tipos de volúmenes que deseas utilizar.
+====
+
+. En la interfaz de usuario {harvester-product-name}, ve a la pantalla de *Almacenamiento*.
+
+. Crea una nueva StorageClass y selecciona *LVM* en la lista de *Proveedor*.
++
+image::csi-driver-lvm/create-lvm-sc-01.png[]
+
+. En la pestaña *Parámetros*, configura los siguientes ajustes:
++
+** *Nodo*: Selecciona el nodo objetivo para las cargas de trabajo previstas. 
++
+image::csi-driver-lvm/create-lvm-sc-02.png[]
++
+** *Nombre del Grupo de Volúmenes*: Selecciona el grupo de volúmenes que has creado.
++
+image::csi-driver-lvm/create-lvm-sc-03.png[]
++
+** *Tipo de Grupo de Volúmenes*: Selecciona el tipo de volumen local que se ajuste a tus requisitos. {harvester-product-name} actualmente soporta *striped** y *dm-thin*.
++
+image::csi-driver-lvm/create-lvm-sc-04.png[]
+
+. Haz clic en *Guardar*.
+
+. En la pantalla de *Almacenamiento*, verifica que la StorageClass se haya creado y que el proveedor correcto esté configurado.
++
+image::csi-driver-lvm/create-lvm-sc-05.png[]
+
+Para más información, consulta xref:storage/storageclass.adoc[StorageClass].
+
+== Creando un volumen con LVM
+
+. En la interfaz de usuario {harvester-product-name}, ve a la pantalla de *Volúmenes*.
+
+. Crea un nuevo volumen utilizando la clase de almacenamiento LVM que has creado.
++
+image::csi-driver-lvm/create-lvm-volume-01.png[]
++
+[NOTE]
+====
+El estado *No Listo* es normal porque {harvester-product-name} crea el volumen LVM solo cuando se crea la primera carga de trabajo.
+====
+
+. En la pantalla de *Máquinas Virtuales*, selecciona la máquina virtual de destino y luego selecciona *⋮ -> Añadir Volumen*.
++
+[NOTE]
+====
+Debido a que el volumen LVM es un volumen local, debes asegurarte de que el nodo de destino de la clase de almacenamiento LVM sea el nodo en el que se programa la máquina virtual.
+====
+
+. Especifica el volumen que deseas adjuntar.
++
+image::csi-driver-lvm/attach-lvm-volume-01.png[]
+
+. En la pantalla de *Volúmenes*, verifica que el estado sea *En uso*.
++
+image::csi-driver-lvm/attach-lvm-volume-02.png[]
+
+También puedes crear una nueva máquina virtual con el volumen de la clase de almacenamiento LVM que has creado. Esta máquina virtual se programará en el nodo de destino con almacenamiento local para el volumen.
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-01.png[]
+
+image::csi-driver-lvm/create-vm-with-lvm-volume-02.png[]
+
+== Creando instantáneas para un volumen LVM
+
+. En la interfaz de usuario {harvester-product-name}, ve a la pantalla de *Configuración*.
+
+. En la sección *csi-driver-config*, selecciona *⋮ -> Editar Configuración*.
++
+image::csi-driver-lvm/update-csi-driver-config-01.png[]
+
+. Añade una entrada con la siguiente configuración:
++
+** *Proveedor*: Select *lvm.driver.harvesterhci.io*.
+** *Nombre de la Clase de Instantáneas de Volumen*: Selecciona *lvm-snapshot*.
+
+. En la pantalla de *Máquinas Virtuales*, selecciona la máquina virtual de destino y luego selecciona *⋮ -> Tomar Instantánea de la Máquina Virtual*.
++
+Ejemplo:
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-01.png[]
+
+. En la pantalla de *Instantáneas de Máquinas Virtuales*, verifica que la instantánea esté lista para usar.
++
+image::csi-driver-lvm/vm-take-snapshot-with-lvm-02.png[]
+
+== Características de Volumen LVM Soportadas
+
+* Redimensionamiento de volúmenes
+* Clonación de volúmenes
+* Creación de instantáneas
+
+[IMPORTANT]
+====
+La creación de copia de seguridad no está soportada actualmente. Esta limitación se abordará en una futura versión.
+====

@@ -1,0 +1,146 @@
+= IP池
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+IP池是一个内置的IP地址管理（IPAM）解决方案，仅适用于{harvester-product-name}负载均衡器（LB）。
+
+== 功能
+
+* *多个IP范围：*每个IP池可以包含多个IP范围或CIDR。
+* *分配历史：*IP池跟踪每个IP地址的分配历史，并优先根据负载均衡器名称分配之前分配的地址。
++
+[,yaml]
+----
+status:
+  allocatedHistory:
+    192.168.178.8: default/rke2-default-lb-pool-2fab9ac0
+----
+
+* *范围:*IP池可以限制在特定的网络、项目、名称空间或来宾集群中。
+
+== 创建IP池
+
+. 在{harvester-product-name} UI上，转到*网络 -> IP池*。
+. 选择*创建*。
+. 指定IP池的名称。
+. 在*范围*选项卡上，指定一个或多个IP范围。
++
+image::networking/multiple-ranges.png[IP池中的多个IP范围]
+. 在*选择器*选项卡上，指定IP池的优先级和范围（名称空间）。
++
+image::networking/ippool-scope.png[IP池范围]
+
+=== 使用Rancher UI创建IP池
+
+如果您将{harvester-product-name}集群导入到{rancher-short-name}中，您可以使用{rancher-short-name} UI创建IP池（*虚拟化管理* -> IP池：创建*）。但是，*范围*选项卡上的*选择器*部分要求您指定项目和客户Kubernetes集群，以及命名空间。有关更多信息，请参见xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[多租户示例]和 https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[与Rancher的项目和Kubernetes名称空间]。
+
+当*范围*部分仅包含一个条目，并且*项目*、*名称空间*和*访客Kubernetes集群*字段设置为*全部*时，IP池被指定为全局资源。
+
+== 选择策略
+
+每个IP池将具有特定范围，您可以在LB `annotations`中指定相应的要求。满足指定要求的IP池将自动为LB分配IP地址。
+
+* LB使用以下注释来表达要求（所有注释都是可选的）：
+ ** `loadbalancer.harvesterhci.io/network`指定访客集群节点使用的虚拟机网络。
+ ** `loadbalancer.harvesterhci.io/project`和`loadbalancer.harvesterhci.io/namespace`标识构成访客集群的虚拟机的项目和名称空间。
+ ** `loadbalancer.harvesterhci.io/cluster`表示访客集群的名称。
+* IP池具有选择器，包括网络和范围，以匹配LB的要求。
+ ** 网络是一个硬性条件。可选的IP池必须与LB注释`loadbalancer.harvesterhci.io/network`的值匹配。
+ ** 每个IP池（全局IP池除外）如果其优先级为`0`，则具有与其他IP池不同的唯一范围。如果LB希望从此池中获取IP，则项目、名称空间或集群名称应在IP池的范围内。
+* `spec.selector.priority`指定IP池的优先级。数字越大，优先级越高。如果优先级不是`0`，则值应不同。优先级帮助您将旧IP池迁移到新IP池。
+* 如果IP池的范围匹配所有项目、名称空间和来宾集群，则称为全局IP池，并且只允许一个全局IP池。如果没有IP池满足LB的要求，IPAM将在全局IP池中分配一个IP地址（如果存在）。
+
+=== 示例
+
+* *示例 1：*您希望在`192.168.100.0/24`范围内为`default`名称空间设置一个IP池。在这种情况下，`default`名称空间内的所有负载均衡器将从这个指定的IP池中获取IP地址：
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: default-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.100.0/24
+  selector:
+    scope:
+      namespace: default
+----
+
+* *示例 2：*您在网络`default/vlan1`中部署了一个来宾集群`rke2`，其`project/namespace`名称为`product/default`。如果您想为其配置一个独占的IP池范围`192.168.10.10-192.168.10.20`。请参见以下`YAML`配置：
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: rke2-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.10.0/24
+    rangeStart: 192.168.10.10
+    rangeEnd: 192.168.10.20
+  selector:
+    network: default/vlan1
+    scope:
+    - project: product
+      namespace: default
+      guestCluster: rke2
+----
+
+* *示例 3：*如果您已为`default`名称空间指定了IP池`default-ip-pool`，您希望将IP池`default-ip-pool`迁移到一个不同的IP池`default-ip-pool-2`，其范围为`192.168.200.0/24`。不允许为同一范围指定多个IP池，但您可以将IP池`default-ip-pool-2`的优先级设置高于`default-ip-pool`。请参见以下`YAML`配置：
++
+[,yaml]
+----
+  apiVersion: networking.harvesterhci.io/v1beta1
+  kind: IPPool
+  metadata:
+    name: default-ip-pool-2
+  spec:
+    ranges:
+    - subnet: 192.168.200.0/24
+    selector:
+      priority: 1  # The priority is higher than default-ip-pool
+      scope:
+        namespace: default
+----
+
+* *示例 4：*您希望配置一个CIDR范围为`192.168.20.0/24`的全局IP池：
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
+spec:
+  ranges:
+  - subnet: 192.168.20.0/24
+  selector:
+    scope:
+    - project: "*"
+      namespace: "*"
+      guestCluster: "*"
+----
+
+== 分配策略
+
+* IP 池根据其分配历史优先分配先前分配的 IP 地址。
+* IP 地址按升序分配。
+
+== 最佳实践
+
+=== 虚拟机类型负载均衡器的 IP 池
+
+* 创建一个IP池<<Creating an IP pool,使用{harvester-product-name} UI>>，将范围选择器的*项目*和*来宾Kubernetes集群*字段留空。
+
+* 如果您必须<<Creating an IP pool using the Rancher UI,使用{rancher-short-name} UI>>，请将*项目*和*来宾Kubernetes集群*字段设置为*全部*或*无*。
+
+=== 来宾集群类型负载均衡器的 IP 池
+
+* 创建一个IP池<<Creating an IP pool using the Rancher UI,使用{rancher-short-name} UI>>，这允许您指定目标项目和来宾Kubernetes集群，以便更好地管理和隔离资源。
+
+* 创建全局 IP 池时请谨慎。单个来宾集群可能会耗尽整个池，导致其他集群无法提供服务。此外，如果任何地址仍在使用中，您无法删除该池。

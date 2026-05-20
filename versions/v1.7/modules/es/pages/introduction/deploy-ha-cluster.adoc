@@ -1,0 +1,105 @@
+= Desplegar un clúster de alta disponibilidad
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Se requiere un clúster {harvester-product-name} con tres o más nodos para aprovechar completamente las características de múltiples nodos, como la alta disponibilidad. Las versiones más recientes permiten crear clústeres con dos nodos de gestión y un xref:/hosts/witness-node.adoc[nodo testigo] (y opcionalmente, uno o más nodos de trabajo). También puedes crear xref:/installation-setup/single-node-clusters.adoc[clústeres de un solo nodo] que admiten la mayoría de las características (excluyendo la alta disponibilidad, el soporte de múltiples réplicas y la migración en vivo).
+
+Esta guía te conduce a través de los pasos necesarios para desplegar un *clúster de alta disponibilidad* y máquinas virtuales (VMs) que pueden alojar clústeres invitados y ejecutar cargas de trabajo personalizadas.
+
+== 1. Verifica que se cumplan los requisitos mínimos de hardware y red.
+
+{harvester-product-name} está construido para equipos sin sistema operativo utilizando componentes de software de código abierto de nivel empresarial. El instalador verifica automáticamente el hardware y muestra mensajes de advertencia si no se cumplen los xref:/installation-setup/requirements.adoc[requisitos] mínimos.
+
+== 2. Prepara los archivos de instalación según el método de instalación que desees utilizar.
+
+Puedes descargar los archivos de instalación desde la página https://github.com/harvester/harvester/releases[Releases]. La sección *Descargas* de las notas de la versión contiene enlaces a los archivos ISO y artefactos relacionados. Están disponibles los siguientes tipos de archivos ISO:
+
+* *ISO completa*: Contiene los componentes principales del sistema operativo y todas las imágenes de contenedor requeridas, que se precargan durante la instalación. Debes usar una ISO completa al instalar {harvester-product-name} detrás de un firewall o proxy, y en entornos sin conectividad a internet.
+* xref:/installation-setup/media/net-install.adoc[*ISO de instalación de red*]: Contiene solo los componentes principales del sistema operativo. Una vez completada la instalación, el sistema operativo descarga todas las imágenes de contenedor requeridas de internet (principalmente de Docker Hub).
+
+|===
+| Método | Archivos de instalación requeridos | Otros requisitos
+
+| xref:/installation-setup/methods/iso-install.adoc[ISO]
+| ISO
+| N/D
+
+| xref:/installation-setup/methods/usb-install.adoc[USB]
+| ISO
+| Unidad flash USB; utilidad como https://etcher.balena.io/[balenaEtcher] o el comando de Linux https://man7.org/linux/man-pages/man1/dd.1.html[dd]
+
+| xref:/installation-setup/methods/pxe-boot-install.adoc[PXE]
+| ISO, imagen del kernel de Linux (vmlinuz), initrd, imagen de SquashFS
+| Directorio en el servidor HTTP (para servir archivos de arranque); scripts de arranque iPXE (para instalación automática); configuración del servidor DHCP
+|===
+
+== 3. Prepara los requisitos de configuración del clúster.
+
+* Token del clúster: Cadena ASCII que los nodos utilizan al unirse al clúster
+* Dirección IP fija para cada nodo: Puede ser asignada de forma estática o utilizando DHCP (reserva de host)
+* Dirección IP virtual fija (VIP) que se utilizará como dirección de gestión del clúster: VIP a la que los nodos apuntan al unirse al clúster y a la que te conectas al realizar tareas de administración después de que el clúster esté desplegado
+* Direcciones de los servidores DNS, servidores NTP y el servidor proxy (si es necesario)
+
+== 4. Despliega el primer nodo del clúster.
+
+El despliegue implica instalar el sistema operativo y otros componentes en el host, y luego reiniciar una vez que la instalación se haya completado. Desplegar el primer nodo crea el clúster, y el primer nodo se asigna como nodo de gestión por defecto.
+
+Durante la instalación, debes configurar los ajustes del nodo, definir la dirección de gestión del clúster (VIP) y el token del clúster, y especificar otra información. Si es necesario, puedes configurar más ajustes utilizando un xref:/installation-setup/config/configuration-file.adoc[archivo de configuración].
+
+Una vez que la instalación se haya completado, el nodo se reinicia y luego aparece la consola. La consola muestra información sobre el clúster (URL de gestión y estado) y el nodo (nombre de host, dirección IP y estado). Después de que el clúster se inicializa y todos los servicios comienzan a funcionar, el estado del clúster cambia a *Listo*.
+
+== 5. Configura una contraseña fuerte para el usuario predeterminado `admin`.
+
+Una vez que el estado del clúster cambie a *Listo*, puedes acceder a la xref:/installation-setup/authentication.adoc[interfaz de usuario] utilizando la URL de gestión que se muestra en la consola.
+
+== 6. Despliega los otros nodos y únelos al clúster.
+
+El despliegue implica instalar el sistema operativo y otros componentes en el host, y luego reiniciar una vez que la instalación se haya completado. Todos los demás nodos se unen al clúster que se creó cuando se desplegó el primer nodo.
+
+Durante la instalación, debes configurar los ajustes del nodo y especificar la dirección de gestión del clúster (IP virtual) y el token del clúster que definiste anteriormente. Si es necesario, puedes configurar más ajustes utilizando un xref:/installation-setup/config/configuration-file.adoc[archivo de configuración].
+
+Cuando el clúster tiene tres o más nodos, los dos nodos añadidos después del primer nodo se promueven automáticamente a nodos de gestión para formar un clúster de alta disponibilidad (HA).
+
+== 7. Crea una red de clúster personalizada (opcional) y una red de VM (requerida).
+
+La red implica tres conceptos principales:
+
+* xref:/networking/cluster-network.adoc#_cluster_network[*Red de clúster*]: Ruta de reenvío aislada para la transmisión del tráfico de red en el clúster {harvester-product-name}.
++
+Durante el despliegue, se crea una red de clúster llamada xref:/networking/cluster-network.adoc#_built_in_cluster_network[`mgmt`] para las comunicaciones intra-clúster. `mgmt` permite que las VMs sean accesibles desde la red de infraestructura (externa al clúster) a la que cada nodo se conecta con NICs de gestión para fines de gestión del clúster. {harvester-product-name} también te permite crear xref:/networking/cluster-network.adoc#_custom_cluster_network[redes de clúster personalizadas] que pueden estar dedicadas al tráfico de VM.
+
+* xref:/networking/cluster-network.adoc#_network_configuration[*Configuración de la red*]: Definición de cómo los nodos del clúster se conectan a una red de clúster específica.
++
+Cada configuración de red corresponde a un conjunto de nodos con especificaciones de red uniformes. Solo los nodos que están cubiertos por la configuración de red pueden acceder a la red de clúster asociada. Este arreglo te ofrece flexibilidad al configurar un clúster heterogéneo, particularmente cuando los nombres de las interfaces de red son diferentes para cada nodo.
+
+* xref:/networking/cluster-network.adoc#_vm_network[*Red de VM*]: Red virtual que las VMs utilizan para comunicarse con otras VMs y la red de infraestructura externa.
++
+Cada red de VM está vinculada a una red de clúster específica, que se utiliza para la transmisión del tráfico de VM. Puedes crear una xref:/networking/vm-network.adoc#_vlan_network[red VLAN] o una xref:/networking/vm-network.adoc#_untagged_network[red sin etiquetar] según tus requisitos, como aislamiento de tráfico, segmentación de red, facilidad de gestión o alineación con el entorno de red externo.
+
+Antes de crear VMs, crea las redes necesarias. Si se adjunta más de una interfaz de red a cada nodo del clúster, considera xref:/networking/cluster-network.adoc#_create_a_new_cluster_network[crear redes de clúster personalizadas] y configuraciones de red para un mejor aislamiento del tráfico. De lo contrario, solo puedes usar la red de gestión para la transmisión del tráfico de VM. A continuación, xref:/networking/vm-network.adoc#_create_a_vm_network[crea una red de VM] que esté vinculada a `mgmt` o a cualquiera de las redes de clúster personalizadas que creaste.
+
+== 8. Importa imágenes de VM.
+
+En la interfaz de usuario, puedes importar ISO, qcow2 y raw xref:/virtual-machines/vm-images/upload-image.adoc[imágenes] subiendo una imagen desde el sistema de archivos local, o especificando la URL de una imagen a la que se pueda acceder desde el clúster.
+
+== 9. Importa claves SSH. (Recomendado)
+
+Puedes almacenar claves públicas SSH en {harvester-product-name}. Cuando se lanza una VM, una clave almacenada puede ser xref:/virtual-machines/access-vm.adoc#_ssh_access[inyectada] en la VM para permitir el acceso seguro a través de SSH. Las claves validadas se muestran en la pantalla *Claves SSH* en la interfaz de usuario.
+
+== 10. Crea VMs.
+
+Puedes crear xref:/virtual-machines/create-vm.adoc[VMs de Linux] utilizando uno de los siguientes métodos:
+
+* interfaz de usuario: En la pantalla *Máquinas Virtuales*, haz clic en *Crear* y configura los ajustes en cada pestaña.
+* Kubernetes API: Crea un objeto `VirtualMachine`.
+* xref:/integrations/terraform/terraform-provider.adoc[Proveedor de Terraform]: Define un bloque de recurso `harvester_virtualmachine`.
+
+Crear xref:/virtual-machines/create-windows-vm.adoc[VMs de Windows] en la interfaz de usuario implica pasos ligeramente diferentes. {harvester-product-name} proporciona una plantilla de VM llamada `windows-iso-image-base-template` que añade un volumen con los controladores Virtio para Windows, lo que agiliza el proceso de configuración de la VM. Si necesitas dispositivos Virtio pero decides no utilizar la plantilla, debes añadir tus propios controladores Virtio para Windows para habilitar la detección correcta del hardware.
+
+== ¿Qué hacer a continuación?
+
+Las siguientes secciones proporcionan guías que te explican cómo hacer copias de seguridad y restaurar máquinas virtuales, gestionar hosts y utilizar {rancher-product-name} con {harvester-product-name}.
+
+* xref:/virtual-machines/backup-restore.adoc[Copias de seguridad de VM, Instantáneas y Restauración]
+* xref:/hosts/hosts.adoc[Gestión de hosts]
+* xref:/integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integración]

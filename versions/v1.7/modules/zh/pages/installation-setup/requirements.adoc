@@ -1,0 +1,247 @@
+= 硬件和网络要求
+:revdate: 2025-12-30
+:page-revdate: {revdate}
+
+作为裸机上的HCI解决方案，安装和运行{harvester-product-name}有最低的节点硬件和网络要求。
+
+需要一个三节点集群才能充分实现多节点功能。添加到集群的第一个节点默认是管理节点。当集群有三个或更多节点时，添加的两个节点会自动提升为管理节点，以形成高可用性（HA）集群。
+
+最新版本支持xref:installation-setup/single-node-clusters.adoc[单节点集群]的部署。此类集群不支持高可用性、多副本和实时迁移。
+
+== 硬件要求
+
+{harvester-product-name}节点具有以下硬件要求和安装、测试建议。
+
+|===
+| 硬件 | 开发/测试 | 生产
+
+| CPU
+| AMD64或ARM64（带硬件辅助虚拟化）；最少8个核心
+| AMD64或ARM64（带硬件辅助虚拟化）；最少16个核心
+
+| 内存
+| 最少32 GB
+| 最少64 GB
+
+| 磁盘容量
+| 最少250 GB（xref:hosts/witness-node.adoc[见证节点]或使用多个磁盘时最少180 GB）
+| 最少500 GB；推荐1 TB或更多
+
+| 磁盘性能
+| 每个磁盘5,000+随机IOPS（SSD/NVMe）；管理节点存储必须满足 https://support.scc.suse.com/s/kb/360045276411[etcd]速度要求。仅支持本地磁盘和硬件独立磁盘冗余阵列。
+| 每个磁盘5,000+随机IOPS（SSD/NVMe）；管理节点存储必须满足 https://support.scc.suse.com/s/kb/360045276411[etcd]速度要求。仅支持本地磁盘和硬件独立磁盘冗余阵列。
+
+| 网卡数量
+| 管理集群网络：需要1个网卡，推荐2个网卡；虚拟机工作负载网络：需要1个网卡，推荐至少2个网卡（不适用于xref:hosts/witness-node.adoc[见证节点]）
+| 管理集群网络：需要1个网卡，推荐2个网卡；虚拟机工作负载网络：需要1个网卡，推荐至少2个网卡（不适用于xref:hosts/witness-node.adoc[见证节点]）
+
+| 网卡速度
+| 最低1 Gbps以太网
+| 最低10 Gbps以太网
+
+| 网络交换机
+| 支持VLAN的端口聚合
+| 支持VLAN的端口聚合
+|===
+
+[IMPORTANT]
+====
+* 不支持混合架构集群。部署单独的集群以避免意外的系统行为。
+* 为了获得最佳效果，请使用 https://www.suse.com/yesCertified/home#search?platforms=1361&platforms=1360&platforms=1355[通过YES认证的硬件]来运行SUSE Linux Micro 5.5/6.0/6.1。{harvester-product-name}基于SUSE Linux Enterprise技术，YES认证的硬件对驱动程序和系统主板的兼容性进行了额外验证。不支持笔记本电脑和嵌套虚拟化。
+* 在{harvester-product-name}上运行的虚拟机不支持嵌套虚拟化。
+* 每个节点必须具有唯一的`product_uuid`（从`/sys/class/dmi/id/product_uuid`获取），以防止在虚拟机实时迁移和其他操作期间发生错误。有关更多信息，请参见 https://github.com/harvester/harvester/issues/4025[问题#4025]。
+* {harvester-product-name}具有xref:networking/cluster-network.adoc#_built_in_cluster_network[内置管理集群网络]（`mgmt`）。为了在生产环境中实现高可用性和最佳性能，请在每个节点中使用至少两个 NIC 来设置管理网络的绑定 NIC（请参见xref:installation-setup/methods/iso-install.adoc#_installation_steps[.iso 映像安装]中的第6步）。您还可以为虚拟机工作负载创建xref:networking/cluster-network.adoc#_custom_cluster_network[自定义集群网络]。每个自定义集群网络需要至少两个额外的 NIC，以在集群的每个相关节点中设置绑定 NIC。xref:hosts/witness-node.adoc[见证节点]不需要额外的 NIC。有关更多信息，请参见 xref:networking/cluster-network.adoc#_concepts[Cluster Network]。
+* 在测试期间，您只能使用一个 NIC 用于xref:networking/cluster-network.adoc#_built_in_cluster_network[内置管理集群网络]（`mgmt`），并且用于测试xref:networking/vm-network.adoc#_create_a_vm_network[虚拟机网络]也由`mgmt`承载。高可用性和最佳性能无法得到保证。
+* 如果磁盘仅满足最低所需容量，您可能在升级过程中遇到与 xref:upgrades/upgrades.adoc#_free_system_partition_space_requirement[系统分区空间要求] 相关的问题。
+* 在 v1.7.0 中，支持传统 BIOS 启动已被弃用，并将在后续版本中移除。使用此启动模式的现有 {harvester-product-name} 集群将继续运行，但升级到更高版本可能需要在 UEFI 模式下重新安装。为避免问题和中断，请在新安装中使用 UEFI。
+====
+
+
+=== CPU 规格
+
+xref:virtual-machines/live-migration.adoc[实时迁移] 仅在集群中所有物理服务器的 CPU 具有相同规格时才能正常工作。此要求适用于所有依赖于实时迁移功能的操作，例如在启用 xref:hosts/hosts.adoc#_node_maintenance[维护模式] 时自动迁移虚拟机。
+
+更新的 CPU（即使来自同一供应商、同一代和同一家族）可能具有不同的能力，这些能力可能会暴露给虚拟机操作系统。为确保虚拟机的稳定性，实时迁移会检查 CPU 能力是否一致，并在源和目标不兼容时阻止迁移尝试。
+
+在创建集群、向集群添加更多主机和更换主机时，请始终使用具有相同规格的 CPU，以防止操作限制。
+
+== 网络要求
+
+节点在安装时具有以下网络要求。
+
+=== 节点的端口要求
+
+节点需要以下端口连接或入站规则。通常，所有出站流量都是允许的。
+
+|===
+| 协议 | 端口 | 源 | 说明
+
+| TCP
+| 2379
+| 管理节点
+| Etcd 客户端端口
+
+| TCP
+| 2381
+| 管理节点
+| Etcd 指标收集
+
+| TCP
+| 2380
+| 管理节点
+| Etcd 对等端口
+
+| TCP
+| 2382
+| 管理节点
+| Etcd 客户端端口（仅限 HTTP）
+
+| TCP
+| 10010
+| 管理节点和计算节点
+| Containerd
+
+| TCP
+| 6443
+| 管理节点
+| Kubernetes API
+
+| TCP
+| 9345
+| 管理节点
+| Kubernetes API
+
+| TCP
+| 10252
+| 管理节点
+| Kube-controller-manager 健康检查
+
+| TCP
+| 10257
+| 管理节点
+| Kube-controller-manager 安全端口
+
+| TCP
+| 10251
+| 管理节点
+| Kube-scheduler 健康检查
+
+| TCP
+| 10259
+| 管理节点
+| Kube-scheduler 安全端口
+
+| TCP
+| 10250
+| 管理节点和计算节点
+| Kubelet
+
+| TCP
+| 10256
+| 管理节点和计算节点
+| Kube-proxy 健康检查
+
+| TCP
+| 10258
+| 管理节点
+| cloud-controller-manager
+
+| TCP
+| 10260
+| 管理节点
+| cloud-controller-manager
+
+| TCP
+| 9091
+| 管理节点和计算节点
+| Canal calico-node felix
+
+| TCP
+| 9099
+| 管理节点和计算节点
+| Canal CNI 健康检查
+
+| UDP
+| 8472
+| 管理节点和计算节点
+| 使用 VxLAN 的 Canal CNI
+
+| TCP
+| 2112
+| 管理节点
+| Kube-vip
+
+| TCP
+| 6444
+| 管理节点和计算节点
+| RKE2 代理
+
+| TCP
+| 10246/10247/10248/10249
+| 管理节点和计算节点
+| Nginx 工作进程（Nginx worker process）
+
+| TCP
+| 8181
+| 管理节点和计算节点
+| Nginx-ingress-controller
+
+| TCP
+| 8444
+| 管理节点和计算节点
+| Nginx-ingress-controller
+
+| TCP
+| 10245
+| 管理节点和计算节点
+| Nginx-ingress-controller
+
+| TCP
+| 80
+| 管理节点和计算节点
+| Nginx
+
+| TCP
+| 9796
+| 管理节点和计算节点
+| Node-exporter
+
+| TCP
+| 30000-32767
+| 管理节点和计算节点
+| NodePort 端口范围
+
+| TCP
+| 22
+| 管理节点和计算节点
+| sshd
+
+| UDP
+| 68
+| 管理节点和计算节点
+| NetworkManager
+
+| TCP
+| 3260
+| 管理节点和计算节点
+| iscsid
+|===
+
+=== 与 {rancher-product-name} 集成的端口要求
+
+如果您想要 xref:integrations/rancher/rancher-integration.adoc[与 {rancher-product-name}] 集成，您需要确保所有 {harvester-product-name} 节点可以连接到 {rancher-product-name} 负载均衡器的 TCP 端口 *443*。
+
+当从 {rancher-product-name} 向 {harvester-product-name} 提供带有 Kubernetes 集群的虚拟机时，您需要能够连接到 {rancher-product-name} 负载均衡器的 TCP 端口 *443*。否则，集群将无法由 {rancher-product-name} 管理。有关更多信息，请参阅 https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/about-rancher/architecture/communicating-with-downstream-clusters.html[Rancher Architecture]。
+
+=== K3s 和 RKE2 集群的端口要求
+
+有关在{harvester-product-name}虚拟机内部署的客户集群的端口要求，请参阅以下链接：
+
+* https://documentation.suse.com/cloudnative/k3s/latest/en/networking/networking.html[K3s 网络]
+* https://documentation.suse.com/cloudnative/rke2/latest/en/install/requirements.html#_networking[RKE2 网络]
+
+== 时间要求
+
+可靠的网络时间协议（NTP）服务器对于维护 Kubernetes 集群中所有节点的正确系统时间至关重要，尤其是在运行{harvester-product-name}时。Kubernetes 依赖于 etcd，一个分布式键值存储，它需要精确的时间同步以确保数据一致性，并防止领导者选举、日志复制和集群稳定性的问题。
+
+确保集群中的时间准确且一致对于可靠性、安全性和整体系统完整性至关重要。

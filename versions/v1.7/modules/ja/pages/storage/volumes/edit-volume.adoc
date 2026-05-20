@@ -1,0 +1,39 @@
+= ボリュームを編集する
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+ボリュームを作成した後、`⋮`ボタンをクリックして`Edit Config`オプションを選択することで、ボリュームを編集できます。
+
+== ボリュームを拡張する
+
+`Size`パラメータの値を直接増加させることで、ボリュームを拡張できます。予期しないデータのR/Wによる干渉を防ぐために、{harvester-product-name}は`offline`の拡張のみをサポートしています。VMに接続されている場合は、まずVMをシャットダウンするかボリュームを切り離す必要があります。切り離されたボリュームは、自動的に https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[メンテナンスモード]でランダムなノードに接続され、自動的に拡張されます。
+
+image::volume/expand-volume.png[expand-volume]
+
+=== オンラインボリューム拡張
+
+ダウンタイムを最小限に抑えるために、{harvester-product-name}は実行中の仮想マシンに接続されているボリュームや、ゲストクラスター内の実行中のポッドに接続されているPVCを拡張することを許可します。基盤となるストレージプロバイダーによっては、この機能を使用するために追加の手順が必要な場合があります。
+
+* *{longhorn-product-name}*: {harvester-product-name}は、Longhorn Data Engineのバージョン間に違いがあっても、{longhorn-product-name}がオンラインボリューム拡張をサポートしていると見なします。現在、V1 Data Engineはオンラインボリューム拡張を完全にサポートしていますが、V2 Data Engineはボリュームの接続状態に関係なく、ボリューム拡張を全くサポートしていません。
+
+* *サードパーティストレージ*: {harvester-product-name}は、デフォルトでサードパーティストレージに対するオンラインボリューム拡張リクエストを拒否します。ストレージプロバイダーがオンラインボリューム拡張をサポートしていることを確認した場合は、xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`]設定を使用して、そのストレージプロバイダーを検証済みとしてマークできます。
+
+[IMPORTANT]
+====
+ホットプラグされたファイルシステムボリュームのオンラインリサイズはサポートされていません。ファイルシステムボリュームが`virt-launcher`ポッドにバインドマウントされている場合、新しいファイルシステムボリュームをホットプラグすると、前のボリュームに対して`NodeUnPublish`および`NodeUnstage`操作がトリガーされ、さらなるリサイズが妨げられます。
+
+さらに、仮想マシンが実行中の間に、xref:virtual-machines/edit-vm.adoc[Edit Config]機能を{harvester-product-name} UI *Virtual Machines*画面で使用してボリュームをリサイズすることはできません。特定の制限により、現在のUIはボリューム拡張操作の結果を正確に表示できません。詳細については、 https://github.com/harvester/harvester/issues/8669[問題 #8669]を参照してください。
+====
+
+== 失敗したボリューム拡張をキャンセルする
+
+拡張中に{longhorn-product-name}の容量より大きなサイズを指定すると、ボリューム拡張のステータスは`Resizing`に固定されます。失敗したボリューム拡張は、`⋮`ボタンをクリックして`Cancel Expand`オプションを選択することでキャンセルすることができます。
+
+image::volume/cancel-failed-volume-expansion.png[cancel-failed-volume-expansion]
+
+== 既存のボリュームのStorageClassを変更する
+
+既存のボリュームのStorageClassは変更できません。ただし、以下の手順に従ってスナップショットから新しいボリュームを復元する際にStorageClassを変更することができます：
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[スナップショットを取得する]。
+. xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[スナップショットを使用してボリュームを復元する際にStorageClassを選択する]。

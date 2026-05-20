@@ -1,0 +1,140 @@
+= CloudInit CRD
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+`CloudInit` CRDを使用して、{harvester-product-name}オペレーティングシステムの設定を手動またはGitOpsソリューションを使用して構成できます。
+
+== 背景
+
+{harvester-product-name}オペレーティングシステムは、 https://github.com/rancher/elemental-toolkit[elemental-toolkit]を使用しており、これは独自の https://rancher.github.io/elemental-toolkit/docs/reference/cloud_init/[cloud-initサポート]を持っています。
+
+インストールプロセス中に構成された設定は、`/oem`ディレクトリ内にある`elemental` cloud-initファイルに書き込まれます。オペレーティングシステムは不変であるため、cloud-initファイルはノード固有の設定が再起動ごとに適用されることを保証します。
+
+`CloudInit` CRDは、Kubernetes CRDを介してcloud-initファイルを公開します。これにより、インストール後にノード固有の設定を変更することができ、ルートファイルシステムを読み書き可能にする手順を踏む必要がありません。
+
+さらに、`CloudInit` CRDは永続化され、基盤となるホストと同期されるため、オペレーティングシステムに直接加えられた変更が、ノードが再起動およびアップグレードされるたびに失われることはありません。
+
+[NOTE]
+====
+
+`CloudInit` CRDは、クラスター範囲のリソースです。リソースにアクセスするために必要な権限がユーザーアカウントに付与されていることを確認してください（{rancher-product-name}ロールベースのアクセス制御を介して）。
+====
+
+
+== はじめに
+
+以下の例は、既存の{harvester-product-name}クラスター内のすべてのノードにSSHキーを追加します。
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: my-ssh-keys
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-my-ssh-keys
+  contents: |
+    stages:
+      network:
+        - name: "add my ssh keys"
+          authorized_keys:
+            rancher:
+            - ssh-rsa key1
+            - ssh-rsa key2
+  paused: false
+----
+
+`spec`フィールドには次の内容が含まれています：
+
+* `matchSelector (required)`:変更を適用するノードを特定するために使用されるラベルセレクター。`harvesterhci.io/managed: "true"`ラベルを使用してすべてのノードを選択できます。
+* `filename (required)`:`/oem`内のファイル名。`/oem`内のcloud-initファイルは、アルファベット順に適用されます。これを使用して、ブート中にファイルの変更が適用されることを保証できます。
+* `content (required)`:ターゲットノードに書き込まれるElemental cloud-initリソースのインラインコンテンツ。
+* `paused (optional)`:`CloudInit` CRDの調整を一時停止するために使用されます。{harvester-product-name}コントローラーは、`CloudInit` CRDによって管理されるElemental cloud-initファイルを監視します。これらのファイルに加えられた直接の変更は、CRDが一時停止されていない限り、定義された状態に即座に調整されます。
+
+オブジェクトが作成されると、ターゲットノードにログインして結果を確認できます。
+
+次の例では、`/oem/99-my-ssh-keys.yaml`という名前のファイルが作成され、その後{harvester-product-name}コントローラーによって監視されます。
+
+----
+harvester-qhgd4:/oem # more 99-my-ssh-keys.yaml
+stages:
+  network:
+    - name: "add my ssh keys"
+      authorized_keys:
+        rancher:
+        - ssh-rsa key1
+        - ssh-rsa key2
+----
+
+`status`サブリソースは、基盤となるノードへの変更の展開を追跡するために使用できます。
+
+次の例では、`status`の値は、変更がクラスター内のすべての3つのノードに適用されたことを示しています。
+
+----
+status:
+  rollouts:
+    harvester-kfs2c:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-qhgd4:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-rmvzg:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+[NOTE]
+====
+
+cloud-initの変更が適用された後、`elemental-toolkit`が要求された変更をオペレーティングシステムに適用できるように、ノードを再起動する必要があります。
+====
+
+
+`CloudInit` CRDを削除すると、基盤となるノードから関連ファイルが削除されます。他のcloud-initリソースと同様に、この変更の影響は、影響を受けたノードが再起動されるまで現れません。
+
+https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}]および`CloudInit` CRDを活用して、{harvester-product-name}オペレーティングシステムへの変更を管理することをお勧めします。

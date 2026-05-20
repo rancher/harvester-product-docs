@@ -1,0 +1,146 @@
+= Grupo de IP
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+El grupo de IP es una solución de gestión de direcciones IP (IPAM) integrado exclusivamente disponible para {harvester-product-name} equilibradores de carga (LBs).
+
+== Funciones
+
+* *Múltiples rangos de IP:* Cada grupo de IP puede contener múltiples rangos de IP o CIDRs.
+* *Historial de asignación:* El grupo de IP lleva un registro del historial de asignación de cada dirección IP y prioriza la asignación de direcciones previamente asignadas por el nombre del equilibrador de carga.
++
+[,yaml]
+----
+status:
+  allocatedHistory:
+    192.168.178.8: default/rke2-default-lb-pool-2fab9ac0
+----
+
+* *Ámbito:* Los grupos de IP pueden estar confinados a una red, proyecto, espacio de nombres o clúster de invitados en particular.
+
+== Creando un grupo de IP
+
+. En la interfaz de usuario {harvester-product-name}, ve a *Redes -> Grupos de IP*.
+. Selecciona *Crear*.
+. Especifica un nombre para el grupo de IP.
+. En la pestaña *Rango*, especifica uno o más rangos de IP.
++
+image::networking/multiple-ranges.png[Múltiples rangos de IP en un grupo de IP]
+. En la pestaña *Selector*, especifica el nivel de prioridad y el alcance (espacio de nombres) del grupo de IP.
++
+image::networking/ippool-scope.png[Alcance del grupo de IP]
+
+=== Creando un grupo de IP utilizando la interfaz de usuario de Rancher
+
+Si importaste el clúster {harvester-product-name} en {rancher-short-name}, puedes crear un grupo de IP utilizando la interfaz de usuario {rancher-short-name} (*Gestión de Virtualización* -> Grupo de IP: Crear*). Sin embargo, la sección *Alcance* en la pestaña *Selector* requiere que especifiques el proyecto y el clúster de Kubernetes de invitados, además del espacio de nombres. Para más información, consulta xref:integrations/rancher/virtualization-management.adoc#_multi_tenancy_example[Ejemplo de Multi-Tenencia] y https://documentation.suse.com/cloudnative/rancher-manager/latest/en/cluster-admin/manage-clusters/projects-and-namespaces.html#_about_projects[Proyectos y Espacios de Nombres de Kubernetes con Rancher].
+
+Un grupo de IP se designa como un recurso global cuando la sección *Alcance* contiene solo una entrada con los campos *Proyecto*, *espacio de nombres* y *clúster de Kubernetes de invitados* establecidos en *Todos*.
+
+== Política de selección
+
+Cada grupo de IP tendrá un rango específico, y puedes especificar los requisitos correspondientes en el LB `annotations`. Los grupos de IP que cumplan con los requisitos especificados asignarán automáticamente direcciones IP a los LBs.
+
+* Los LBs utilizan las siguientes anotaciones para expresar requisitos (todas las anotaciones son opcionales):
+ ** `loadbalancer.harvesterhci.io/network` especifica la red de VM que utilizan los nodos del clúster invitado.
+ ** `loadbalancer.harvesterhci.io/project` y `loadbalancer.harvesterhci.io/namespace` identifican el proyecto y el espacio de nombres de las VMs que componen el clúster de invitados.
+ ** `loadbalancer.harvesterhci.io/cluster` denota el nombre del clúster de invitados.
+* El grupo de IP tiene un selector, que incluye red y alcance, para coincidir con los requisitos del LB.
+ ** La red es una condición estricta. El grupo de IP opcional debe coincidir con el valor de la anotación del LB `loadbalancer.harvesterhci.io/network`.
+ ** Cada grupo de IP, excepto el grupo de IP global, tiene un alcance único diferente de los demás si su prioridad es `0`. El proyecto, el espacio de nombres o el nombre del clúster de los LBs deben estar en el alcance del grupo de IP si quieren obtener una IP de este grupo.
+* `spec.selector.priority` especifica la prioridad del grupo de IP. Cuanto mayor sea el número, mayor será la prioridad. Si la prioridad no es `0`, el valor debe diferir. La prioridad te ayuda a migrar el antiguo grupo de IP al nuevo.
+* Si el grupo de IP tiene un alcance que coincide con todos los proyectos, espacios de nombres y clústeres invitados, se llama grupo de IP global, y solo se permite un grupo de IP global. Si no hay un grupo de IP que coincida con los requisitos del LB, el IPAM asignará una dirección IP del grupo de IP global si existe.
+
+=== Ejemplos
+
+* *Ejemplo 1:* Deseas configurar un grupo de IP dentro del rango `192.168.100.0/24` para el espacio de nombres `default`. En este escenario, todos los equilibradores de carga dentro del espacio de nombres `default` recibirán una dirección IP de este grupo de IP designado:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: default-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.100.0/24
+  selector:
+    scope:
+      namespace: default
+----
+
+* *Ejemplo 2:* Tienes un clúster de invitados `rke2` desplegado dentro de la red `default/vlan1`, y su nombre `project/namespace` es `product/default`. Si deseas configurar un rango exclusivo para ese grupo de IP `192.168.10.10-192.168.10.20`. Consulta la siguiente configuración `YAML`:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: rke2-ip-pool
+spec:
+  ranges:
+  - subnet: 192.168.10.0/24
+    rangeStart: 192.168.10.10
+    rangeEnd: 192.168.10.20
+  selector:
+    network: default/vlan1
+    scope:
+    - project: product
+      namespace: default
+      guestCluster: rke2
+----
+
+* *Ejemplo 3:* Si has especificado el grupo de IP `default-ip-pool` para el espacio de nombres `default`, deseas migrar el grupo de IP `default-ip-pool` a un grupo de IP diferente `default-ip-pool-2` con rango `192.168.200.0/24`. No se permite especificar más de un grupo de IP para el mismo alcance, pero puedes dar al grupo de IP `default-ip-pool-2` una prioridad mayor que `default-ip-pool`. Consulta la siguiente configuración `YAML`:
++
+[,yaml]
+----
+  apiVersion: networking.harvesterhci.io/v1beta1
+  kind: IPPool
+  metadata:
+    name: default-ip-pool-2
+  spec:
+    ranges:
+    - subnet: 192.168.200.0/24
+    selector:
+      priority: 1  # The priority is higher than default-ip-pool
+      scope:
+        namespace: default
+----
+
+* *Ejemplo 4:* Deseas configurar un grupo de IP global con un rango CIDR de `192.168.20.0/24`:
++
+[,yaml]
+----
+apiVersion: networking.harvesterhci.io/v1beta1
+kind: IPPool
+metadata:
+  name: global-ip-pool
+labels:
+  loadbalancer.harvesterhci.io/global-ip-pool: 'true' # Added by the controller automatically
+spec:
+  ranges:
+  - subnet: 192.168.20.0/24
+  selector:
+    scope:
+    - project: "*"
+      namespace: "*"
+      guestCluster: "*"
+----
+
+== Política de asignación
+
+* El grupo de IP prioriza la asignación de direcciones IP previamente asignadas en función de su historial de asignación.
+* Las direcciones IP se asignan en orden ascendente.
+
+== Prácticas recomendadas
+
+=== Grupo de IP para equilibrador de carga de tipo VM
+
+* Crea un grupo de IP <<Creating an IP pool,usando la interfaz {harvester-product-name}>>, que deja en blanco los campos *Proyecto* y *Clúster de Kubernetes de invitados* del selector de alcance.
+
+* Si debes <<Creating an IP pool using the Rancher UI,usar la interfaz {rancher-short-name}>>, establece los campos *Proyecto* y *Clúster de Kubernetes de invitados* en *Todos* o *Ninguno*.
+
+=== Grupo de IP para equilibrador de carga de tipo clúster de invitados
+
+* Crea un grupo de IP <<Creating an IP pool using the Rancher UI,usando la interfaz {rancher-short-name}>>, que te permite especificar el proyecto objetivo y el clúster de Kubernetes de invitados para una mejor gestión y aislamiento de recursos.
+
+* Ten cuidado al crear grupos de IP globales. Un solo clúster de invitados puede agotar todo el grupo, dejando a otros clústeres incapaces de provisionar servicios. Además, no puedes eliminar un grupo si alguna de las direcciones aún está en uso.

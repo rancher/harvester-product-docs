@@ -1,0 +1,49 @@
+= Tareas posteriores a la instalación
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Puedes mejorar la seguridad y el rendimiento de tu clúster {harvester-product-name} realizando los siguientes procedimientos una vez completada la instalación.
+
+== Desactiva la autenticación por contraseña SSH
+
+Por defecto, la autenticación por contraseña SSH está habilitada en los nodos {harvester-product-name} durante la instalación. Esto permite al administrador acceder a los nodos para el diagnóstico posterior a la instalación.
+
+Sin embargo, una vez completada la instalación, se recomienda desactivar la autenticación por contraseña SSH. Puedes ejecutar el siguiente comando, que utiliza `kubectl` para aplicar una https://docs.harvesterhci.io/v1.6/advanced/cloudinitcrd[`CloudInit`] configuración, para desactivar la autenticación por contraseña SSH en todos los nodos {harvester-product-name}:
+
+[,shell]
+----
+cat <<EOF | kubectl apply -f -
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: ssh-config
+spec:
+  matchSelector: 
+    harvesterhci.io/managed: "true" # apply to all nodes
+  filename: 99-ssh-config
+  contents: |
+    stages:
+      network:
+      - name: "disable password login"
+        commands:
+        - sed -i -E 's/^#?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
+        - sed -i -E 's/^#?UsePAM .*/UsePAM no/' /etc/ssh/sshd_config
+        - systemctl restart sshd
+  paused: false
+EOF
+----
+
+[NOTE]
+====
+* El campo `matchSelector` se utiliza para seleccionar nodos {harvester-product-name} con etiquetas específicas.
+* Todos los nodos afectados deben reiniciarse para que la configuración `CloudInit` tenga efecto.
+====
+
+Una vez aplicada la configuración, se deniegan todos los intentos de acceder a los nodos {harvester-product-name} con la contraseña SSH.
+
+[,shell]
+----
+$ ssh -o PreferredAuthentications=password rancher@<node-ip>
+rancher@<node-ip>: Permission denied (publickey,keyboard-interactive).
+----

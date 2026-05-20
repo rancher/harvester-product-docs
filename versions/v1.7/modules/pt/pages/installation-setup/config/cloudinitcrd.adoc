@@ -1,0 +1,140 @@
+= CloudInit CRD
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Você pode usar o `CloudInit` CRD para configurar as configurações do sistema operacional {harvester-product-name} manualmente ou usando soluções GitOps.
+
+== Background
+
+O {harvester-product-name} sistema operacional usa o https://github.com/rancher/elemental-toolkit[elemental-toolkit], que possui uma forma única de https://rancher.github.io/elemental-toolkit/docs/reference/cloud_init/[suporte ao cloud-init].
+
+As configurações configuradas durante o processo de instalação são escritas no `elemental` arquivo cloud-init no diretório `/oem`. Como o sistema operacional é imutável, o arquivo cloud-init garante que as configurações específicas do nó sejam aplicadas em cada reinicialização.
+
+O `CloudInit` CRD expõe o arquivo cloud-init através de um CRD do Kubernetes. Isso permite que você modifique as configurações específicas do nó após a instalação sem precisar tomar medidas para tornar o sistema de arquivos raiz gravável.
+
+Além disso, o `CloudInit` CRD é persistido e sincronizado com os hosts subjacentes para que as alterações feitas diretamente no sistema operacional não sejam perdidas sempre que os nós forem reinicializados e atualizados.
+
+[NOTE]
+====
+
+O `CloudInit` CRD é um recurso com escopo de cluster. Certifique-se de que sua conta de usuário tenha as permissões necessárias para acessar o recurso (via {rancher-product-name} controle de acesso com base em função).
+====
+
+
+== Conceitos Básicos
+
+O seguinte exemplo adiciona chaves SSH a todos os nós em um {harvester-product-name} cluster existente.
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: my-ssh-keys
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-my-ssh-keys
+  contents: |
+    stages:
+      network:
+        - name: "add my ssh keys"
+          authorized_keys:
+            rancher:
+            - ssh-rsa key1
+            - ssh-rsa key2
+  paused: false
+----
+
+O `spec` campo contém o seguinte:
+
+* `matchSelector (required)`: Seletor de rótulos usado para identificar os nós aos quais a alteração deve ser aplicada. Você pode usar o `harvesterhci.io/managed: "true"` rótulo para selecionar todos os nós.
+* `filename (required)`: Nome do arquivo em `/oem`. Os arquivos cloud-init em `/oem` são aplicados em ordem alfabética. Isso pode ser usado para garantir que as alterações de arquivo sejam aplicadas durante a inicialização.
+* `content (required)`: Conteúdo inline para o recurso cloud-init Elemental que é escrito para os nós de destino.
+* `paused (optional)`: Usado para pausar a reconciliação do `CloudInit` CRD. Os controladores {harvester-product-name} monitoram os arquivos cloud-init Elemental que são gerenciados pelo `CloudInit` CRD. Mudanças diretas feitas nesses arquivos são imediatamente reconciliadas de volta ao estado definido, a menos que o CRD esteja pausado.
+
+Uma vez que o objeto é criado, você pode fazer login nos nós de destino para verificar os resultados.
+
+No exemplo a seguir, um arquivo chamado `/oem/99-my-ssh-keys.yaml` é criado e posteriormente monitorado pelos {harvester-product-name} controladores.
+
+----
+harvester-qhgd4:/oem # more 99-my-ssh-keys.yaml
+stages:
+  network:
+    - name: "add my ssh keys"
+      authorized_keys:
+        rancher:
+        - ssh-rsa key1
+        - ssh-rsa key2
+----
+
+O `status` sub-recurso pode ser usado para rastrear a implantação de uma mudança nos nós subjacentes.
+
+No exemplo a seguir, os `status` valores indicam que a mudança foi aplicada a todos os três nós no cluster.
+
+----
+status:
+  rollouts:
+    harvester-kfs2c:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-qhgd4:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T04:00:00Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+    harvester-rmvzg:
+      conditions:
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: ""
+        reason: CloudInitApplicable
+        status: "True"
+        type: Applicable
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: Local file checksum is the same as the CloudInit checksum
+        reason: CloudInitChecksumMatch
+        status: "False"
+        type: OutOfSync
+      - lastTransitionTime: "2024-08-26T03:57:33Z"
+        message: 99-my-ssh-keys.yaml is present under /oem
+        reason: CloudInitPresentOnDisk
+        status: "True"
+        type: Present
+----
+
+[NOTE]
+====
+
+Uma vez que as mudanças do cloud-init são aplicadas, você deve reiniciar os nós para garantir que o `elemental-toolkit` aplique as mudanças solicitadas ao sistema operacional.
+====
+
+
+Excluir o `CloudInit` CRD resulta na remoção de arquivos associados dos nós subjacentes. Assim como em outros recursos do cloud-init, os efeitos dessa mudança não são exibidos até que os nós impactados sejam reiniciados.
+
+Você é encorajado a aproveitar https://documentation.suse.com/cloudnative/continuous-delivery/[{fleet-product-name}] e o `CloudInit` CRD para gerenciar mudanças no sistema operacional {harvester-product-name}.

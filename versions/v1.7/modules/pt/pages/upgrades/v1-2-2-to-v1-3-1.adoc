@@ -1,0 +1,89 @@
+= Atualize de v1.2.2/v1.3.0 para v1.3.1
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== Informações gerais
+
+Um botão *Upgrade* aparece na tela *Dashboard* sempre que uma nova versão {harvester-product-name} que você pode fazer upgrade se torna disponível. Para mais informações, veja xref:./upgrades.adoc#_start_an_upgrade[Iniciar o upgrade].
+
+Para ambientes air-gapped, veja xref:./upgrades.adoc#_prepare_an_air_gapped_upgrade[Preparar um upgrade air-gapped].
+
+== Problemas conhecidos
+
+=== 1. Upgrade do cluster travado após o primeiro nó ser atualizado.
+
+[TIP]
+====
+Para evitar que esse problema ocorra, rotule o `local-kubeconfig` segredo antes de iniciar o processo de upgrade.
+`kubectl label secret local-kubeconfig -n fleet-local cluster.x-k8s.io/cluster-name=local`
+====
+
+Ao fazer upgrade de um Harvester cluster de v1.2.2 ou v1.3.0 para v1.3.1, o processo de upgrade fica travado após o primeiro nó ser atualizado.
+
+Exemplo:
+
+image::upgrade/known_issues/6041-stuck-on-first-node.png[]
+
+Para solucionar esse problema, siga estas etapas:
+
+. Identifique o status do cluster:
++
+[,sh]
+----
+ kubectl get clusters.provisioning.cattle.io local -n fleet-local -o yaml
+----
++
+Exemplo de saída:
++
+[,console]
+----
+...
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Updated
+  - lastUpdateTime: "2024-06-18T23:37:39Z"
+    message: 'configuring bootstrap node(s) custom-9cb22ccf7984: waiting for kubelet to update'
+    reason: Waiting
+    status: Unknown
+    type: Provisioned
+----
++
+Se a saída incluir a mensagem `waiting for kubelet`, continue para o próximo passo.
++
+. Verifique os logs do pod capi-controller-manager:
++
+[,sh]
+----
+kubectl logs -n cattle-provisioning-capi-system deployment/capi-controller-manager
+----
++
+Se a saída for semelhante ao seguinte exemplo, o problema provavelmente existe no cluster.
++
+[,console]
+----
+2024-06-19T08:54:22.407423986Z W0619 08:54:22.407257       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:54:22.407470069Z E0619 08:54:22.407283       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153396619Z W0619 08:55:05.153190       1 reflector.go:424] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: failed to list *v1.Node: Unauthorized
+2024-06-19T08:55:05.153438978Z E0619 08:55:05.153217       1 reflector.go:140] k8s.io/client-go@v0.26.1/tools/cache/reflector.go:169: Failed to watch *v1.Node: failed to list *v1.Node: Unauthorized
+----
++
+. Aplique a seguinte solução alternativa para retomar o upgrade:
++
+Mate e reinicie o pod capi-controller-manager.
++
+Exemplo:
++
+[,sh]
+----
+kubectl rollout restart deployment/capi-controller-manager -n cattle-provisioning-capi-system
+----
+
+Problema relacionado: https://github.com/harvester/harvester/issues/6041[#6041]
+
+'''
+
+=== 2. A limpeza automática de imagens não está funcionando
+
+Porque a ISO do Harvester publicada contém uma lista de imagens incompleta, a limpeza automática de imagens não pode ser realizada durante um upgrade de v1.2.2 para v1.3.1. Esse problema não bloqueia o upgrade, e você pode usar https://github.com/harvester/upgrade-helpers/blob/main/bin/harv-purge-images.sh[este script] para limpar manualmente as imagens de contêiner após o upgrade ser concluído. Para mais informações, veja https://github.com/harvester/harvester/issues/6620[Problema #6620].

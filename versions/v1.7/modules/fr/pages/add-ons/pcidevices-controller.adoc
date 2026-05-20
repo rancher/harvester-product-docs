@@ -1,0 +1,158 @@
+= Contrôleur de périphériques PCI
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Un `PCIDevice` dans SUSE® Virtualization représente un périphérique hôte avec une adresse PCI.
+Les périphériques peuvent être passés par l'hyperviseur vers une VM en créant une ressource `PCIDeviceClaim`, ou en utilisant l'interface utilisateur pour activer le dispositif d'intercommunication (pass-through). Passer un périphérique à travers l'hyperviseur signifie que la VM peut accéder directement au périphérique et en possède effectivement le contrôle. Une VM peut même installer ses propres pilotes pour ce périphérique.
+
+Cela est réalisé en utilisant le produit complémentaire `pcidevices-controller`.
+
+Pour utiliser la fonctionnalité des périphériques PCI, les utilisateurs doivent d'abord activer le produit complémentaire `pcidevices-controller`.
+
+image::vm-import-controller/EnableAddon.png[]
+
+Une fois le produit complémentaire `pcidevices-controller` déployé avec succès, il peut falloir quelques minutes pour qu'il effectue une analyse et que les CRD de périphériques PCI deviennent disponibles.
+
+image::pcidevices/PcideviceEnabled.png[]
+
+== Activer le dispositif d'intercommunication (pass-through) sur un périphérique PCI
+
+. Allez maintenant à la page `Advanced -> PCI Devices`{nbsp}:
++
+image::pcidevices/advanced-pcidevices-index.png[]
+
+. Recherchez votre périphérique par nom de fournisseur (par exemple, NVIDIA, Intel, etc.) ou par nom de périphérique.
++
+image::pcidevices/search-pcidevices.png[]
+
+. Sélectionnez les périphériques que vous souhaitez activer pour le dispositif d'intercommunication (pass-through){nbsp}:
++
+image::pcidevices/select-pcidevices.png[]
+
+. Puis cliquez sur *Activer le dispositif d'intercommunication (pass-through)* et lisez le message d'avertissement. Si vous souhaitez toujours activer ces périphériques, cliquez sur *Activer* et attendez que tous les périphériques soient `Enabled`.
++
+[CAUTION]
+====
+Veuillez ne pas utiliser de périphériques PCI `host-owned` (par exemple, les NIC de gestion et VLAN). Une allocation incorrecte des périphériques peut causer des dommages à votre cluster, y compris des pannes de nœuds.
+====
++
+image::pcidevices/enable-pcidevices-inprogress.png[]
++
+image::pcidevices/enable-pcidevices-done.png[]
+
+== Attacher des périphériques PCI à une VM
+
+Après avoir activé ces périphériques PCI, vous pouvez naviguer vers la page *Machines Virtuelles* et sélectionner *Modifier la configuration* pour passer ces périphériques.
+
+image::pcidevices/vm-pcidevices-edit-config.png[]
+
+Sélectionnez *Périphériques PCI* et utilisez le menu déroulant *Périphériques PCI disponibles*. Sélectionnez les périphériques que vous souhaitez attacher dans la liste affichée, puis cliquez sur *Enregistrer*.
+
+image::pcidevices/vm-pcidevices-attach.png[]
+
+== Utilisation d'un périphérique PCI avec dispositif d'intercommunication (pass-through) à l'intérieur de la VM
+
+Démarrez la VM et exécutez `lspci` à l'intérieur de la VM, les périphériques PCI attachés apparaîtront, bien que l'adresse PCI dans la VM ne corresponde pas nécessairement à l'adresse PCI dans l'hôte.
+
+== Installation des pilotes pour votre périphérique PCI à l'intérieur de la VM
+
+C'est comme installer des pilotes sur l'hôte. La fonctionnalité de dispositif d'intercommunication (pass-through) PCI liera le périphérique hôte au pilote `vfio-pci`, ce qui permet aux VM d'utiliser leurs propres pilotes.
+
+== Problèmes connus
+
+* https://github.com/harvester/harvester/issues/6648[Problème #6648]{nbsp}: Une machine virtuelle peut être programmée sur un nœud incorrect si le cluster a plusieurs instances du même périphérique PCI. 
+
+Le produit complémentaire pcidevices-controller utilise actuellement des descripteurs de ressources uniques pour publier des périphériques au kubelet. Si plusieurs `PCIDeviceClaims` du même type de périphérique existent dans le cluster, le même descripteur de ressource unique est utilisé pour ces `PCIDeviceClaims`, et donc la machine virtuelle peut être programmée sur un nœud incorrect. Pour garantir que le bon périphérique et le bon nœud sont utilisés, sélectionnez *Exécuter la VM sur un nœud spécifique* lors de la configuration des paramètres *Planification des nœuds*.
+
+image::pcidevices/vm-scheduling.png[]
+
+== Périphériques réseau SR-IOV
+
+image::pcidevices/SriovNetworkDevicesLink.png[]
+
+Le produit complémentaire `pcidevices-controller` peut désormais scanner les interfaces réseau sur les hôtes sous-jacents et vérifier si elles prennent en charge les fonctions virtuelles SRIOV (VFs). Si un périphérique valide est trouvé, `pcidevices-controller` générera un nouvel objet `SRIOVNetworkDevice`.
+
+image::pcidevices/SriovNetworkDevicesList.png[]
+
+Pour créer des VFs sur un SriovNetworkDevice, vous pouvez cliquer sur *⋮ -> Activer* puis définir le *Nombre de fonctions virtuelles*.
+
+image::pcidevices/SriovNetworkDeviceEnable.png[]
+
+image::pcidevices/SriovNetworkVFDefinition.png[]
+
+Le `pcidevices-controller` définira les VFs sur l'interface réseau et rapportera le nouvel état du périphérique PCI pour les VFs nouvellement créées.
+
+image::pcidevices/SriovNetworkDevicesVFStatus.png[]
+
+Lors de la prochaine nouvelle analyse, le `pcidevices-controller` créera les périphériques PCI pour les VFs. Cela peut prendre jusqu'à 1 minute.
+
+Vous pouvez maintenant naviguer vers la page *Périphériques PCI* pour voir les nouveaux périphériques.
+
+Nous avons également introduit un nouveau filtre pour vous aider à filtrer les périphériques PCI par l'interface réseau sous-jacente.
+
+image::pcidevices/SriovNetworkDevicesFilter.png[]
+
+Le périphérique PCI nouvellement créé peut être passé via le dispositif d'intercommunication (pass-through) aux machines virtuelles comme tout autre périphérique PCI.
+
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== Périphériques USB
+
+Une ressource `USBDevice` dans Harvester représente un périphérique USB sur le nœud. Les périphériques USB peuvent être passés via l'hyperviseur pour permettre un accès direct depuis les VM. Ceci est réalisé au moyen du produit complémentaire `pcidevices-controller`. Pour utiliser le passthrough USB, vous pouvez soit créer une ressource `USBDeviceClaim`, soit activer la fonctionnalité sur l'interface utilisateur de Harvester. 
+
+Le passthrough USB est légèrement différent du passthrough PCI. Par exemple, vous pouvez contrôler entièrement un contrôleur USB avec quatre ports USB en créant une `PCIDeviceClaim`. Cependant, vous pouvez également créer une `USBDeviceClaim` pour contrôler uniquement un port USB. Les trois autres ports USB restent disponibles pour le nœud.
+
+[CAUTION]
+====
+Avant de retirer le périphérique USB, détachez-le de la machine virtuelle, puis désactivez le passthrough sur l'écran *USB Devices*.
+====
+
+=== Activer le passthrough sur un périphérique USB
+
+. Sur l'interface utilisateur de Harvester, allez à *Advanced -> USB Devices*.
++
+image::pcidevices/index.png[]
++
+. Repérez le périphérique dans la liste.
++
+image::pcidevices/search.png[]
++
+. Sélectionnez le périphérique cible, puis sélectionnez *⋮ -> Activer le dispositif d'intercommunication (pass-through)*.
++
+image::pcidevices/select.png[]
++
+. Lisez le message de confirmation, puis cliquez sur *Activer*.
++
+Laissez un certain temps pour que l'état du périphérique change en *Activé*.
++
+image::pcidevices/enable-done.png[]
+
+=== Attacher un périphérique USB à une machine virtuelle
+
+. Vérifiez que le passthrough est activé sur le périphérique cible.
++
+. Allez à *Machines Virtuelles*, puis créez une machine virtuelle ou modifiez la configuration d'une machine virtuelle existante.
++
+. Sur l'écran de configuration de la machine virtuelle, allez à l'onglet *Périphériques USB* puis sélectionnez un périphérique dans la liste *Périphériques USB disponibles*.
++
+image::pcidevices/attach-vm.png[]
++
+. Cliquez sur *Créer* ou *Enregistrer*.
+
+=== Afficher les périphériques USB connectés à une machine virtuelle.
+
+. Démarrez puis accédez à la machine virtuelle.
++
+. Exécutez `lsusb`.
++
+Cet utilitaire affiche des informations sur les bus USB et les périphériques connectés.
++
+image::pcidevices/usb-in-vm.png[]
+
+=== limites
+
+* Les machines virtuelles avec des périphériques USB connectés ne peuvent pas être migrées en direct car les périphériques sont liés à un nœud spécifique.
++
+* Le branchement à chaud et le rebranchement des périphériques USB ne sont pas pris en charge. Pour plus d'informations, consultez https://github.com/kubevirt/kubevirt/issues/11979[Problème KubeVirt #11979].
++
+* Si le chemin change lorsque vous rebranchez le périphérique ou redémarrez le nœud, vous devez détacher le périphérique de la machine virtuelle puis réactiver le passthrough.

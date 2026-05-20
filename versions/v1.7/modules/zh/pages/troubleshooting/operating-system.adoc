@@ -1,0 +1,156 @@
+= 操作系统问题
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+Harvester 运行在基于 OpenSUSE 的操作系统上。该操作系统是由 https://github.com/rancher/elemental-toolkit[elemental-toolkit] 生成的工件。以下部分包含信息和提示，以帮助用户排除与操作系统相关的问题。
+
+== 如何登录到 Harvester 节点
+
+用户可以使用用户名 `rancher` 和在安装过程中提供的密码或 SSH 密钥对登录到 Harvester 节点。
+用户 `rancher` 可以在不输入密码的情况下执行特权命令：
+
+----
+# Run a privileged command
+rancher@node1:~> sudo blkid
+
+# Or become root
+rancher@node1:~> sudo -i
+node1:~ # blkid
+----
+
+== 我该如何安装软件包？为什么有些路径是只读的？
+
+操作系统文件系统像容器镜像一样，是基于镜像的，并且在某些目录之外是不可变的。
+
+我们建议使用 *toolbox container* 来运行未打包在 Harvester 操作系统中的程序以进行调试。请参见 https://harvesterhci.io/kb/package_your_own_toolbox_image/[这篇文章] 以了解如何构建和运行 toolbox 容器。
+
+Harvester 操作系统还提供了一种临时启用读写模式的方法。请按照以下步骤操作：
+
+[CAUTION]
+====
+启用读写模式可能会在文件被修改时破坏您的系统。请自行承担风险使用。
+====
+
+* 对于版本 `v0.3.0`，我们需要先应用一个变通方法，以在启用读写模式后 https://github.com/harvester/harvester/issues/1388[使某些目录不被覆盖]。在运行的 Harvester 节点上，以 root 身份运行以下命令：
++
+----
+  cat > /oem/91_hack.yaml <<'EOF'
+  name: "Rootfs Layout Settings for debugrw"
+  stages:
+    rootfs:
+      - if: 'grep -q root=LABEL=COS_STATE /proc/cmdline && grep -q rd.cos.debugrw /proc/cmdline'
+        name: "Layout configuration for debugrw"
+        environment_file: /run/cos/cos-layout.env
+        environment:
+          RW_PATHS: " "
+  EOF
+----
+
+* 重启系统以进入 GRUB 菜单。按 ESC 键以停留在菜单上。
++
+image::troubleshooting/grub-menu.png[]
+
+* 在第一个菜单项上按 `e`。将 `rd.cos.debugrw` 附加到 `linux (loop0)$kernel $kernelcmd` 行。按 `Ctrl + x` 启动系统。
++
+image::troubleshooting/edit-boot-parameter.png[]
+
+== 如何永久编辑内核参数
+
+[NOTE]
+====
+以下步骤是一个变通方法。一旦有永久解决方案，Harvester 将通知社区。
+====
+
+* 以读写模式重新挂载 state 目录：
++
+----
+  # blkid -L COS_STATE
+  /dev/vda2
+  # mount -o remount,rw /dev/vda2 /run/initramfs/cos-state
+----
+
+* 编辑 grub 配置文件并将参数附加到 `linux (loop0)$kernel $kernelcmd` 行。以下示例添加了一个 `nomodeset` 参数：
++
+----
+  # vim /run/initramfs/cos-state/grub2/grub.cfg
+  menuentry "${display_name}" --id cos {
+    # label is kept around for backward compatibility
+    set label=${active_label}
+    set img=/cOS/active.img
+    loopback $loopdev /$img
+    source ($loopdev)/etc/cos/bootargs.cfg
+    linux ($loopdev)$kernel $kernelcmd ${extra_cmdline} ${extra_active_cmdline} nomodeset
+    initrd ($loopdev)$initramfs
+  }
+----
+
+* 重启以使更改生效。
+
+== 如何更改默认的 GRUB 启动菜单项
+
+要更改默认项，首先检查菜单项的 `--id` 属性。GRUB 菜单项位于以下文件中：
+
+* `/run/initramfs/cos-state/grub2/grub.cfg`：包含默认、备用和恢复项
+* `/run/initramfs/cos-state/grubcustom`：包含调试项
+
+在以下示例中，项的 ID 是 `debug`。
+
+----
+# cat \
+    /run/initramfs/cos-state/grub2/grub.cfg \
+    /run/initramfs/cos-state/grubcustom
+
+<...>
+menuentry "${display_name} (debug)" --id debug {
+  search --no-floppy --set=root --label COS_STATE
+  set img=/cOS/active.img
+  set label=COS_ACTIVE
+  loopback loop0 /$img
+  set root=($root)
+  source (loop0)/etc/cos/bootargs.cfg
+  linux (loop0)$kernel $kernelcmd ${extra_cmdline} ${extra_passive_cmdline} ${crash_kernel_params}
+  initrd (loop0)$initramfs
+}
+----
+
+您可以通过运行以下命令来配置默认项：
+
+----
+# mount -o remount,rw /run/initramfs/cos-state
+# grub2-editenv /run/initramfs/cos-state/grub_oem_env set saved_entry=debug
+----
+
+如有必要，您可以通过运行命令 `grub2-editenv /run/initramfs/cos-state/grub_oem_env unset saved_entry` 来撤销更改。
+
+== 如何调试系统崩溃或挂起
+
+=== 收集崩溃日志
+
+如果系统崩溃时内核恐慌跟踪未记录在系统日志中，找到崩溃日志的一个可靠方法是使用串行控制台。
+
+要启用将内核消息输出到串行控制台，请按照以下步骤操作：
+
+* 启动系统进入 GRUB 菜单。按 ESC 键以停留在菜单上。
++
+image:troubleshooting/grub-menu.png[]
+
+* 在第一个菜单项上按 `e`。将 `console=ttyS0,115200n8` 附加到 `linux (loop0)$kernel $kernelcmd` 行。按 `Ctrl + x` 启动系统。
++
+image::troubleshooting/edit-boot-parameter-serial.png[]
++
+[NOTE]
+====
+根据您的环境调整 https://www.kernel.org/doc/html/latest/admin-guide/serial-console.html[控制台选项]。*确保*在行末添加 `console=` 字符串。
+====
+
+* 连接到串行端口以捕获日志。
+
+=== 收集崩溃转储
+
+对于内核恐慌崩溃，您可以使用 kdump 收集崩溃转储。
+
+默认情况下，操作系统在未启用 kdump 功能的情况下启动。用户可以通过在启动时选择 `debug` 菜单来启用该功能，如以下示例所示：
+
+image::troubleshooting/grub-menu-debug.png[]
+
+当系统崩溃时，崩溃转储将存储在 `/var/crash/<time>` 目录中。向开发人员提供崩溃转储有助于他们排查和解决问题。

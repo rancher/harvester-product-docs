@@ -1,0 +1,108 @@
+= Motor de Datos Longhorn V2
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+El Motor de Datos Longhorn V2 aprovecha el poder del Kit de Desarrollo de Rendimiento de Almacenamiento (SPDK) para reducir significativamente la latencia de E/S mientras aumenta el IOPS y el rendimiento. El resultado es una solución de almacenamiento de alto rendimiento que es capaz de satisfacer diversas demandas de carga de trabajo.
+
+[IMPORTANT]
+====
+El Motor de Datos Longhorn V2 es una característica *experimental* y no debe utilizarse en un entorno de producción.
+====
+
+== Requisitos previos
+
+Cada nodo con un Motor de Datos Longhorn V2 activo requiere los siguientes recursos dedicados:
+
+* 1 núcleo de CPU para uso del pod del gestor de instancias de Longhorn
+* 2 GiB de RAM (asignados como 1024 × 2 GiB de páginas enormes)
+* Al menos un disco NVMe local para almacenamiento de datos
+
+== limitaciones
+
+El Motor de Datos Longhorn V2 actualmente no soporta las siguientes operaciones:
+
+* Creación y uso de imágenes de respaldo
+* Cifrado de volúmenes
+
+Los SSD y otros discos que no son NVMe se gestionan utilizando el controlador SPDK AIO bdev, que no soporta la operación de unmap. Si estás utilizando discos que no son NVMe, evita recortar el sistema de archivos porque esto resulta en errores de E/S y máquinas virtuales en pausa. Por ejemplo, al crear un sistema de archivos ext4 en una máquina virtual Linux, utiliza `mkfs.ext4 -E nodiscard /dev/vdb` (suponiendo que `/dev/vdb` es la ruta de tu dispositivo). En máquinas virtuales Windows, puedes desactivar el recorte para NTFS ejecutando el comando `fsutil behavior set disabledeletenotify NTFS 1`.
+
+== Uso
+
+El Motor de Datos Longhorn V2 solo está disponible para volúmenes e imágenes recién creados. Los volúmenes existentes, las imágenes de máquinas virtuales y los volúmenes raíz de máquinas virtuales seguirán utilizando el Motor de Datos V1.
+
+. En la interfaz {harvester-product-name}, ve a *Configuración -> Avanzada*.
+
+. Establece `longhorn-v2-data-engine-enabled` en `true`.
++
+{harvester-product-name} carga automáticamente los módulos del kernel requeridos por el Motor de Datos Longhorn V2, y intenta asignar 1024 × 2 MiB de páginas enormes (por ejemplo, 2 GiB de RAM) en todos los nodos. 
++
+Cambiar esta configuración reinicia automáticamente RKE2 en todos los nodos, pero no afecta a las cargas de trabajo de máquinas virtuales en ejecución.
++
+[TIP]
+====
+Si encuentras mensajes de error que incluyen la frase "no hay suficiente capacidad de hugepages-2Mi", permite un tiempo para que se resuelva el error. Si el error persiste, reinicia los nodos afectados.
+
+Para deshabilitar el motor de datos Longhorn V2 en nodos específicos (por ejemplo, nodos con menos recursos de procesamiento y memoria), ve a la pantalla *Hosts* y añade la siguiente etiqueta a los nodos objetivo:
+
+* etiqueta: `node.longhorn.io/disable-v2-data-engine`
+* valor: `true`
+====
+
+. Ve a la pantalla *Hosts* y luego añade discos adicionales a cada nodo como se describe en xref:/hosts/hosts.adoc#_multi_disk_management[Gestión de múltiples discos].
++
+Establece el `Provisioner` de cada disco adicional en `Longhorn V2 (CSI)`.
++
+[NOTE]
+====
+{harvester-product-name} establece el https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Controlador de disco Longhorn] en `auto` para que los discos NVMe utilicen el controlador bdev NVMe SPDK, que proporciona el mejor rendimiento y también soporta operaciones avanzadas como trim (también conocido como descartar).
+
+Los SSD y otros discos que no son NVMe se gestionan utilizando el controlador bdev AIO SPDK, que requiere un tamaño de disco que sea un _múltiplo par de 4096 bytes_. Los discos que no son NVMe que no cumplen con este requisito de tamaño no pueden ser añadidos. Además, el controlador bdev AIO SPDK no soporta la operación de unmap. Si estás utilizando discos que no son NVMe, evita recortar el sistema de archivos porque esto resulta en errores de E/S y máquinas virtuales en pausa.
+====
+
+. Ve a *Clases de almacenamiento -> avanzadas*, y luego añade una nueva clase de almacenamiento, como se describe en xref:./storageclass.adoc#_creating_a_storageclass[Crear una clase de almacenamiento]. 
++
+Establece el `Provisioner` en `Longhorn V2 (CSI)`.
+
+. Utiliza la nueva clase de almacenamiento al crear lo siguiente:
++
+* Volúmenes (ya sea en la pantalla *Volúmenes* o durante la creación de máquinas virtuales)
+* Imágenes (en la pantalla *Imágenes*)
++
+Los volúmenes e imágenes creados utilizando la nueva StorageClass están respaldados por el motor de datos Longhorn V2.
+
+== Actualizando desde {harvester-product-name} v1.4.x
+
+{harvester-product-name} v1.4.x, que utiliza {longhorn-product-name} v1.7.x, no puede migrar en vivo máquinas virtuales con volúmenes V2 adjuntos. Además, el motor de datos V2 no se puede utilizar para imágenes de máquinas virtuales y volúmenes de arranque. Estas limitaciones no existen en {harvester-product-name} v1.5.0 y versiones posteriores, que utilizan {longhorn-product-name} v1.8.1 y versiones posteriores. Sin embargo, esto se aplica solo a volúmenes e imágenes que se crean _después_ de que {harvester-product-name} se actualiza.
+
+En las clases de almacenamiento V2 creadas utilizando {harvester-product-name} v1.4.x, la opción `migratable` se establece en `false`. Al igual que todas las demás propiedades de la clase de almacenamiento, esto no se puede cambiar una vez establecido. De manera similar, los volúmenes V2 creados utilizando {harvester-product-name} v1.4.x permanecen no migrables después de la actualización. Si utilizaste el motor de datos V2 en {harvester-product-name} v1.4.x y luego actualizaste a {harvester-product-name} v1.5, debes crear una nueva clase de almacenamiento V2. La opción `migratable` se establece en `true` por defecto, por lo que los volúmenes e imágenes creados utilizando esta nueva clase de almacenamiento V2 pueden ser migrados en vivo.
+
+[IMPORTANT]
+====
+* Si estás utilizando el controlador bdev AIO de SPDK (específicamente, si se añadieron discos utilizando `/dev/sd*` rutas de dispositivo), _los volúmenes V2 creados antes de la actualización se vuelven inutilizables y no se pueden recuperar después de la actualización_. Para obtener más información, consulta https://github.com/longhorn/longhorn/issues/10461[problema #10461].
+
+* Si estás utilizando el controlador bdev NVMe de SPDK (específicamente, si se añadieron discos utilizando `/dev/nvme*` rutas de dispositivo), los volúmenes V2 creados antes de la actualización seguirán funcionando. Sin embargo, estos volúmenes seguirán utilizando el motor {longhorn-product-name} v1.7.x y permanecerán no migrables. Puedes exportar los datos y crear nuevos volúmenes migrables, si es necesario.
+
+* Todas las máquinas virtuales con volúmenes V2 adjuntos deben detenerse antes de iniciar la actualización. Los volúmenes V2 activos harán que el proceso de actualización se detenga durante la fase de "actualización de servicios del sistema". Los registros del pod `apply-manifests` mostrarán mensajes repetidos similares a los siguientes:
++
+[,shell]
+----
+instance-manager (aio)(v2) (image=longhornio/longhorn-instance-manager:v1.8.1) state is not running on node harvester-node-0, will retry...
+----
++
+Detener todas las máquinas virtuales que utilizan volúmenes V2 permitirá que la actualización continúe.
+====
+
+Si estás utilizando el controlador bdev NVMe de SPDK (específicamente, si se añadieron discos utilizando `/dev/nvme*` rutas de dispositivo) y volúmenes V2 no migrables están adjuntos a máquinas virtuales existentes, puedes transitar a volúmenes migrables en vivo realizando los siguientes pasos:
+
+. Detén las máquinas virtuales.
+
+. Exporta cada volumen V2 adjunto a una imagen que utilice la nueva clase de almacenamiento V2 (con la opción `migratable` establecida en `true`).
+
+. Una vez que los volúmenes se exporten a imágenes, edita la máquina virtual y realiza las siguientes acciones en la pestaña de *Volúmenes*:
++
+* Elimina los volúmenes V2 existentes.
+* Añade las imágenes que se crearon a partir de los volúmenes exportados.
+
+. Inicia las máquinas virtuales.
++
+Este paso puede tardar bastante, dependiendo de la cantidad de datos a copiar.

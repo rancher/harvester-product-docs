@@ -1,0 +1,117 @@
+= カスタムSUSE仮想マシンイメージ
+:revdate: 2026-01-08
+:page-revdate: {revdate}
+
+SUSEは、 https://www.suse.com/download/sles/[SUSE Linux Enterprise (SLE)]および https://get.opensuse.org/leap/[openSUSE Leap]の仮想マシンイメージを提供しており、{harvester-product-name}での使用に適しています。これらのイメージは、 https://build.opensuse.org/[openSUSE Build Service] (OBS)上で https://osinside.github.io/kiwi/[Kiwi]イメージビルディングツールを使用して構築されており、ダウンロード後すぐに使用できます。
+
+ほとんどの場合、_Minimal VM Cloud_ qcow2イメージを使用できます。これには、自動仮想マシン構成に必要なcloud-initツールが含まれています。他のイメージバリアントは、仮想マシンコンソールにログインし、初期設定を行う必要があります。
+
+[IMPORTANT]
+====
+_Minimal VM Cloud_イメージは、SLES 15 SP5およびopenSUSE 15.5より前のリリースでは_Minimal VM OpenStack Cloud_と名付けられていました。
+====
+
+== openSUSE Build Service (OBS)の使用
+
+SUSEのOBSを使用してカスタムイメージを作成できます。 https://build.opensuse.org/image_templates[イメージテンプレート]は、事前に設定されたKiwiイメージ構成です。たとえば、SLE 15 SP7で他のパッケージを使用したい場合は、_SLE 17 SP5 Minimal_テンプレートを使用してイメージを作成できます。OBSは、パッケージを追加するためのインターフェースを提供し、自動的にイメージをビルドします。ダウンロードして{harvester-product-name}にアップロードできます。詳細については、 https://openbuildservice.org/help/manuals/obs-user-guide/[OBSユーザーガイド]を参照してください。
+
+=== 1.既存のテンプレートに基づいてカスタムイメージを作成します。
+
+. https://build.opensuse.org/image_templates.に移動します。リソースにアクセスするには、openSUSEアカウントにサインインする必要があります。
+. 使用したいテンプレートを選択します。
+. イメージの名前を指定し、次に*アプライアンスを作成*を選択します。
++
+image::advanced/custom-vm-01-select-template.png[]
++
+OBSは自動的にイメージをビルドします。デフォルトでは、インターフェースは*概要*タブを表示し、含まれるパッケージの数やビルドステータスなどの情報が含まれています。
++
+image::advanced/custom-vm-02-image-overview.png[]
+
+=== 2.イメージプロファイルを選択し、パッケージを追加します。
+
+. *ソフトウェア*タブに移動します。
+. OBSにビルドさせたいイメージプロファイルを選択します。
++
+[IMPORTANT]
+====
+ほとんどの場合、_Minimal VM Cloud_ qcow2イメージを使用できます。これには、自動仮想マシン構成に必要なcloud-initツールが含まれています。他のイメージバリアントは、仮想マシンコンソールにログインし、初期設定を行う必要があります。
+====
++
+image::advanced/custom-vm-03-image-software.png[]
+
+. （オプション）パッケージを追加および削除します。
++
+image::advanced/custom-vm-04-image-software-packages.png[]
++
+image::advanced/custom-vm-05-image-software-add-package.png[]
+
+=== 3.（オプション）_パッケージの表示_モードに切り替えます。
+
+_パッケージの表示_モードは、設定に対するより詳細な制御を提供します。切り替えるには、ナビゲーションバーの_パッケージの表示_アイコンをクリックします。
+
+image::advanced/custom-vm-06-view-package.png[]
+
+*概要*タブの*ソースファイル*セクションには、あなたのKiwiテンプレートを構成するすべてのファイルが表示されます。対応するファイル名を選択することで、任意のファイルを編集できます。
+
+image::advanced/custom-vm-07-view-package-details.png[]
+
+=== 4.（オプション）設定ファイル`Minimal.kiwi`を編集します。
+
+ファイル名を選択してテキストエディタを開きます。`<packages type="image">`セクションには、インストールされるパッケージがリストされています。各イメージプロファイルに対して追加のパッケージを指定できます。
+
+デフォルトでは、_クラウド_イメージプロファイル（`<package type="image" profiles="Cloud">`）は、_kernel-default-base_パッケージをインストールします。次の例では、そのパッケージはiSCSIサポートに必要なモジュールを含む_kernel-default_に置き換えられます。
+
+image::advanced/custom-vm-08-edit-kiwi-config.png[]
+
+=== 5.OBSがイメージのビルドを完了するのを待ちます。
+
+プロセスが完了すると、*概要*タブの*ビルド結果*セクションにステータス_成功_が表示されます。
+
+image::advanced/custom-vm-09-build-succeeded.png[]
+
+*ビルド結果*セクションには、新しいイメージのダウンロードリンクも含まれています。
+
+image::advanced/custom-vm-10-binaries-link.png[]
+
+image::advanced/custom-vm-11-binaries-download.png[]
+
+=== 6.イメージを共有するために公開を有効にします。
+
+一般の人がカスタムイメージをダウンロードできるようにするには、OBSプロジェクトの*リポジトリ*タブに移動し、_公開_フラグを有効にします。
+
+image::advanced/custom-vm-12-project-publish-repositories.png[]
+
+あなたのイメージは https://download.opensuse.org/（`repositories/home:/YOUR_USER_NAME:/branches:/SUSE:/Templates:/Images:/`の下）に公開されます。
+
+image::advanced/custom-vm-13-download.openuse.org.png[]
+
+== Kiwiコマンドラインツールの使用
+
+openSUSEビルドサービスの代替として、Kiwiコマンドラインツールを使用してローカルでイメージを作成できます。ツールに関する詳細は、 https://documentation.suse.com/appliance/kiwi-9/html/kiwi/index.html[KIWI次世代を使用したLinuxシステムアプライアンスの構築]を参照してください。
+
+カスタムイメージを作成するには、まずファイル`Minimal.kiwi`と、対応するプロジェクトからスクリプト`config.sh`と`editbootinstall_rpi.sh`をOBSからダウンロードする必要があります。
+
+|===
+| オペレーティングシステム | openSUSEビルドサービスプロジェクト
+
+| SLE 15 SP7
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP7:GA/kiwi-templates-Minimal
+
+| SLE 15 SP6
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP6:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.6
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.6/kiwi-templates-Minimal
+
+| SLE 15 SP5
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP5:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.5
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.5/kiwi-templates-Minimal
+
+| SLE 15 SP4
+| https://build.opensuse.org/package/show/SUSE:SLE-15-SP4:GA/kiwi-templates-Minimal
+
+| openSUSE Leap 15.4
+| https://build.opensuse.org/package/show/openSUSE:Leap:15.4/kiwi-templates-Minimal
+|===

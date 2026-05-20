@@ -1,0 +1,312 @@
+= 网络最佳实践
+:revdate: 2025-12-26
+:page-revdate: {revdate}
+
+== 更换以太网网卡
+
+您可能希望出于各种原因更换 {harvester-product-name} 集群中裸机节点的以太网网卡，包括以下原因：
+
+* 故障或损坏
+* 硬件容量不足
+* 缺少功能
+
+您可以按照以下步骤逐步在每个节点上运行。
+
+=== 更换前检查
+
+. 验证已安装的 {harvester-product-name} 版本是否支持新的 NIC。
+. 在非生产环境中测试新的 NIC。
+. 在 xref:/virtual-machines/access-vm.adoc#_access_with_the_suse_virtualization_ui[*虚拟机* 屏幕] 的 {harvester-product-name} 用户界面中，验证所有虚拟机的状态是否为 __运行中__ 或 __停止__。
+. 在 xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[嵌入式 {longhorn-product-name} 用户界面] 中，验证所有 {longhorn-product-name} 卷的状态是否为 __健康__。
+. （可选）在 *Harvester 支持* 屏幕上，生成一个 xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[支持包] 以供比较。
+
+=== 收集信息
+
+在采取任何行动之前，收集当前的网络信息和状态是很重要的。
+
+* 网络配置：默认情况下，{harvester-product-name} 为管理网络创建一个名为 `mgmt-bo` 的绑定接口。在此之上是一个名为 `mgmt-br` 的桥接接口，可以选择使用 VLAN。每个集群网络也有一个新的绑定接口。您可以使用 `nmcli` 工具查看当前连接详细信息。
++
+示例：
++
+----
+$ nmcli
+mgmt-br.2017: connected to vlan-mgmt
+        "mgmt-br.2017"
+        vlan, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        ip4 default
+        inet4 10.115.55.20/21
+        route4 10.115.48.0/21 metric 400
+        route4 default via 10.115.55.254 metric 400
+...
+mgmt-bo: connected to bond-mgmt
+        "mgmt-bo"
+        bond, 5C:B9:01:89:C2:F5, sw, mtu 1500
+        master mgmt-br
+mgmt-br: connected to bridge-mgmt
+        "mgmt-br"
+        bridge, 5C:B9:01:89:C2:F5, sw, mtu 1500
+eno50: connected to bond-slave-eno50
+        "Intel 82599ES SFI/SFP+"
+        ethernet (ixgbe), 5C:B9:01:89:C2:F5, hw, sriov, mtu 1500
+        master mgmt-bo
+...
+----
+
+* 物理 NIC：您可以使用命令 `ip link` 来检索相关信息，包括每个 NIC 的状态及相应的主控（如果适用）。
++
+示例：
++
+----
+  $ ip link | grep master -1
+
+  2: ens3: <BROADCAST,MULTICAST,SLAVE,UP,LOWER_UP> mtu 1500 qdisc pfifo_fast master mgmt-bo state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+  --
+
+  4: mgmt-bo: <BROADCAST,MULTICAST,MASTER,UP,LOWER_UP> mtu 1500 qdisc noqueue master mgmt-br state UP mode DEFAULT group default qlen 1000
+      link/ether 52:54:00:03:3a:e4 brd ff:ff:ff:ff:ff:ff
+----
+
+* PCI 设备：您可以使用命令 `lspci` 来检索设备列表，这样可以快速识别网络 NIC。要检索每个设备的详细信息，请使用命令 `lspci -v`。
++
+示例 (`lspci`)：
++
+----
+  $ lspci
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+----
++
+示例 (`lspci -v`)：
++
+----
+  $ lspci -v
+  00:03.0 Ethernet controller: Intel Corporation 82540EM Gigabit Ethernet Controller (rev 03)
+    Subsystem: Red Hat, Inc. QEMU Virtual Machine
+    Physical Slot: 3
+    Flags: bus master, fast devsel, latency 0, IRQ 11
+    Memory at fc080000 (32-bit, non-prefetchable) [size=128K]
+    I/O ports at c000 [size=64]
+    Expansion ROM at fc000000 [disabled] [size=512K]
+    Kernel driver in use: e1000
+    Kernel modules: e1000
+----
+
+* Linux 内核日志：您可以使用命令 `dmesg` 来显示内核消息，其中包含大部分所需的信息。如果您将消息保存到 `kernel.log`，可以检查驱动程序和链接状态。
++
+{harvester-product-name} 将子 NIC 放入绑定接口中。在以下示例中，在集群中创建了一个名为 `data-bo` 的附加绑定接口。
++
+----
+  $ grep "(slave" kernel.log  (or: dmesg | grep "(slave")
+
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave eno5): Enslaving as a backup interface with an up link
+  Jan 08 00:35:00 localhost kernel: mgmt-bo: (slave ens4f0): Enslaving as a backup interface with an up link
+  Jan 08 00:37:34 localhost kernel: data-bo: (slave eno6): Enslaving as a backup interface with an up link
+  Jan 08 00:37:35 localhost kernel: data-bo: (slave ens4f1): Enslaving as a backup interface with an up link
+----
++
+NIC 被重命名。
++
+----
+  $ grep "renamed" kernel.log
+
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.0 eno1: renamed from eth2 // eth2 / eno1 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.3 eno4: renamed from eth6 // eth6 / eno4 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.2 eno3: renamed from eth5 // eth5 / eno3 is not used by Harvester
+  Jan 08 00:34:48 localhost kernel: tg3 0000:02:00.1 eno2: renamed from eth3 // eth3 / eno2 is not used by Harvester
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.0 ens4f0: renamed from eth4
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.1 eno6: renamed from eth1
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 ens4f1: renamed from eth2
+----
++
+`eno5(0000:5d:00.0)` 的 NIC 驱动程序是 `(intel) i40e 10Gbps Full Duplex`。
++
+----
+  $ grep "0000:5d:00.0" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: fw 8.71.63306 api 1.11 nvm 10.54.7 [8086:1572] [103c:22fc]
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: MAC address: 48:df:37:24:c2:00
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: FW LLDP is enabled
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: PCI-Express: Speed 8.0GT/s Width x8
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0: Features: PF-id[0] VFs: 64 VSIs: 66 QP: 112 RSS FD_ATR FD_SB NTUPLE DCB VxLAN Geneve PTP VEPA
+  Jan 08 00:34:49 localhost kernel: i40e 0000:5d:00.0 eno5: renamed from eth0
+----
++
+已检测到启用的 NIC。
++
+----
+  $ grep "is Up" kernel.log
+
+  Jan 08 00:34:47 localhost kernel: i40e 0000:5d:00.0 eth0: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:5d:00.1 eth1: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:48 localhost kernel: i40e 0000:af:00.0 eth4: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+  Jan 08 00:34:49 localhost kernel: i40e 0000:af:00.1 eth2: NIC Link is Up, 10 Gbps Full Duplex, Flow Control: None
+----
+
+=== 启用维护模式
+
+. （可选）停止无法或不应迁移的虚拟机。
+. 在目标节点上 xref:/hosts/hosts.adoc#_node_maintenance[启用维护模式] 以自动将所有虚拟机迁移到其他节点。
+
+* 等待一切准备就绪，然后重复 <<Pre-Replacement Checks,预检查>> 部分中的步骤。
+* 在以下情况下手动停止虚拟机：
+ ** 虚拟机迁移失败。
+ ** 虚拟机具有阻止其迁移到其他节点的选择器。
+ ** 虚拟机具有特殊硬件（例如，PCI直通或虚拟GPU），这使其无法迁移到其他节点。
+
+=== （可选）更新网络配置
+
+在每个xref:./cluster-network.adoc#_cluster_network[集群网络]下都有一个或多个xref:./cluster-network.adoc#_create_a_new_cluster_network[网络配置]。每个`Network Config`都由一个`VlanConfig` CRD 对象支持。
+
+[IMPORTANT]
+====
+如果新的网卡将放置在不同的物理插槽中或具有不同的上行参数，则更新`Network Config`是*必需的*。
+====
+
+. 检查节点。
++
+当一个{harvester-product-name}集群节点属于一个`Network Config`时，`Node`对象具有键为`network.harvesterhci.io/vlanconfig`的标签。
++
+示例：
++
+----
+ apiVersion: v1
+ kind: Node
+ metadata:
+   labels:
+     ...
+     network.harvesterhci.io/vlanconfig: vlan123
+----
+
+. 从`Network Config`中移除此节点。
++
+当新的网卡放置在不同的插槽中时，您必须更改`Network Config`以排除此节点。如果`Network Config`对象仅从`nodeSelector`中选择此节点，则可以删除VlanConfig。
++
+示例：
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanConfig
+ spec:
+   clusterNetwork: data
+   nodeSelector:
+     kubernetes.io/hostname: node123  // select one or more nodes
+   uplink:
+     bondOptions:
+       miimon: 100
+       mode: 802.3ad
+     linkAttributes:
+       mtu: 1500
+       txQLen: -1
+     nics:
+     - enp0s1
+     - enp0s2
+----
++
+当虚拟机仍在受影响的节点上运行时，网络Webhook会返回错误。
+
+. 检查`Node`对象。
++
+根据情况，标签`network.harvesterhci.io/vlanconfig`要么更改，要么被移除。
+
+. 检查`VlanStatus`对象。
++
+根据情况，`VlanStatus`对象的`ready`条件的状态要么更改为`"True"`，要么对象被删除。
++
+示例：
++
+----
+ apiVersion: network.harvesterhci.io/v1beta1
+ kind: VlanStatus
+ metadata:
+ ...
+ status:
+   clusterNetwork: data
+   conditions:
+   - lastUpdateTime: "2024-02-03T18:32:41Z"
+     status: "True"
+     type: ready
+   linkMonitor: public
+   localAreas:
+   - cidr: 10.190.186.0/24
+     vlanID: 2013
+   node: node123
+   vlanConfig: vlan123
+----
+
+=== （可选）排空节点
+
+您可能会发现，即使在完成之前概述的程序后，一些{longhorn-product-name}副本仍在节点上处于活动状态。
+
+. 排空节点。（在{harvester-product-name}中这是可选的。）
+ ** 方案 1:所有卷的`numReplicas`值为`3`，这意味着每个{longhorn-product-name}卷都有三个活动副本。
++
+Longhorn Engine 识别到它无法再与排空节点上的副本通信，然后将该副本标记为失败。{longhorn-product-name} 的副本没有任何特殊意义，因此只要它能与至少一个副本通信，就可以正常工作。
+
+ ** 方案 2:一些 {longhorn-product-name} 卷的活动副本少于 _三个_，或者您是通过 {harvester-product-name} 界面或 {longhorn-product-name} 界面手动附加的卷。
++
+您必须手动分离副本或将其移动到其他节点，然后使用命令 `kubectl drain --ignore-daemonsets <node name>` 执行 https://documentation.suse.com/cloudnative/storage/1.8/en/troubleshooting-maintenance/maintenance.html#_updating_the_node_os_or_container_runtime[排空节点]。选项 `--ignore-daemonsets` 是必需的，因为 {longhorn-product-name} 部署了守护程序集，例如 Longhorn Manager、Longhorn CSI 插件和 Longhorn Engine 镜像。
++
+在节点上运行的副本被停止并标记为 `Failed`。在节点上运行的 Longhorn Engine 进程与 pod 一起迁移到其他节点。一旦节点完全排空，节点上不应再有副本和 Longhorn Engine 进程运行。
+. 补充副本。
++
+在节点关闭后，{longhorn-product-name} 不会在其他节点上开始重建副本，直到达到 `replica-replenishment-wait-interval`（默认值：600 秒）。如果节点在等待间隔值达到之前重新上线，{longhorn-product-name} 将重用副本。否则，{longhorn-product-name} 会在另一个节点上重建副本。
++
+在系统维护期间，您可以使用 xref:/troubleshooting/cluster.adoc#_access_embedded_rancher_and_longhorn_dashboards[嵌入式 {longhorn-product-name} 界面] 修改 https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_replenishment_wait_interval[`replica-replenishment-wait-interval`] 值，以启用更快的副本重建。
+
+=== 替换 NIC
+
+. 关闭节点。
+. 替换 NIC。
+. 重启节点。
+. 关于当前网络配置和状态的 <<Collect Information>>。
+
+如果您观察到任何异常，请生成一个 xref:/troubleshooting/cluster.adoc#_generate_a_support_bundle[支持包] 以便进行故障排除。
+
+=== （可选）再次更新网络配置
+
+[IMPORTANT]
+====
+如果新的 NIC 将被放置在不同的物理插槽中，则需要更新`Network Config`。
+====
+
+. 将节点添加到`Network Config`。
++
+您必须创建一个新的`Network Config`或更改`Network Config`以包含此节点。
+
+. 检查`Node`对象。
++
+标签`network.harvesterhci.io/vlanconfig`反映所使用的特定`Network Config`。
+
+. 检查`VlanStatus`对象。
++
+`VlanStatus`对象的`ready`状态更改为`"True"`。
+
+=== 禁用维护模式
+
+. 等待节点被移回集群。
+. 禁用维护模式。
+. （可选）启动您手动停止的虚拟机。
+. （可选）手动xref:/virtual-machines/live-migration.adoc#_starting_a_migration[迁移虚拟机]到此节点。
+
+=== 查错
+
+{harvester-product-name}使用多个与网络相关的Pod和CRD。在故障排除时，请检查Pod日志和CRD对象的状态。
+
+Pods：
+
+ $ kubectl get pods -n harvester-system
+ NAME                                                    READY   STATUS    RESTARTS      AGE
+ harvester-network-controller-cnf22                      1/1     Running   2 (60m ago)   3d22h  // Network controller agent daemonSet, deployed in each node
+ harvester-network-controller-manager-859c4bd874-xcllf   1/1     Running   2 (60m ago)   3d22h  // Network controller
+ harvester-network-webhook-56b877d5d5-z42dp              1/1     Running   2 (60m ago)   3d22h
+
+CRD：
+
+----
+clusternetworks.network.harvesterhci.io
+linkmonitors.network.harvesterhci.io
+vlanconfigs.network.harvesterhci.io
+vlanstatuses.network.harvesterhci.io
+----

@@ -1,0 +1,104 @@
+= Instalación de USB
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== Crear una unidad flash USB de arranque
+
+Hay un par de maneras de crear una unidad flash USB de instalación.
+
+[CAUTION]
+====
+*Problema conocido:* Para la imagen ISO v1.2.0, existe un https://github.com/harvester/harvester/issues/4510[problema] conocido en el que la instalación interactiva de la ISO se queda atascada al usar el método USB.
+
+Para resolver esto, puedes usar la https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso[ISO] parcheada. Esta versión parcheada solo corrige la etiqueta de la partición y no realiza ningún otro cambio. También puedes usar el sha512 relacionado https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso.sha512sum[archivo] para verificar la ISO.
+
+Consulta el <<Interactive ISO hangs with the USB installation method>> para más detalles y una solución alternativa.
+
+No importa qué herramienta uses, crear un dispositivo de arranque borra los datos de tu dispositivo USB. Por favor, haz una copia de seguridad de todos los datos en tu dispositivo USB antes de crear un dispositivo de arranque.
+====
+
+=== Rufus
+
+https://rufus.ie/[Rufus] te permite crear una imagen ISO en tu unidad flash USB en un ordenador con Windows.
+
+. Abre Rufus e inserta una memoria USB limpia en tu ordenador.
+. Rufus detecta automáticamente tu USB. Selecciona el dispositivo USB que deseas usar del menú desplegable *Dispositivo*.
+. Para *Selección de arranque*, elige *Seleccionar* y encuentra la imagen ISO que deseas grabar en el USB.
++
+image::install/rufus.png[rufus.png]
++
+[IMPORTANT]
+====
+Si usas versiones más antiguas de Rufus, tanto `DD mode` como `ISO mode` funcionan. `DD mode` funciona igual que el comando `dd` en Linux, y no puedes navegar por las particiones después de crear un dispositivo de arranque. `ISO mode` crea particiones en tu dispositivo automáticamente y copia archivos a estas particiones, y puedes navegar por estas particiones incluso después de crear un dispositivo de arranque.
+====
+
+=== balenaEtcher
+
+https://www.balena.io/etcher/[balenaEtcher] admite escribir una imagen en una unidad flash USB en la mayoría de las distribuciones de Linux, macOS y Windows. Tiene una GUI y es fácil de usar.
+
+. Selecciona la imagen ISO.
+. Selecciona el dispositivo USB de destino para crear una unidad flash USB de instalación.
++
+image::install/balena-etcher.png[balena-etcher.png]
+
+=== `dd` comando
+
+Puedes usar el comando 'dd' en Linux u otras plataformas para crear una unidad flash USB de instalación. Asegúrate de elegir el dispositivo correcto; el siguiente comando borra los datos del dispositivo seleccionado.
+
+[,sh]
+----
+# sudo dd if=<path_to_iso> of=<path_to_usb_device> bs=64k
+----
+
+== Problemas conocidos
+
+=== Se muestra un `GRUB _` texto, pero no ocurre nada al arrancar desde una unidad flash USB de instalación.
+
+Si usas el modo UEFI, intenta arrancar desde la partición de arranque UEFI del dispositivo USB en lugar del propio dispositivo USB. Por ejemplo, selecciona el `UEFI: USB disk 3.0 PMAP, Partition 1` para arrancar. La representación varía de un sistema a otro.
+
+image::install/usb-install-select-correct-partition.png[]
+
+=== Problema gráfico
+
+Los firmwares de algunas tarjetas gráficas no se incluyen en `v0.3.0`.
+
+Presiona `e` para editar la entrada del menú GRUB y añade `nomodeset` a los parámetros de arranque. Presiona `Ctrl + x` para arrancar.
+
+image::install/usb-install-nomodeset.png[]
+
+=== El instalador no se muestra
+
+Si una unidad flash USB arranca, pero no puedes ver el instalador, prueba una de las siguientes soluciones alternativas:
+
+* Conecta la unidad flash USB a un puerto USB 2.0.
+* Para la versión `v0.3.0` o superior, elimina el parámetro `console=ttyS0` al arrancar. Presiona `e` para editar la entrada del menú GRUB y eliminar el parámetro `console=ttyS0`.
+
+=== La ISO interactiva se cuelga con el método de instalación USB.
+
+Durante la instalación desde una unidad flash USB con la imagen ISO v1.2.0 (creada por herramientas como `balenaEtcher`, `dd`, etc.), el proceso de instalación puede quedarse atascado en el proceso de carga de la imagen inicial porque falta una etiqueta requerida en la partición de arranque. Por lo tanto, la instalación no puede montar correctamente la partición de datos, lo que provoca que algunas comprobaciones en `dracut` se bloqueen.
+
+Si te encuentras con este problema, observarás la siguiente salida similar, y el proceso se quedará colgado durante al menos 50 minutos (el valor de tiempo de espera predeterminado de `dracut`).
+
+image::install/usb-install-hang.png[]
+
+==== Solución alternativa
+
+Para abordar este problema, puedes modificar manualmente la partición root de la siguiente manera:
+
+[,text]
+----
+# Replace the `CDLABEL=COS_LIVE` with your USB data partition. Usually, your USB data partition is the first partition with the device name `sdx` that hangs on your screen.
+# Original
+$linux ($root)/boot/kernel cdroot root=live:CDLABEL=COS_LIVE rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+# Modified
+$linux ($root)/boot/kernel cdroot root=live:/dev/sda1 rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+----
+
+El parámetro modificado debería verse como el siguiente:
+
+image::install/grub-parameter-modified.png[]
+
+Después de hacer este ajuste, presiona `Ctrl + x` para iniciar el arranque. Ahora deberías entrar en el instalador como de costumbre.
+
+* Problema relacionado:
+ ** https://github.com/harvester/harvester/issues/4510[[BUG\] v1.2.0 La ISO interactiva no se instala en algunos equipos sin sistema operativo]

@@ -1,0 +1,167 @@
+= Ambiente Air-Gapped
+:revdate: 2025-06-10
+:page-revdate: {revdate}
+
+Esta seção descreve como usar {harvester-product-name} em um ambiente air-gapped. Alguns casos de uso podem ser onde {harvester-product-name} será instalado offline, atrás de um gateway de segurança ou atrás de um proxy.
+
+A imagem ISO contém todos os pacotes para fazê-la funcionar em um ambiente air-gapped.
+
+== Trabalhando Atrás de um Proxy HTTP
+
+Em alguns ambientes, a conexão com serviços externos, a partir dos servidores ou VMs, requer um proxy HTTP(S).
+
+=== Configure um Proxy HTTP Durante a Instalação
+
+Você pode configurar o proxy HTTP(S) durante a xref:../installation-setup/methods/iso-install.adoc[instalação da ISO] como mostrado na imagem abaixo:
+
+image::install/iso-proxy.png[iso-proxy]
+
+=== Configure um Proxy HTTP
+
+Você pode configurar o proxy HTTP(S) usando a interface gráfica.
+
+. Vá para a página de configurações da interface gráfica.
+. Encontre a configuração `http-proxy`, clique em *⋮ > Editar configuração*
+. Insira o(s) valor(es) para `http-proxy`, `https-proxy` e `no-proxy`.
+
+image::proxy-setting.png[proxy-setting]
+
+[NOTE]
+====
+{harvester-product-name} anexa endereços necessários à `no-proxy` configurada pelo usuário para garantir que o tráfego interno funcione, ou seja, `localhost,127.0.0.1,0.0.0.0,10.0.0.0/8,longhorn-system,cattle-system,cattle-system.svc,harvester-system,.svc,.cluster.local`. `harvester-system` foi adicionado à lista desde a versão 1.1.2.
+
+Quando os nós no cluster não usam um proxy para se comunicar entre si, o CIDR precisa ser adicionado a `http-proxy.noProxy` após o primeiro nó ser instalado com sucesso. Por favor, consulte xref:../troubleshooting/cluster.adoc#_fail_to_deploy_a_multi_node_cluster_due_to_incorrect_http_proxy_setting[falha ao implantar um cluster de múltiplos nós].
+====
+
+== Imagens do Cluster Convidado
+
+Todas as imagens necessárias para instalar e executar {harvester-product-name} estão convenientemente empacotadas na ISO, eliminando a necessidade de pré-carregar imagens em nós bare metal. Um cluster {harvester-product-name} os gerencia de forma independente e eficaz nos bastidores.
+
+No entanto, é essencial entender que um cluster Kubernetes convidado (por exemplo, um cluster {rke2-product-name}) criado pelo xref:../integrations/rancher/node-driver/node-driver.adoc[Harvester Node Driver] é uma entidade distinta de um cluster {harvester-product-name}. Um cluster convidado opera dentro de VMs e requer a obtenção de imagens, seja da internet ou de um https://documentation.suse.com/cloudnative/rancher-manager/v2.11/en/rancher-admin/global-configuration/global-default-private-registry.html#_configure_a_private_registry_with_credentials_when_creating_a_cluster[registro privado].
+
+Se a opção *Cloud Provider* estiver configurada para {harvester-product-name} em um cluster Kubernetes convidado, ele implanta o Harvester Cloud Provider e o driver Container Storage Interface (CSI).
+
+image::cluster-registry.png[cluster-registry]
+
+Como resultado, recomendamos monitorar cada versão do RKE2 em seu ambiente air-gapped e baixar as imagens necessárias para seu registro privado. Por favor, consulte a https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[Support Matrix] para obter o melhor suporte de capacidade do Harvester Cloud Provider e do driver CSI.
+
+== Integre com um {rancher-short-name} externo.
+
+{rancher-short-name} determina a imagem `rancher-agent` a ser usada sempre que um cluster {harvester-product-name} é importado. Se a imagem não estiver incluída no ISO {harvester-product-name}, ela deve ser obtida da internet e carregada em cada nó, ou enviada para o registro do cluster {harvester-product-name}.
+
+[,bash]
+----
+# Run the following commands on a computer that can access both the internet and the {harvester-product-name} cluster.
+docker pull rancher/rancher-agent:<version>
+docker save rancher/rancher-agent:<version> -o rancher-agent-<version>.tar
+
+# Copy the image TAR file to the air-gapped environment.
+scp rancher-agent-<version>.tar rancher@<harvester-node-ip>:/tmp
+
+# Use SSH to connect to the {harvester-product-name} node, and then load the image.
+ssh rancher@<harvester-node-ip>
+sudo -i
+docker load -i /tmp/rancher-agent-<version>.tar
+----
+
+== Extensão da UI do Harvester com Integração {rancher-short-name}
+
+A Extensão da UI do Harvester é necessária para acessar a UI do {harvester-product-name} nas versões {rancher-short-name} v2.10.x e posteriores. No entanto, instalar a extensão pela rede não é possível em ambientes air-gapped, então você deve realizar a seguinte solução alternativa:
+
+. Puxe a imagem https://hub.docker.com/r/rancher/ui-plugin-catalog/tags[rancher/ui-plugin-catalog] com a tag mais recente.
+
+. Na UI do {rancher-short-name}, vá para *Extensions* e, em seguida, selecione *⋮ -> Gerenciar Catálogos de Extensões*.
++
+image::air-gapped/air-gappted-harvester-ui-extension-01.png[Rancher UI - Gerenciar Catálogos de Extensões]
+
+. Especifique as informações necessárias.
++
+image::air-gapped/air-gappted-harvester-ui-extension-02.png[Rancher UI - Importar Catálogo de Extensões]
++
+* *Referência da Imagem do Catálogo*: Especifique a URL do registro privado e o repositório de imagens.
+* *Segredos de Pull de Imagem*: Especifique o segredo usado para acessar o registro quando um nome de usuário e senha são necessários. Você deve criar esse segredo no namespace `cattle-ui-plugin-system`. Use `kubernetes.io/dockercfg` ou `kubernetes.io/dockerconfigjson` como o valor de `type`.
++
+Exemplo:
++
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: my-registry-secret-rancher
+  namespace: cattle-ui-plugin-system
+type: kubernetes.io/dockerconfigjson
+data:
+  .dockerconfigjson: {base64 encoded data}
+----
+
+. Clique em *Carregar*, e então aguarde um tempo para que a extensão seja carregada.
++
+image::air-gapped/air-gappted-harvester-ui-extension-03.png[Rancher UI - Catálogos de Extensões]
+
+. Na aba *Disponível*, localize a extensão chamada *Harvester*, e então clique em *Instalar*.
++
+image::air-gapped/air-gappted-harvester-ui-extension-04.png[Rancher UI - Extensões Disponíveis]
+
+. Selecione a versão que corresponde ao cluster {harvester-product-name}, e então clique em *Instalar*.
++
+xref:../integrations/rancher/harvester-ui-extension.adoc#_support_matrix[Matriz de Suporte da Extensão da UI do Harvester]
++
+image::air-gapped/air-gappted-harvester-ui-extension-05.png[Rancher UI - Selecionar Versão da Extensão da UI do Harvester]
++
+image::air-gapped/air-gappted-harvester-ui-extension-06.png[Rancher UI - Extensão da UI do Harvester Instalada]
+
+. Vá para *Gerenciamento de Virtualização -> Clusters do Harvester*.
++
+Agora você pode importar clusters {harvester-product-name} e acessar a UI {harvester-product-name}.
++
+image::air-gapped/air-gappted-harvester-ui-extension-07.png[Rancher UI - Harvester Clusters]
+
+== Requisitos de tempo
+
+Um servidor de Protocolo de Tempo de Rede (NTP) confiável é crítico para manter a hora correta do sistema em todos os nós de um cluster Kubernetes, especialmente ao executar {harvester-product-name}. O Kubernetes depende do etcd, um armazenamento distribuído de chave-valor, que requer sincronização de tempo precisa para garantir a consistência dos dados e evitar problemas com eleição de líder, replicação de logs e estabilidade do cluster.
+
+Em um ambiente air-gapped, onde fontes externas de tempo estão indisponíveis, manter um tempo preciso e sincronizado se torna ainda mais crucial. Sem a devida sincronização de tempo, os nós do cluster podem enfrentar falhas de autenticação, problemas de agendamento ou até mesmo corrupção de dados. Para mitigar esses riscos, as organizações devem implantar um servidor NTP robusto e interno que sincronize o tempo em todos os sistemas dentro da rede.
+
+Garantir um tempo preciso e consistente em todo o cluster é essencial para a confiabilidade, segurança e integridade geral do sistema.
+
+== Solução de problemas
+
+=== Extensões da UI não aparecem
+
+Se a tela de *Extensões* estiver vazia, vá para *Repositórios* (*⋮ -> Gerenciar Repositórios*) e clique em *Atualizar*.
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-01.png[Rancher UI - Gerenciar Repositórios]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-02.png[Rancher UI - Erro de Conexão Recusada]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-03.png[Rancher UI - Atualizar Tela de Repositórios]
+
+image::air-gapped/air-gappted-harvester-ui-extension-04-04.png[Rancher UI - Repositórios]
+
+=== Instalação falhou
+
+Se você encontrar um erro durante a instalação, verifique o recurso `uiplugins`.
+
+image::air-gapped/air-gappted-harvester-ui-extension-05-01.png[Rancher UI - Erro de Instalação da Extensão Harvester UI]
+
+Exemplo:
+
+[,shell]
+----
+bash-4.4# k get uiplugins -A
+NAMESPACE                 NAME        PLUGIN NAME   VERSION   STATE
+cattle-ui-plugin-system   harvester   harvester     1.0.3     pending
+bash-4.4# k get uiplugins harvester --namespace cattle-ui-plugin-system -o yaml
+apiVersion: catalog.cattle.io/v1
+kind: UIPlugin
+metadata:
+  # skip
+  name: harvester
+  namespace: cattle-ui-plugin-system
+spec:
+  plugin:
+    endpoint: http://ui-plugin-catalog-svc.cattle-ui-plugin-system:8080/plugin/harvester-1.0.3
+----
+
+Certifique-se de que `svc.namespace` é acessível a partir de {rancher-short-name}. Se esse endpoint não for acessível, você pode usar diretamente um IP de cluster como `10.43.33.58:8080/plugin/harvester-1.0.3`.

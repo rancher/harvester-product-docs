@@ -1,0 +1,102 @@
+= Équilibreur de charge
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+L'équilibreur de charge Harvester (LB) est un équilibreur de charge de couche 4 intégré qui répartit le trafic entrant sur les charges de travail déployées sur des machines virtuelles (VM) Harvester ou des clusters Kubernetes invités.
+
+== Équilibreur de charge VM
+
+=== Fonctions
+
+L'équilibreur de charge VM Harvester prend en charge les fonctionnalités suivantes{nbsp}:
+
+* *Attribution d'adresse :* Obtenez l'adresse IP du LB à partir d'un serveur DHCP ou d'un pool d'adresses IP prédéfini.
+* *Prise en charge des protocoles :* Prend en charge les protocoles TCP et UDP pour l'équilibrage de la charge.
+* *Multiples écouteurs :* Créez plusieurs écouteurs pour gérer le trafic entrant sur différents ports ou avec d'autres protocoles.
+* *Sélecteur d'étiquettes :* Le LB utilise des sélecteurs d'étiquettes pour faire correspondre les serveurs backend. Par conséquent, vous devez configurer les étiquettes correspondantes pour les VM backend que vous souhaitez ajouter au LB.
+* *Vérification de l'état de santé :* N'envoyez du trafic qu'aux instances backend saines.
+
+=== limites
+
+L'équilibreur de charge VM Harvester a les limitations suivantes{nbsp}:
+
+* *Restriction de l'espace de noms :* Cette restriction facilite la gestion des autorisations et garantit que le LB n'utilise que des VM dans le même espace de noms que les serveurs backend.
+* *IPv4 uniquement :* Le LB n'est compatible qu'avec les adresses IPv4 pour les VM.
+* *Installation de l'agent invité :* L'installation de l'agent invité sur chaque VM backend est nécessaire pour obtenir des adresses IP.
+* *Exigence de connectivité :* Une connectivité réseau doit être établie entre les VM backend et les hôtes Harvester. Lorsqu'une VM a plusieurs adresses IP, le LB sélectionnera la première comme adresse backend.
+* *Restriction d'accès :* L'adresse LB de la VM est exposée uniquement au sein du même réseau que les hôtes Harvester. Pour accéder au LB depuis l'extérieur du réseau, vous devez fournir un itinéraire de l'extérieur vers l'adresse LB.
+
+[NOTE]
+====
+L'équilibreur de charge VM Harvester ne prend pas en charge les VM Windows car l'agent invité n'est pas disponible pour les VM Windows.
+====
+
+
+=== Comment créer
+
+Pour créer un nouvel équilibreur de charge VM Harvester :
+
+. Allez à la page **Réseaux > Équilibreurs de charge** et sélectionnez *Créer*.
+. Sélectionnez l'*espace de noms* et spécifiez le *Nom*.
+. Allez à l'onglet *Basique* pour choisir le mode IPAM, qui peut être *DHCP* ou *pool d'adresses IP*. Si vous sélectionnez *pool d'adresses IP*, préparez d'abord un pool d'adresses IP, spécifiez le nom du pool d'adresses IP, ou choisissez *auto*. Si vous choisissez *auto*, le LB sélectionne automatiquement un pool d'adresses IP selon xref:./ip-pool.adoc#_selection_policy[la stratégie de sélection du pool d'adresses IP].
++
+image::networking/create-lb-01.png[]
+. Allez à l'onglet *Écouteurs* pour ajouter des écouteurs. Vous devez spécifier le *Port*, le *Protocole* et le *Port Backend* pour chaque écouteur.
++
+image::networking/create-lb-02.png[]
+. Allez à l'onglet *Sélecteur de serveur backend* pour ajouter des sélecteurs d'étiquettes. Pour ajouter la VM au LB, allez à l'onglet **Machine Virtuelle > Étiquettes d'Instance** pour ajouter les étiquettes correspondantes à la VM.
++
+image::networking/create-lb-03.png[]
+. Allez à l'onglet *Vérification de l'état de santé* pour activer la vérification de l'état de santé et spécifier les paramètres, y compris le *Port*, le *Seuil de Réussite*, le *Seuil d'Échec*, l'*Intervalle* et le *Délai* si le service backend prend en charge la vérification de l'état de santé. Pour plus d'informations, consultez la <<Health Checks>>.
++
+image::networking/create-lb-04.png[]
+
+=== Bilans de santé
+
+L'équilibreur de charge Harvester prend en charge les vérifications de santé TCP. Vous pouvez spécifier les paramètres dans l'interface utilisateur de Harvester si vous avez activé l'option `Health Check`.
+
+image::networking/health-check.png[]
+
+|===
+| Nom | Types de valeur | Requis | Par défaut | Description
+
+| Port de Vérification de l'état de santé
+| entier
+| true
+| S/O
+| Indique le port. Le sondeur accédera à l'adresse composée de l'IP du serveur backend et du port.
+
+| Seuil de Réussite de Vérification de l'état de santé
+| entier
+| false
+| 1
+| Indique le seuil de réussite de la vérification de l'état de santé. Désactivée par défaut. Le serveur backend commencera à rediriger le trafic si le nombre de fois que le sondeur détecte continuellement une adresse avec succès atteint le seuil.
+
+| Seuil d'Échec de Vérification de l'état de santé
+| entier
+| false
+| 3
+| Indique le seuil d'échec de la vérification de l'état de santé. Désactivée par défaut. Le serveur backend cessera de rediriger le trafic si le nombre d'échecs de vérification de l'état de santé atteint le seuil.
+
+| Période de Vérification de l'état de santé
+| entier
+| false
+| 5
+| Indique la période de vérification de l'état de santé en secondes. Désactivée par défaut.
+
+| Délai de Vérification de l'état de santé
+| entier
+| false
+| 3
+| Indique le délai de chaque vérification de l'état de santé en secondes. Désactivée par défaut.
+|===
+
+== Équilibreur de charge du cluster Kubernetes invité
+
+En conjonction avec le fournisseur de cloud Harvester, l'équilibreur de charge Harvester fournit un équilibrage de la charge pour les services LB dans le cluster invité.
+
+image::networking/guest-kubernetes-cluster-lb.png[]
+
+Lorsque vous créez, mettez à jour ou supprimez un service LB sur un cluster invité avec le fournisseur de cloud Harvester, le fournisseur de cloud Harvester créera automatiquement un équilibreur de charge Harvester.
+
+Pour plus de détails, veuillez vous référer à xref:../integrations/rancher/cloud-provider.adoc[Harvester Cloud Provider].

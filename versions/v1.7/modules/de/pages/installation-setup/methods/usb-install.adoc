@@ -1,0 +1,104 @@
+= USB-Installation
+:revdate: 2025-05-09
+:page-revdate: {revdate}
+
+== Erstellen Sie einen bootfähigen USB-Speicherstick.
+
+Es gibt mehrere Möglichkeiten, einen USB-Installations-Speicherstick zu erstellen.
+
+[CAUTION]
+====
+*Bekanntes Problem:* Für das v1.2.0 ISO-Image gibt es ein bekanntes https://github.com/harvester/harvester/issues/4510[Problem], bei dem die interaktive ISO-Installation beim USB-Verfahren hängen bleibt.
+
+Um dies zu beheben, können Sie das gepatchte https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso[ISO] verwenden. Diese gepatchte Version korrigiert nur das Partitionslabel, und es gibt keine weiteren Änderungen. Sie können auch die zugehörige sha512 https://releases.rancher.com/harvester/v1.2.0/harvester-v1.2.0-patch1-amd64.iso.sha512sum[Datei] verwenden, um das ISO-Image zu überprüfen.
+
+Bitte beziehen Sie sich auf das <<Interactive ISO hangs with the USB installation method>> für Details und eine Umgehungslösung.
+
+Egal, welches Tool Sie verwenden, das Erstellen eines bootfähigen Geräts löscht die Daten Ihres USB-Geräts. Bitte sichern Sie alle Daten auf Ihrem USB-Gerät, bevor Sie ein bootfähiges Gerät erstellen.
+====
+
+=== Rufus
+
+https://rufus.ie/[Rufus] ermöglicht es Ihnen, ein ISO-Image auf Ihrem USB-Speicherstick auf einem Windows-Computer zu erstellen.
+
+. Öffnen Sie Rufus und stecken Sie einen leeren USB-Speicherstick in Ihren Computer.
+. Rufus erkennt automatisch Ihr USB-Gerät. Wählen Sie das USB-Gerät, das Sie verwenden möchten, aus dem *Gerät*-Dropdown-Menü aus.
+. Für *Boot-Auswahl* wählen Sie *Auswählen* und suchen Sie das ISO-Image, das Sie auf den USB-Speicherstick brennen möchten.
++
+image::install/rufus.png[rufus.png]
++
+[IMPORTANT]
+====
+Wenn Sie ältere Versionen von Rufus verwenden, funktionieren sowohl `DD mode` als auch `ISO mode`. `DD mode` funktioniert genau wie der `dd` Befehl in Linux, und Sie können nach dem Erstellen eines bootfähigen Geräts keine Partitionen durchsuchen. `ISO mode` erstellt automatisch Partitionen auf Ihrem Gerät und kopiert Dateien in diese Partitionen, und Sie können diese Partitionen auch nach dem Erstellen eines bootfähigen Geräts durchsuchen.
+====
+
+=== balenaEtcher
+
+https://www.balena.io/etcher/[balenaEtcher] unterstützt das Schreiben eines Images auf einen USB-Speicherstick auf den meisten Linux-Distributionen, macOS und Windows. Es hat eine GUI und ist einfach zu bedienen.
+
+. Wählen Sie das ISO-Image aus.
+. Wählen Sie den Ziel-USB-Speicherstick aus, um einen USB-Installations-Speicherstick zu erstellen.
++
+image::install/balena-etcher.png[balena-etcher.png]
+
+=== `dd`-Befehl
+
+Sie können den 'dd'-Befehl unter Linux oder anderen Plattformen verwenden, um einen USB-Installations-Speicherstick zu erstellen. Stellen Sie sicher, dass Sie das richtige Gerät auswählen; der folgende Befehl löscht Daten auf dem ausgewählten Gerät.
+
+[,sh]
+----
+# sudo dd if=<path_to_iso> of=<path_to_usb_device> bs=64k
+----
+
+== Bekannte Probleme
+
+=== Ein `GRUB _`-Text wird angezeigt, aber es passiert nichts, wenn von einem USB-Installations-Speicherstick gebootet wird.
+
+Wenn Sie den UEFI-Modus verwenden, versuchen Sie, von der UEFI-Bootpartition auf dem USB-Speicherstick zu booten, anstatt vom USB-Speicherstick selbst. Wählen Sie beispielsweise das `UEFI: USB disk 3.0 PMAP, Partition 1` zum Booten aus. Die Darstellung variiert von System zu System.
+
+image::install/usb-install-select-correct-partition.png[]
+
+=== Grafikproblem
+
+Die Firmware einiger Grafikkarten ist nicht in `v0.3.0` enthalten.
+
+Sie können `e` drücken, um den GRUB-Menüeintrag zu bearbeiten und `nomodeset` zu den Bootparametern hinzuzufügen. Drücken Sie `Ctrl + x`, um zu booten.
+
+image::install/usb-install-nomodeset.png[]
+
+=== Installer wird nicht angezeigt
+
+Wenn ein USB-Speicherstick bootet, Sie aber den Installer nicht sehen können, versuchen Sie eine der folgenden Lösungen:
+
+* Stecken Sie den USB-Speicherstick in einen USB 2.0-Anschluss.
+* Für Version `v0.3.0` oder höher entfernen Sie den `console=ttyS0`-Parameter beim Booten. Drücken Sie `e`, um den GRUB-Menüeintrag zu bearbeiten und den `console=ttyS0`-Parameter zu entfernen.
+
+=== Interaktive ISO hängt bei der USB-Installationsmethode
+
+Während der Installation von einem USB-Speicherstick mit dem ISO-Image v1.2.0 (erstellt mit Tools wie `balenaEtcher`, `dd` usw.) kann der Installationsprozess beim Laden des anfänglichen Images hängen bleiben, da ein erforderliches Label auf der Boot-Partition fehlt. Daher kann die Installation die Datenpartition nicht korrekt einbinden, was dazu führt, dass einige Überprüfungen in `dracut` blockiert werden.
+
+Wenn Sie auf dieses Problem stoßen, werden Sie die folgende ähnliche Ausgabe beobachten, und der Prozess wird mindestens 50 Minuten hängen bleiben (der Standard-Timeout-Wert von `dracut`).
+
+image::install/usb-install-hang.png[]
+
+==== Umgehung des Problems
+
+Um dieses Problem zu beheben, können Sie die Root-Partition manuell wie folgt ändern:
+
+[,text]
+----
+# Replace the `CDLABEL=COS_LIVE` with your USB data partition. Usually, your USB data partition is the first partition with the device name `sdx` that hangs on your screen.
+# Original
+$linux ($root)/boot/kernel cdroot root=live:CDLABEL=COS_LIVE rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+# Modified
+$linux ($root)/boot/kernel cdroot root=live:/dev/sda1 rd.live.dir=/ rd.live.squashimg=rootfs.squashfs console=tty1 console=ttyS0 rd.cos.disable net.ifnames=1
+----
+
+Der modifizierte Parameter sollte wie folgt aussehen:
+
+image::install/grub-parameter-modified.png[]
+
+Nachdem Sie diese Anpassung vorgenommen haben, drücken Sie `Ctrl + x`, um den Bootvorgang zu starten. Sie sollten jetzt wie gewohnt in den Installer gelangen.
+
+* Verwandtes Problem:
+ ** https://github.com/harvester/harvester/issues/4510[[BUG\] v1.2.0 Interaktive ISO kann auf einigen Bare-Metal-Geräten nicht installiert werden]

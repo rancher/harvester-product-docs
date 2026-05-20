@@ -1,0 +1,39 @@
+= 编辑卷
+:revdate: 2025-07-31
+:page-revdate: {revdate}
+
+创建卷后，您可以通过单击`⋮`按钮并选择`Edit Config`选项来编辑您的卷。
+
+== 展开卷
+
+您可以通过直接增加`Size`参数的值来展开卷。为了防止意外数据读写干扰卷展开，{harvester-product-name}仅支持`offline`展开。如果卷已附加到虚拟机，您必须先关闭虚拟机或卸载卷，卸载的卷将自动附加到一个随机节点，并以 https://documentation.suse.com/cloudnative/storage/1.8/en/introduction/concepts.html#_2_volumes_and_primary_storage[维护模式]自动展开。
+
+image::volume/expand-volume.png[expand-volume]
+
+=== 在线卷展开
+
+为了最小化停机时间，{harvester-product-name}允许您展开附加到正在运行的虚拟机的卷或附加到正在运行的Pod的PVC。根据底层存储提供商，您可能需要采取额外步骤来使用此功能。
+
+* *{longhorn-product-name}*：{harvester-product-name}认为{longhorn-product-name}支持在线卷展开，即使Longhorn数据引擎的版本之间存在差异。目前，V1数据引擎完全支持在线卷展开，而V2数据引擎根本不支持在线卷展开（无论卷的附加状态如何）。
+
+* *第三方存储*：{harvester-product-name}默认拒绝对第三方存储的在线卷展开请求。如果您已确认您的存储提供商支持在线卷展开，您可以使用xref:installation-setup/config/settings.adoc#_csi_online_expand_validation[`csi-online-expand-validation`]设置将该存储提供商标记为已验证。
+
+[IMPORTANT]
+====
+不支持热插拔文件系统卷的在线调整大小。当文件系统卷在`virt-launcher` Pod中绑定挂载时，热插拔新文件系统卷会触发对先前卷的`NodeUnPublish`和`NodeUnstage`操作，从而阻止进一步调整大小。
+
+此外，您无法在虚拟机运行时使用xref:virtual-machines/edit-vm.adoc[编辑配置]功能在{harvester-product-name} UI *虚拟机*屏幕上调整卷的大小。某些限制阻止当前UI准确显示卷展开操作的结果。有关更多信息，请参见 https://github.com/harvester/harvester/issues/8669[问题#8669]。
+====
+
+== 取消失败的卷展开
+
+如果您在展开过程中指定的大小超过了{longhorn-product-name}的容量，卷展开的状态将停留在`Resizing`。您可以通过点击`⋮`按钮并选择`Cancel Expand`选项来取消失败的卷展开。
+
+image::volume/cancel-failed-volume-expansion.png[取消失败的卷展开]
+
+== 更改现有卷的存储类
+
+现有卷的存储类无法更改。但是，您可以在从快照恢复新卷时更改存储类，方法如下：
+
+. xref:./volume-snapshots.adoc#_create_volume_snapshots[创建卷快照]。
+. 在xref:./volume-snapshots.adoc#_restore_a_new_volume_from_a_volume_snapshot[使用快照恢复卷时]选择存储类。

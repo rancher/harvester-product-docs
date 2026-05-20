@@ -1,0 +1,108 @@
+= Moteur de données Longhorn V2
+:revdate: 2026-01-02
+:page-revdate: {revdate}
+
+Le moteur de données Longhorn V2 exploite la puissance du Kit de développement de performances de stockage (SPDK) pour réduire considérablement la latence d'E/S tout en augmentant les IOPS et le débit. Le résultat est une solution de stockage haute performance capable de répondre à des demandes de charge de travail diverses.
+
+[IMPORTANT]
+====
+Le moteur de données Longhorn V2 est une fonctionnalité *expérimentale* et ne doit pas être utilisée dans un environnement de production.
+====
+
+== Conditions préalables
+
+Chaque nœud avec un moteur de données Longhorn V2 actif nécessite les ressources dédiées suivantes{nbsp}:
+
+* 1 cœur d'UC pour être utilisé par le pod gestionnaire d'instances Longhorn
+* 2 GiB de RAM (alloués sous forme de 1024 × 2 GiB de grandes pages)
+* Au moins un disque NVMe local pour le stockage des données
+
+== limites
+
+Le moteur de données Longhorn V2 ne prend actuellement pas en charge les opérations suivantes{nbsp}:
+
+* Création et utilisation d'images de sauvegarde
+* Chiffrement de volume
+
+Les disques SSD et autres disques non-NVMe sont gérés à l'aide du pilote SPDK AIO bdev, qui ne prend pas en charge l'opération de désallocation. Si vous utilisez des disques non-NVMe, évitez de lancer la commande de trim sur le système de fichiers car cela entraîne des erreurs d'E/S et des machines virtuelles en pause. Par exemple, lors de la création d'un système de fichiers ext4 sur une machine virtuelle Linux, utilisez `mkfs.ext4 -E nodiscard /dev/vdb` (en supposant que `/dev/vdb` soit votre chemin de périphérique). Sur les machines virtuelles Windows, vous pouvez désactiver le trim pour NTFS en exécutant la commande `fsutil behavior set disabledeletenotify NTFS 1`.
+
+== Syntaxe
+
+Le moteur de données Longhorn V2 n'est disponible que pour les volumes et images nouvellement créés. Les volumes existants, les images de machines virtuelles et les volumes racines de machines virtuelles continueront d'utiliser le moteur de données V1.
+
+. Dans l'interface {harvester-product-name}, allez dans *Paramètres -> avancés*.
+
+. Définissez `longhorn-v2-data-engine-enabled` sur `true`.
++
+{harvester-product-name} charge automatiquement les modules de kernel requis par le moteur de données Longhorn V2 et tente d'allouer 1024 × 2 MiB de grandes pages (par exemple, 2 GiB de RAM) sur tous les nœuds. 
++
+Modifier ce paramètre redémarre automatiquement RKE2 sur tous les nœuds mais n'affecte pas les charges de travail de machines virtuelles en cours d'exécution.
++
+[TIP]
+====
+Si vous rencontrez des messages d'erreur contenant la phrase "capacité de hugepages-2Mi insuffisante", laissez un certain temps pour que l'erreur soit résolue. Si l'erreur persiste, redémarrez les nœuds concernés.
+
+Pour désactiver le moteur de données Longhorn V2 sur des nœuds spécifiques (par exemple, des nœuds avec moins de ressources de traitement et de mémoire), allez à l'écran *Hôtes* et ajoutez l'étiquette suivante aux nœuds cibles{nbsp}:
+
+* étiquette{nbsp}: `node.longhorn.io/disable-v2-data-engine`
+* valeur{nbsp}: `true`
+====
+
+. Allez à l'écran *Hôtes*, puis ajoutez des disques supplémentaires à chaque nœud comme décrit dans xref:/hosts/hosts.adoc#_multi_disk_management[Gestion multi-disques].
++
+Définissez le `Provisioner` de chaque disque supplémentaire sur `Longhorn V2 (CSI)`.
++
+[NOTE]
+====
+{harvester-product-name} définit le https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Pilote de disque Longhorn] sur `auto` afin que les disques NVMe utilisent le pilote SPDK NVMe bdev, qui offre les meilleures performances et prend également en charge des opérations avancées telles que trim (également connu sous le nom de discard).
+
+Les disques SSD et autres disques non-NVMe sont gérés à l'aide du pilote SPDK AIO bdev, qui nécessite que la taille du disque soit un _multiple pair de 4096 octets_. Les disques non-NVMe qui ne répondent pas à cette exigence de taille ne peuvent pas être ajoutés. De plus, le pilote SPDK AIO bdev ne prend pas en charge l'opération de désallocation. Si vous utilisez des disques non-NVMe, évitez de lancer la commande de trim sur le système de fichiers car cela entraîne des erreurs d'E/S et des machines virtuelles en pause.
+====
+
+. Allez à *Classes de stockage avancées ->*, puis ajoutez une nouvelle StorageClass comme décrit dans xref:./storageclass.adoc#_creating_a_storageclass[Création d'une StorageClass]. 
++
+Définissez le `Provisioner` sur `Longhorn V2 (CSI)`.
+
+. Utilisez la nouvelle StorageClass lors de la création des éléments suivants{nbsp}:
++
+* Volumes (soit sur l'écran *Volumes* soit lors de la création de machines virtuelles)
+* Images (sur l'écran *Images*)
++
+Les volumes et images créés à l'aide de la nouvelle StorageClass sont soutenus par le moteur de données Longhorn V2.
+
+== Mise à niveau depuis {harvester-product-name} v1.4.x
+
+{harvester-product-name} v1.4.x, qui utilise {longhorn-product-name} v1.7.x, ne peut pas migrer en direct des machines virtuelles avec des volumes V2 attachés. De plus, le moteur de données V2 ne peut pas être utilisé pour les images de machines virtuelles et les volumes de démarrage. Ces limitations n'existent pas dans {harvester-product-name} v1.5.0 et les versions ultérieures, qui utilisent {longhorn-product-name} v1.8.1 et les versions ultérieures. Cependant, cela ne s'applique qu'aux volumes et images qui sont créés _après_ que {harvester-product-name} soit mis à niveau.
+
+Dans les classes de stockage V2 créées en utilisant {harvester-product-name} v1.4.x, l'option `migratable` est définie sur `false`. Comme toutes les autres propriétés de la classe de stockage, cela ne peut pas être changé une fois défini. De même, les volumes V2 créés en utilisant {harvester-product-name} v1.4.x restent non migrables après la mise à niveau. Si vous avez utilisé le moteur de données V2 dans {harvester-product-name} v1.4.x et que vous mettez ensuite à niveau vers {harvester-product-name} v1.5, vous devez créer une nouvelle classe de stockage V2. L'option `migratable` est définie sur `true` par défaut, de sorte que les volumes et images créés en utilisant cette nouvelle classe de stockage V2 peuvent être migrés en direct.
+
+[IMPORTANT]
+====
+* Si vous utilisez le pilote bdev AIO SPDK (en particulier, si des disques ont été ajoutés en utilisant des `/dev/sd*` chemins), _les volumes V2 créés avant la mise à niveau deviennent inutilisables et ne peuvent pas être récupérés après la mise à niveau_. Pour plus d'informations, voir https://github.com/longhorn/longhorn/issues/10461[issue #10461].
+
+* Si vous utilisez le pilote bdev NVMe SPDK (en particulier, si des disques ont été ajoutés en utilisant des chemins `/dev/nvme*`), les volumes V2 créés avant la mise à niveau fonctionneront toujours. Cependant, ces volumes continueront d'utiliser le moteur {longhorn-product-name} v1.7.x et resteront non migrables. Vous pouvez exporter les données et créer de nouveaux volumes migrables, si nécessaire.
+
+* Toutes les machines virtuelles avec des volumes V2 attachés doivent être arrêtées avant de commencer la mise à niveau. Les volumes V2 actifs provoqueront un blocage du processus de mise à niveau pendant la phase "mise à niveau des services système". Les journaux du pod `apply-manifests` afficheront des messages répétés similaires à ce qui suit{nbsp}:
++
+[,shell]
+----
+instance-manager (aio)(v2) (image=longhornio/longhorn-instance-manager:v1.8.1) state is not running on node harvester-node-0, will retry...
+----
++
+Arrêter toutes les machines virtuelles utilisant des volumes V2 permettra à la mise à niveau de se poursuivre.
+====
+
+Si vous utilisez le pilote bdev NVMe SPDK (en particulier, si des disques ont été ajoutés en utilisant des chemins `/dev/nvme*`) et que des volumes V2 non migrables sont attachés à des machines virtuelles existantes, vous pouvez passer à des volumes migrables en direct en effectuant les étapes suivantes{nbsp}:
+
+. Arrêtez les machines virtuelles.
+
+. Exportez chaque volume V2 attaché vers une image qui utilise la nouvelle classe de stockage V2 (avec l'option `migratable` définie sur `true`).
+
+. Une fois que les volumes sont exportés en images, modifiez la machine virtuelle et effectuez les actions suivantes dans l'onglet *Volumes*{nbsp}:
++
+* Supprimez les volumes V2 existants.
+* Ajoutez les images qui ont été créées à partir des volumes exportés.
+
+. Démarrez les machines virtuelles.
++
+Cette étape peut prendre un certain temps, selon la quantité de données à copier.

@@ -1,0 +1,46 @@
+= Clusters de Nó Único
+:revdate: 2025-07-16
+:page-revdate: {revdate}
+
+{harvester-product-name} suporta clusters de nó único para implementações que podem tolerar menor resiliência ou requerem recursos mínimos de implantação inicial. Você pode criar clusters de nó único usando os métodos de instalação padrão (xref:/installation-setup/methods/iso-install.adoc[ISO], xref:/installation-setup/methods/usb-install.adoc[USB] e xref:/installation-setup/methods/pxe-boot-install.adoc[Inicialização PXE]).
+
+Clusters de nó único suportam a maioria dos recursos {harvester-product-name}, incluindo a criação de clusters RKE2 e fazer upgrade de nós (com algumas limitações). No entanto, esse tipo de implantação tem as seguintes desvantagens principais:
+
+* Sem alta disponibilidade: Erros e atualizações que requerem reinicialização do nó causam tempo de inatividade para máquinas virtuais em execução.
+* Sem migração ao vivo e sem suporte a zero tempo de inatividade durante o fazer upgrade.
+
+== Pré-requisitos
+
+Antes de começar a implantar seu cluster de nó único, certifique-se de que os seguintes requisitos sejam atendidos.
+
+* Hardware: xref:/installation-setup/requirements.adoc#_hardware_requirements[Use hardware de classe servidor] com recursos suficientes para executar {harvester-product-name} e uma carga de trabalho de produção. Laptops e virtualização aninhada não são suportados.
+* Rede: xref:/installation-setup/requirements.adoc#_port_requirements_for_nodes[Configure portas] com base no tipo de tráfego a ser transmitido entre máquinas virtuais.
+
+== Contagem de Réplicas da StorageClass Padrão
+
+{harvester-product-name} usa StorageClasses para descrever como {longhorn-product-name} deve provisionar volumes. Cada StorageClass tem um parâmetro que define o número de réplicas a serem criadas para cada volume.
+
+A StorageClass padrão `harvester-longhorn` tem um valor de contagem de réplicas de *3* para alta disponibilidade. Se você usar `harvester-longhorn` em seu cluster de nó único, {longhorn-product-name} não consegue criar o número padrão de réplicas, e os volumes são marcados como _Degradado_ na tela de *Volumes* da interface.
+
+Para evitar esse problema, você pode realizar uma das seguintes ações:
+
+* Altere a xref:/installation-setup/config/configuration-file.adoc#_install_harvester_storage_class_replica_count[contagem de réplicas] de `harvester-longhorn` para *1* usando um xref:/installation-setup/config/configuration-file.adoc[arquivo de configuração].
+* xref:/storage/storageclass.adoc#_creating_a_storageclass[Crie uma nova StorageClass] com o parâmetro *Número de Réplicas* definido como *1*. Uma vez criado, localize a nova StorageClass na lista e então selecione *⋮* > *Definir como Padrão*.
+
+== Múltiplas Réplicas em um Nó com Múltiplos Discos
+
+{longhorn-product-name} cria apenas uma réplica para cada volume, mesmo que o nó tenha múltiplos discos, porque *Replica Hard Anti-Affinity* está habilitado por padrão. Quando uma réplica saudável já existe em um nó, o agendador é impedido de agendar novas réplicas do mesmo volume nesse nó.
+
+Em clusters de alta disponibilidade, *Replica Hard Anti-Affinity* garante redundância de volume. No entanto, esse mesmo mecanismo pode fazer com que os volumes se tornem degradados em clusters de nó único (já que não há outros nós disponíveis para agendamento de novas réplicas).
+
+Se você quiser que {longhorn-product-name} crie múltiplas réplicas em um nó com múltiplos discos, execute os seguintes passos:
+
+. Ative https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_node_level_soft_anti_affinity[`Replica Node Level Soft Anti-Affinity`]: Quando essa configuração está ativada, {longhorn-product-name} agenda novas réplicas em nós com réplicas saudáveis existentes do mesmo volume.
+. Desative https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_replica_disk_level_soft_anti_affinity[`Replica Disk Level Soft Anti-Affinity`]: Quando essa configuração está desabilitada, {longhorn-product-name} não agenda novas réplicas em discos com réplicas saudáveis existentes do mesmo volume. Desabilitar essa configuração fornece tolerância a falhas para discos em clusters de nó único.
+. (Opcional) xref:../storage/storageclass.adoc#_creating_a_storageclass[Crie uma nova StorageClass] e especifique as tags de disco que devem ser correspondidas durante o agendamento de volumes.
+
+== Atualizações e Manutenção
+
+Clusters de nó único não suportam xref:/virtual-machines/live-migration.adoc[Live Migration], portanto as máquinas virtuais ficam indisponíveis durante o processo de fazer upgrade do cluster. {harvester-product-name} força o desligamento de todas as máquinas virtuais antes de iniciar o processo de fazer upgrade. Você pode configurar {harvester-product-name} para restaurar automaticamente máquinas virtuais em execução usando a opção `restoreVM` da configuração xref:/installation-setup/config/settings.adoc#_upgrade_config[`upgrade-config`].
+
+Ativar xref:/hosts/hosts.adoc#_node_maintenance[Modo de Manutenção] também não é possível porque essa operação depende da funcionalidade de Live Migration, e {harvester-product-name} não pode colocar o único plano de controle em Modo de Manutenção.

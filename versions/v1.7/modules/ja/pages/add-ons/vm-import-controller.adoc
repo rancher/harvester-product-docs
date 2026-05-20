@@ -1,0 +1,332 @@
+= VMインポートコントローラー
+:revdate: 2026-01-27
+:page-revdate: {revdate}
+
+VMware、OpenStack、および仮想アプライアンス（OVA）パッケージから{harvester-product-name}に仮想マシンをインポートするには、vm-import-controllerアドオンを使用します。仮想マシンのインポートを開始する前に、アドオンを有効にする必要があります。
+
+image::vm-import-controller/EnableAddon.png[]
+
+デフォルトでは、vm-import-controllerは一時ストレージを利用し、/var/lib/kubeletからマウントされます。
+
+移行中に、大きなVMのノードがこのマウント上でスペース不足になる可能性があり、その結果、スケジューリングのエラーが発生することがあります。
+
+これを避けるために、ユーザーはPVCバックストレージを有効にし、必要なストレージの量をカスタマイズすることをお勧めします。ベストプラクティスに従って、PVCのサイズは移行される最大のVMのサイズの2倍であるべきです。これは重要です。なぜなら、PVCはVMをダウンロードするためのスクラッチスペースとして使用され、ディスクを生のイメージファイルに変換するために使用されるからです。
+
+image::vm-import-controller/ConfigureAddon.png[]
+
+== vm-import-controller
+
+現在、以下のソースプロバイダーがサポートされています：
+
+* VMware
+* OpenStack
+* 仮想アプライアンス（OVA）
+
+== API
+
+vm-import-controllerは2つのCRDを導入します。
+
+=== ソース
+
+ソースは、ユーザーが有効なソースクラスターを定義できるようにします。
+
+次に例を示します。
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VmwareSource
+metadata:
+  name: vcsim
+  namespace: default
+spec:
+  endpoint: "https://vscim/sdk"
+  dc: "DCO"
+  credentials:
+    name: vsphere-credentials
+    namespace: default
+----
+
+シークレットには、vCenterエンドポイントの認証情報が含まれています：
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: vsphere-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+----
+
+調整プロセスの一環として、コントローラーはvCenterにログインし、ソース仕様に指定された`dc`が有効かどうかを確認します。
+
+このチェックが通過すると、ソースは準備完了としてマークされ、VM移行に使用できるようになります。
+
+[,shell]
+----
+$ kubectl get vmwaresource.migration
+NAME    STATUS
+vcsim   clusterReady
+----
+
+OpenStackベースのソースクラスターの場合、定義の例は次のとおりです：
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OpenstackSource
+metadata:
+  name: devstack
+  namespace: default
+spec:
+  endpoint: "https://devstack/identity"
+  region: "RegionOne"
+  credentials:
+    name: devstack-credentials
+    namespace: default
+----
+
+シークレットには、OpenStackエンドポイントの認証情報が含まれています：
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: devstack-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "project_name": "admin"
+  "domain_name": "default"
+  "ca_cert": "pem-encoded-ca-cert"
+----
+
+調整プロセスの一環として、コントローラーはプロジェクト内の仮想マシンをリストしようとし、ソースを準備完了としてマークします。
+
+[,shell]
+----
+$ kubectl get openstacksource.migration
+NAME       STATUS
+devstack   clusterReady
+----
+
+仮想アプライアンスベースのソースの場合、定義の例は次のとおりです：
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: OvaSource
+metadata:
+  name: example
+  namespace: default
+spec:
+  url: "http://192.168.0.1:8080/example.ova"
+  httpTimeoutSeconds: 300
+  credentials:
+    name: example-ova-credentials
+    namespace: default
+----
+
+オプションの`httpTimeoutSeconds`フィールドでは、HTTPリクエストが完了するまでの最大時間（秒単位）を{harvester-product-name}が待機するように指定できます。この期間は、接続の確立、リダイレクトの処理、レスポンスボディの読み取りを含む、全体のトランザクションをカバーします。値が`0`の場合、タイムアウト機能は無効になります。デフォルト値は`600`（10分）です。
+
+シークレットを構成する際、URLの基本認証情報と、エンドポイントがHTTPSを使用している場合はCA証明書を含めることができます。
+
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata: 
+  name: example-ova-credentials
+  namespace: default
+stringData:
+  "username": "user"
+  "password": "password"
+  "ca.crt": "pem-encoded-ca-cert"
+----
+
+調整プロセスの一環として、コントローラーは指定されたURLにHEADリクエストを発行し、その有効性を確認してからソースを準備完了としてマークします。
+
+[,shell]
+----
+$ kubectl get ovasource.migration
+NAME      STATUS
+example   clusterReady
+----
+
+=== VirtualMachineImport
+
+VirtualMachineImport CRDは、ユーザーがソースVMを定義し、実際のソースクラスターにマッピングしてVMのエクスポート/インポートを実行する方法を提供します。
+
+サンプルのVirtualMachineImportは次のようになります：
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: alpine-export-test
+  namespace: default
+spec:
+  virtualMachineName: "alpine-export-test"
+  folder: "Discovered VM"
+  networkMapping:
+  - sourceNetwork: "dvSwitch 1"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "dvSwitch 2"
+    destinationNetwork: "default/vlan2"
+    networkInterfaceModel: "e1000"
+  defaultNetworkInterfaceModel: "virtio"
+  skipPreflightChecks: false
+  storageClass: "my-storage-class"
+  defaultDiskBusType: "scsi"
+  sourceCluster:
+    name: vcsim
+    namespace: default
+    kind: VmwareSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+  forcePowerOff: false
+  gracefulShutdownTimeoutSeconds: 30
+----
+
+これにより、コントローラーは、ソースのVMwareクラスターで名前が`alpine-export-test`の仮想マシンをエクスポートし、処理し、{harvester-product-name}クラスターに再作成するように促されます。
+
+コントローラーはインポートプロセスを開始する前に設定を確認し、未知のxref:storage/storageclass.adoc[StorageClasses]やネットワークなどのエラーを検出した場合はインポートをキャンセルします。これらのチェックはデフォルトで有効ですが、`skipPreflightChecks`を`true`に設定することで無効にすることができます。
+
+インポートプロセスの期間は、仮想マシンのサイズに依存します。インポートプロセスには時間がかかる場合がありますが、定義された仮想マシンの各ディスクに対して`VirtualMachineImages`が作成されるのを見ることができるはずです。
+
+ソース仮想マシンがフォルダーに配置されている場合、オプションの`folder`フィールドにフォルダー名を指定できます。
+
+`networkMapping`のアイテムのリストは、ソースのネットワークインタフェースが{harvester-product-name}ネットワークにどのようにマッピングされるかを定義します。
+
+必要に応じて、`networkInterfaceModel`フィールドを使用して各ソースネットワークインタフェースのモデルを個別に指定できます。有効な値は`e1000`、`e1000e`、`ne2k_pci`、`pcnet`、`rtl8139`、および`virtio`です。
+
+`defaultNetworkInterfaceModel`フィールドを使用してデフォルトのインタフェースモデルを指定することは、以下の状況で特に便利です：
+
+* 自動検出がVMwareインポートに対して機能しない場合のデフォルトモデルをオーバーライドしたり、OpenStackインポートのすべてのネットワークインタフェースに対して使用されるデフォルトモデルをオーバーライドしたりしたい場合。
+* ネットワークマッピングが提供されず、`pod-network`ネットワークインタフェースが自動的に作成されます。
+
+値を指定しない場合、`virtio`がデフォルトで使用されます。
+
+一致するものが見つからない場合、各一致しないネットワークインタフェースはデフォルトの`managementNetwork`に接続されます。
+
+`storageClass`フィールドは、インポートプロセス中に画像と永続ボリュームのプロビジョニングに使用されるxref:storage/storageclass.adoc[StorageClass]を指定します。値が指定されていない場合、{harvester-product-name}はデフォルトのStorageClassを使用します。
+
+`defaultDiskBusType`フィールドでは、インポートされたディスクのバスタイプを指定できます。{harvester-product-name}は次の方法でこのフィールドを使用します：
+
+* VMwareソース：この値は、{harvester-product-name}が自動的にバスタイプを検出できない場合にのみ使用されます。
+* OpenStackソース：この値は、すべてのインポートされたディスクに使用されます。
+* 仮想アプライアンス（OVA）ソース：この値は、{harvester-product-name}が自動的にバスタイプを検出できない場合にのみ使用されます。
+
+有効な値は`sata`、`scsi`、`usb`、および`virtio`です。値を指定しない場合、`virtio`がデフォルトで使用されます。
+
+デフォルトでは、vm-import-controllerはインポートプロセスを開始する前に、ソース仮想マシンのゲストオペレーティングシステムを正常にシャットダウンしようとします。仮想マシンが特定の期間内に正常にシャットダウンされない場合、強制的に電源がオフになります。正常なシャットダウンのためのこの時間を、デフォルトで`60`秒に設定されている`gracefulShutdownTimeoutSeconds`フィールドの値を変更することで調整できます。正常なシャットダウンを試みずに強制的に電源をオフにするには、`forcePowerOff`フィールドを`true`に設定します。
+
+VMwareベースの仮想マシンをインポートする場合、vm-import-controllerの動作は、 https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools]が仮想マシンにインストールされているかどうかに依存します。
+
+|===
+| VMware Toolsのステータス | vm-import-controllerの動作
+
+| インストール済み
+| インポートプロセスを開始する前に、説明された正常なシャットダウンを試みます。
+
+| インストールされていません
+| `handler virtualmachine-import-job-change: failed to shutdown the guest OS of the source VM: ServerFaultCode: Cannot complete operation because VMware Tools is not running in this virtual machine., requeuing`に似たログを表示します
+|===
+
+[NOTE]
+====
+vm-import-controllerは、OpenStackが自動的に正常なシャットダウンと強制的な電源オフの組み合わせを実行するため、VMwareの`forcePowerOff`および`gracefulShutdownTimeoutSeconds`フィールドのみをサポートしています。
+====
+
+仮想マシンが正常にインポートされると、オブジェクトは次のステータスを反映します：
+
+[,shell]
+----
+$ kubectl get virtualmachineimport.migration
+NAME                    STATUS
+alpine-export-test      virtualMachineRunning
+openstack-cirros-test   virtualMachineRunning
+----
+
+同様に、ユーザーはOpenStackソースのためにVirtualMachineImportを定義することもできます：
+
+[,yaml]
+----
+apiVersion: migration.harvesterhci.io/v1beta1
+kind: VirtualMachineImport
+metadata:
+  name: openstack-demo
+  namespace: default
+spec:
+  virtualMachineName: "openstack-demo" #Name or UUID for instance
+  networkMapping:
+  - sourceNetwork: "shared"
+    destinationNetwork: "default/vlan1"
+  - sourceNetwork: "public"
+    destinationNetwork: "default/vlan2"
+  sourceCluster:
+    name: devstack
+    namespace: default
+    kind: OpenstackSource
+    apiVersion: migration.harvesterhci.io/v1beta1
+----
+
+[NOTE]
+====
+OpenStackは、同じ名前の複数のインスタンスを持つことをユーザーに許可します。そのようなシナリオでは、ユーザーはインスタンスIDを使用することをお勧めします。調整ロジックは、名前が使用されるときに名前からIDへのルックアップを試みます。
+====
+
+==== 当バージョンの注意事項
+
+===== ソース仮想マシン名はRFC1123準拠ではありません
+
+仮想マシンオブジェクトを作成する際、vm-import-controllerアドオンはソース仮想マシンの名前を使用しますが、これはKubernetesオブジェクトの https://kubernetes.io/docs/concepts/overview/working-with-objects/names/#dns-subdomain-names[命名基準]を満たさない可能性があります。インポートの成功を完了させるために、ソース仮想マシンの名前を変更する必要があるかもしれません。
+
+===== VMware ToolsなしのVMwareベースの仮想マシンは移行されません
+
+{harvester-product-name} v1.6.0でVMwareベースの仮想マシンをインポートしようとすると、仮想マシンに https://knowledge.broadcom.com/external/article/315382/overview-of-vmware-tools.html[VMware Tools]がインストールされていない場合、次の問題が発生します：
+
+* vm-import-controllerはゲストオペレーティングシステムを正常にシャットダウンしません。
+* 正常なシャットダウン期間（`gracefulShutdownTimeoutSeconds`）が経過すると、vm-import-controllerは強制的な電源オフを行いません。
+* 仮想マシンはVMwareから移行されません。
+
+この問題に対処するために、次のいずれかの回避策を実行してください：
+
+* 仮想マシンを{harvester-product-name}に移行する前にシャットダウンしてください。
+* `VirtualMachineImport` CRD仕様で、`forcePowerOff`フィールドを`true`に設定します。
+* VMware Toolsまたは https://knowledge.broadcom.com/external/article?legacyId=2073803[open-vm-tools]をインストールしてください。
+
+===== 追放戦略が設定されていません
+
+`evictionStrategy` フィールドは、仮想マシンのインポートプロセス中に自動的に設定されません。これにより、仮想マシンのライブマイグレーションが防止されます。
+
+この問題に対処するには、次のコマンドを実行してください：
+
+[,shell]
+----
+kubectl patch VirtualMachine <vm-name> -n <namespace> --type=merge -p '{
+  "spec": {
+    "template": {
+      "spec": {
+        "evictionStrategy": "LiveMigrateIfPossible"
+      }
+    }
+  }
+}'
+----
+
+欠落している `evictionStrategy` 設定を持つすべての仮想マシンを更新するには、次のコマンドを実行してください：
+
+[,shell]
+----
+for vm in $(kubectl get VirtualMachine -A -o json | jq -r '.items[] | select(.spec.template.spec.evictionStrategy == null) | "\(.metadata.namespace):\(.metadata.name)"'); do \
+  kubectl patch VirtualMachine ${vm#*:} -n ${vm%:*} --type=merge -p '{"spec":{"template":{"spec":{"evictionStrategy":"LiveMigrateIfPossible"}}}}'; \
+done
+----
+
+変更を適用するには、仮想マシンを再起動する必要があります。

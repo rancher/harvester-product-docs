@@ -1,0 +1,158 @@
+= Controlador de Dispositivos PCI
+:revdate: 2025-05-23
+:page-revdate: {revdate}
+
+Um `PCIDevice` no SUSE® Virtualization representa um dispositivo host com um endereço PCI.
+Os dispositivos podem ser passados pelo hipervisor para uma VM criando um recurso `PCIDeviceClaim`, ou usando a interface para habilitar o passthrough. Passar um dispositivo pelo hipervisor significa que a VM pode acessar diretamente o dispositivo e efetivamente possui o dispositivo. Uma VM pode até instalar seus próprios drivers para esse dispositivo.
+
+Isso é realizado usando o complemento `pcidevices-controller`.
+
+Para usar o recurso de dispositivos PCI, os usuários precisam habilitar primeiro o complemento `pcidevices-controller`.
+
+image::vm-import-controller/EnableAddon.png[]
+
+Uma vez que o complemento `pcidevices-controller` tenha sido implantado com sucesso, pode levar alguns minutos para que ele realize a varredura e para que os CRDs do dispositivo PCI se tornem disponíveis.
+
+image::pcidevices/PcideviceEnabled.png[]
+
+== Habilitando Passthrough em um Dispositivo PCI
+
+. Agora vá para a página `Advanced -> PCI Devices`:
++
+image::pcidevices/advanced-pcidevices-index.png[]
+
+. Pesquise seu dispositivo pelo nome do fornecedor (por exemplo, NVIDIA, Intel, etc.) ou pelo nome do dispositivo.
++
+image::pcidevices/search-pcidevices.png[]
+
+. Selecione os dispositivos que você deseja habilitar para passthrough:
++
+image::pcidevices/select-pcidevices.png[]
+
+. Em seguida, clique em *Habilitar Passthrough* e leia a mensagem de aviso. Se você ainda quiser habilitar esses dispositivos, clique em *Habilitar* e aguarde todos os dispositivos serem `Enabled`.
++
+[CAUTION]
+====
+Por favor, não use dispositivos PCI `host-owned` (por exemplo, NICs de gerenciamento e VLAN). A alocação incorreta de dispositivos pode causar danos ao seu cluster, incluindo falha de nó.
+====
++
+image::pcidevices/enable-pcidevices-inprogress.png[]
++
+image::pcidevices/enable-pcidevices-done.png[]
+
+== Anexando Dispositivos PCI a uma VM
+
+Após habilitar esses dispositivos PCI, você pode navegar até a página *Máquinas Virtuais* e selecionar *Editar Config* para passar esses dispositivos.
+
+image::pcidevices/vm-pcidevices-edit-config.png[]
+
+Selecione *Dispositivos PCI* e use o menu suspenso *Dispositivos PCI Disponíveis*. Selecione os dispositivos que deseja anexar na lista exibida e clique em *Salvar*.
+
+image::pcidevices/vm-pcidevices-attach.png[]
+
+== Usando um dispositivo PCI com passthrough na VM
+
+Inicie a VM e execute `lspci` dentro da VM, os dispositivos PCI anexados aparecerão, embora o endereço PCI na VM não corresponda necessariamente ao endereço PCI no host.
+
+== Instalando drivers para seu dispositivo PCI dentro da VM
+
+Isso é como instalar drivers no host. O recurso de passthrough PCI irá vincular o dispositivo do host ao driver `vfio-pci`, o que permite que as VMs usem seus próprios drivers.
+
+== Problemas conhecidos
+
+* https://github.com/harvester/harvester/issues/6648[Problema #6648]: Uma máquina virtual pode ser agendada em um nó incorreto se o cluster tiver várias instâncias do mesmo dispositivo PCI. 
+
+O complemento pcidevices-controller atualmente usa descritores de recursos exclusivos para publicar dispositivos no kubelet. Se múltiplos `PCIDeviceClaims` do mesmo tipo de dispositivo existirem dentro do cluster, o mesmo descritor de recurso exclusivo é usado para esses `PCIDeviceClaims`, e assim a máquina virtual pode ser agendada em um nó incorreto. Para garantir que o dispositivo e o nó corretos sejam usados, selecione *Executar VM em nó específico* ao configurar as configurações de *Agendamento de Nó*.
+
+image::pcidevices/vm-scheduling.png[]
+
+== Dispositivos de Rede SR-IOV
+
+image::pcidevices/SriovNetworkDevicesLink.png[]
+
+O complemento `pcidevices-controller` agora pode escanear interfaces de rede nos hosts subjacentes e verificar se elas suportam Funções Virtuais SRIOV (VFs). Se um dispositivo válido for encontrado, `pcidevices-controller` irá gerar um novo objeto `SRIOVNetworkDevice`.
+
+image::pcidevices/SriovNetworkDevicesList.png[]
+
+Para criar VFs em um SriovNetworkDevice, você pode clicar em *⋮ -> Habilitar* e então definir o *Número de Funções Virtuais*.
+
+image::pcidevices/SriovNetworkDeviceEnable.png[]
+
+image::pcidevices/SriovNetworkVFDefinition.png[]
+
+O `pcidevices-controller` irá definir os VFs na interface de rede e relatar o novo status do dispositivo PCI para os VFs recém-criados.
+
+image::pcidevices/SriovNetworkDevicesVFStatus.png[]
+
+Na próxima revarredura, o `pcidevices-controller` irá criar os PCIDevices para os VFs. Isso pode levar até 1 minuto.
+
+Agora você pode navegar até a página *Dispositivos PCI* para visualizar os novos dispositivos.
+
+Também introduzimos um novo filtro para ajudar você a filtrar dispositivos PCI pela interface de rede subjacente.
+
+image::pcidevices/SriovNetworkDevicesFilter.png[]
+
+O dispositivo PCI recém-criado pode ser passado para máquinas virtuais como qualquer outro dispositivo PCI.
+
+image::pcidevices/SriovNetworkDevicesFilterResult.png[]
+
+== Dispositivos USB
+
+Um recurso `USBDevice` no Harvester representa um dispositivo USB no nó. Dispositivos USB podem ser passados pelo hipervisor para permitir acesso direto das VMs. Isso é possível graças ao complemento `pcidevices-controller`. Para usar USB passthrough, você pode criar um recurso `USBDeviceClaim` ou habilitar a funcionalidade na interface do Harvester. 
+
+O USB passthrough é ligeiramente diferente do PCI passthrough. Por exemplo, você pode controlar completamente um controlador USB com quatro portas USB criando um `PCIDeviceClaim`. No entanto, você também pode criar um `USBDeviceClaim` para controlar apenas uma porta USB. As outras três portas USB permanecem disponíveis para o nó.
+
+[CAUTION]
+====
+Antes de remover o dispositivo USB, desconecte-o da máquina virtual e, em seguida, desative o USB passthrough na tela *Dispositivos USB*.
+====
+
+=== Habilitar USB Passthrough em um Dispositivo USB
+
+. Na interface do Harvester, vá para *Avançado -> Dispositivos USB*.
++
+image::pcidevices/index.png[]
++
+. Localize o dispositivo na lista.
++
+image::pcidevices/search.png[]
++
+. Selecione o dispositivo de destino e, em seguida, selecione *⋮ -> Habilitar USB Passthrough*.
++
+image::pcidevices/select.png[]
++
+. Leia a mensagem de confirmação e, em seguida, clique em *Habilitar Passagem*.
++
+Aguarde um tempo para que o estado do dispositivo mude para *Habilitado*.
++
+image::pcidevices/enable-done.png[]
+
+=== Anexar um Dispositivo USB a uma Máquina Virtual
+
+. Verifique se o USB passthrough está habilitado no dispositivo de destino.
++
+. Vá para *Máquinas Virtuais* e, em seguida, crie uma máquina virtual ou edite a configuração de uma máquina virtual existente.
++
+. Na tela de configuração da máquina virtual, vá para a aba *Dispositivos USB* e, em seguida, selecione um dispositivo da lista *Dispositivos USB Disponíveis*.
++
+image::pcidevices/attach-vm.png[]
++
+. Clique *Criar* ou *Salvar*.
+
+=== Visualize os dispositivos USB conectados a uma máquina virtual.
+
+. Inicie e, em seguida, acesse a máquina virtual.
++
+. Executar `lsusb`.
++
+Esta ferramenta exibe informações sobre barramentos USB e dispositivos conectados.
++
+image::pcidevices/usb-in-vm.png[]
+
+=== Limitações
+
+* Máquinas virtuais com dispositivos USB conectados não podem ser migradas ao vivo porque os dispositivos estão vinculados a um nó específico.
++
+* A conexão e a reconexão a quente de dispositivos USB não são suportadas. Para mais informações, veja https://github.com/kubevirt/kubevirt/issues/11979[Problema KubeVirt #11979].
++
+* Se o caminho do dispositivo mudar ao reanexar o dispositivo ou reiniciar o nó, você deve desanexar o dispositivo da máquina virtual e, em seguida, habilitar o passthrough novamente.
