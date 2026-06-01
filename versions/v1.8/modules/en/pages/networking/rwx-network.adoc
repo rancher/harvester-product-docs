@@ -1,0 +1,374 @@
+= RWX Network
+:revdate: 2026-06-01
+:page-revdate: {revdate}
+
+{harvester-product-name} uses {longhorn-product-name} to provide ReadWriteMany (RWX) volumes for workloads that require shared filesystem access. RWX traffic uses the Kubernetes pod network by default. However, you can configure the xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting to either share the existing xref:networking/storage-network.adoc[storage network] or isolate RWX traffic on a dedicated network for better network bandwidth, performance, and security.
+
+[NOTE]
+====
+Avoid configuring {longhorn-product-name} settings directly, as this can result in unexpected or unwanted system behavior.
+====
+
+== Prerequisites
+
+Before you begin configuring the RWX network, ensure that the following requirements are met:
+
+* The xref:networking/cluster-network.adoc[cluster network] and xref:networking/vm-network.adoc#_vlan_network[VLAN network] are configured correctly. Ensure that both networks cover all nodes and are accessible.
+
+* If you are using _share mode_ (`share-storage-network` is set to `true`), the xref:networking/storage-network.adoc[storage network] must be configured.
++
+When _share mode_ is enabled, the `longhorn-csi-plugin` and `share-manager` pods also use the storage network and consume IPs from its range. Ensure that the storage network IP range accounts for these additional pods. For more information, see the xref:networking/storage-network.adoc#_prerequisites[storage network prerequisites].
+
+* If you are using _dedicated mode_ (`share-storage-network` is set to `false` and the `network` field is configured), the IP range of the RWX network must have the following characteristics:
++
+** Uses the IPv4 CIDR format
++
+** Does not conflict or overlap with Kubernetes cluster networks, storage network, or VM migration network
++
+The following addresses are reserved: `10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0/16`, and `10.53.0.0/16`.
++
+** Covers the requirements of the cluster
++
+Pods that use the RWX network each require one IP address.
++
+|===
+| Pod Type | Quantity | Lifecycle
+
+| `longhorn-csi-plugin`
+| One pod per node (DaemonSet)
+| Persistent
+
+| `share-manager`
+| One pod per active RWX volume
+| Created on demand
+|===
++
+The required number of IP addresses is calculated using the following formula: `Required number of IPs = Number of nodes + 32`, where 32 is an arbitrary buffer to accommodate current and future `share-manager` pods.
++
+Example: If a cluster has five nodes, the IP range should be greater than or equal to `/26` (calculation: 5 + 32 = 37).
++
+** Excludes IP addresses that RWX network components must not use, such as addresses reserved for the gateway and other components.
++
+[CAUTION]
+====
+During a cluster upgrade, ensure that the RWX network IP range has sufficient headroom. Mounted RWX volumes hold their allocated IPs throughout the upgrade, and the upgrade repository deployment uses a {longhorn-product-name} RWX volume, consuming one additional IP. IP exhaustion can cause the upgrade to stall.
+====
+
+* All non-migratable RWX volumes are detached.
++
+You can check the status of RWX volumes using the following command:
++  
+[,bash]
+----
+kubectl get volumes.longhorn.io -n longhorn-system -o json | jq '.items[] | select(.spec.accessMode == "rwx" and .spec.migratable == false) | {name: .metadata.name, state: .status.state}'
+----
+
+== `rwx-network` setting
+
+The xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting allows you to configure the network used to isolate RWX volume traffic.
+
+You can enable and disable the RWX network using either the UI or the CLI. The setting's value is represented by a JSON object with the following structure:
+
+[,json]
+----
+{
+  "share-storage-network": true|false,
+  "network": {
+    "vlan": <vlan-id>,
+    "clusterNetwork": "<cluster-network-name>",
+    "range": "<cidr-range>",
+    "exclude": ["<excluded-ip-or-range>"]
+  }
+}
+----
+
+The `network` field is required only when `share-storage-network` is set to `false` and you want to use a dedicated network for RWX traffic. If the `network` field is not configured, RWX traffic uses the Kubernetes pod network.
+
+The following occur once changes to the `rwx-network` setting are applied:
+
+* {harvester-product-name} creates or updates the NetworkAttachmentDefinition for RWX traffic.
+* {harvester-product-name} updates the {longhorn-product-name} `endpoint-network-for-rwx-volume` setting.
+* {longhorn-product-name} restarts all `longhorn-csi-plugin` pods to apply the new configuration.
+
+=== Configuration
+
+[tabs]
+======
+UI::
++
+--
+[TIP]
+====
+Using the {harvester-product-name} UI to configure the `rwx-network` setting is strongly recommended.
+====
+
+==== Enabling the RWX network
+
+. Go to *Advanced -> Settings -> rwx-network*.
+
+. Select the appropriate mode.
++
+** *Share Storage Network*: Select this option to reuse the storage network configuration. No additional fields are required.
+** *Dedicated Network*: Select this option to configure a dedicated network for RWX traffic.
+
+. If you selected *Dedicated Network*, configure the following fields to construct a Multus NetworkAttachmentDefinition CRD:
++
+** *VLAN ID*: (Optional) VLAN ID for RWX network traffic.
+** *Cluster Network*: Preconfigured cluster network to be used for transmitting traffic.
+** *IP Range*: IPv4 CIDR range for RWX network IPs.
+** *Exclude*: (Optional) IP addresses or ranges to be excluded from allocation.
+
+. Click *Save*.
+
+==== Disabling the RWX network
+
+. Go to *Advanced -> Settings -> rwx-network*.
+
+. Select *Disabled* or reset to the default value.
+
+. Click *Save*.
+
+Once the RWX network is disabled, {longhorn-product-name} starts using the Kubernetes pod network for RWX volume operations.
+--
+
+CLI::
++
+--
+You can use the following command to configure the xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting.
+
+[,bash]
+----
+kubectl edit settings.harvesterhci.io rwx-network
+----
+
+==== Using share storage network mode
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+default: '{"share-storage-network":false}'
+kind: Setting
+metadata:
+  name: rwx-network
+value: '{"share-storage-network":true}'
+----
+
+==== Using dedicated network mode
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+default: '{"share-storage-network":false}'
+kind: Setting
+metadata:
+  name: rwx-network
+value: '{"share-storage-network":false,"network":{"vlan":200,"clusterNetwork":"rwx","range":"192.168.1.0/24","exclude":["192.168.1.1/32","192.168.1.254/32"]}}'
+----
+
+==== Disabling the RWX network
+
+Remove the `value` field or set `share-storage-network` to `false`.
+
+[,yaml]
+----
+apiVersion: harvesterhci.io/v1beta1
+default: '{"share-storage-network":false}'
+kind: Setting
+metadata:
+  name: rwx-network
+value: '{"share-storage-network":false}'
+----
+--
+======
+
+=== Post-configuration steps
+
+[IMPORTANT]
+====
+Verify that the configuration is correct and applied successfully before resuming RWX workloads.
+====
+
+. Verify that the `rwx-network` setting's status is `True` and the type is `configured`.
++
+[,bash]
+----
+kubectl get settings.harvesterhci.io rwx-network -o yaml
+----
++
+Example:
++
+[,yaml]
+----
+    apiVersion: harvesterhci.io/v1beta1
+    default: '{"share-storage-network":false}'
+    kind: Setting
+    metadata:
+    annotations:
+        rwx-network.settings.harvesterhci.io/hash: cc5102f8a0442e4e6d7e13923482f6594333b498
+        rwx-network.settings.harvesterhci.io/initialized: "true"
+        rwx-network.settings.harvesterhci.io/net-attach-def: harvester-system/rwx-network-976r9
+        rwx-network.settings.harvesterhci.io/old-net-attach-def: ""
+    creationTimestamp: "2026-03-20T01:48:26Z"
+    generation: 6
+    name: rwx-network
+    resourceVersion: "1280504"
+    uid: 5f934df5-b483-403c-af43-c1f1ec146db4
+    status:
+    conditions:
+    - lastUpdateTime: "2026-03-20T01:58:25Z"
+        reason: Completed
+        status: "True"
+        type: configured
+    value: '{"share-storage-network":false,"network":{"clusterNetwork":"rwx","range":"192.168.201.0/24","exclude":["192.168.201.1/32"]}}'
+----
+
+. Verify that the `longhorn-csi-plugin` pods are ready and that their networks are correctly configured.
++
+.. Retrieve a list of `longhorn-csi-plugin` pods.
++
+[,bash]
+----
+kubectl get pods -n longhorn-system -l app=longhorn-csi-plugin
+----
++
+.. Inspect each pod to verify the network configuration.
++
+[,bash]
+----
+kubectl -n longhorn-system describe pod <pod-name>
+----
++
+Errors similar to the following indicate that the RWX network has exhausted its available IP addresses. You must reconfigure the RWX network with a sufficient IP range.
++
+[,bash]
+----
+Events:
+Type     Reason                  Age                    From     Message
+----     ------                  ----                   ----     -------
+Warning  FailedCreatePodSandBox  2m58s                  kubelet  Failed to create pod sandbox: rpc error: code = Unknown desc = failed to setup network for sandbox "xyz123": plugin type="multus" name="multus-cni-network" failed (add): error adding container to network "rwx-network-abc123": error at storage engine: Could not allocate IP in range
+----
+
+. Verify that an interface named `lhnet2` exists in the `k8s.v1.cni.cncf.io/network-status` annotations. The IP address of this interface must be within the designated IP range.
++
+.. Retrieve a list of `longhorn-csi-plugin` pods with network details.
++
+[,bash]
+----
+kubectl get pods -n longhorn-system -l app=longhorn-csi-plugin -o jsonpath='{range .items[*]}{.metadata.name}{"\t"}{.metadata.annotations.k8s\.v1\.cni\.cncf\.io/network-status}{"\n"}{end}'
+----
++
+.. Verify that each pod has an interface with the expected IP address from your RWX network range.
++
+Example:
++
+[,shell]
+----
+    longhorn-csi-plugin-x8pxs	[{
+        "name": "k8s-pod-network",
+        "interface": "eth0",
+        "ips": [
+            "10.52.0.59"
+        ],
+        "mac": "b2:7d:99:bc:d5:dd",
+        "default": true,
+        "dns": {}
+    },{
+        "name": "harvester-system/rwx-network-qb6zp",
+        "interface": "lhnet2",
+        "ips": [
+            "192.168.201.2"
+        ],
+        "mac": "ea:9f:a0:48:62:b6",
+        "dns": {}
+    }]
+----
+
+. Create a test RWX workload to verify end-to-end functionality.
++
+.. Create an RWX StorageClass (if none exists).
++
+[,yaml]
+----
+    kind: StorageClass
+    apiVersion: storage.k8s.io/v1
+    metadata:
+      name: longhorn-rwx
+    provisioner: driver.longhorn.io
+    allowVolumeExpansion: true
+    reclaimPolicy: Delete
+    volumeBindingMode: Immediate
+    parameters:
+      numberOfReplicas: "3"
+      staleReplicaTimeout: "2880"
+      fromBackup: ""
+      fsType: "ext4"
+      nfsOptions: "vers=4.2,noresvport,softerr,timeo=600,retrans=5"
+----
++
+.. Apply the following manifest to create a temporary PVC and pod.
++
+[,yaml]
+----
+    apiVersion: v1
+    kind: PersistentVolumeClaim
+    metadata:
+      name: rwx-test-pvc
+    spec:
+      accessModes:
+        - ReadWriteMany
+      resources:
+        requests:
+          storage: 1Gi
+      storageClassName: longhorn-rwx
+    ---
+    apiVersion: v1
+    kind: Pod
+    metadata:
+      name: rwx-test-pod
+    spec:
+      containers:
+        - name: test
+          image: busybox
+          command: ["sh", "-c", "echo RWX OK > /data/test.txt && cat /data/test.txt && sleep 3600"]
+          volumeMounts:
+            - name: data
+              mountPath: /data
+      volumes:
+        - name: data
+          persistentVolumeClaim:
+            claimName: rwx-test-pvc
+----
++
+.. Verify that the pod reaches the `Running` state and the volume is mounted successfully.
++
+[,bash]
+----
+kubectl get pod rwx-test-pod
+kubectl logs rwx-test-pod
+----
++
+A log output of `RWX OK` confirms that the RWX network is functioning correctly.
++
+.. Clean up the test resources.
++
+[,bash]
+----
+kubectl delete pod rwx-test-pod
+kubectl delete pvc rwx-test-pvc
+----
+
+Once the configuration is verified, workloads can safely mount RWX volumes.
+
+== Best practices
+
+* *Select the appropriate mode*: Use _share mode_ if you want to consolidate storage-related traffic and simplify network management. Use _dedicated mode_ if your RWX volumes require different bandwidth, QoS, or security policies than your storage replication traffic.
+
+* *Plan IP allocation carefully*: When configuring an IP range for the RWX network in _dedicated mode_, ensure that the allocated IP addresses can service the future needs of the cluster. The `longhorn-csi-plugin` pods are deployed as a DaemonSet (one per node), so you must account for future node additions.
+
+* *Avoid using `mgmt`*: Configure the RWX network on a non-`mgmt` cluster network to ensure complete separation from Kubernetes control plane traffic. Using `mgmt` is possible but not recommended because of the negative impact (resource and bandwidth contention) on the control plane network performance.
+
+* *Monitor network utilization*: After configuring the RWX network, monitor the network utilization to ensure adequate bandwidth for your RWX workloads.
+
+* *Test before applying to production*: Test the RWX network configuration in a non-production environment before applying it to production workloads.
+
+* *Plan maintenance windows*: Changing the RWX network configuration requires restarting all `longhorn-csi-plugin` pods. This temporarily disrupts operations that depend on the CSI plugin, including virtual machine disk provisioning and volume attachment and detachment.

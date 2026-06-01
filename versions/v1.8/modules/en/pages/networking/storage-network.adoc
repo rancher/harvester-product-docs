@@ -1,5 +1,5 @@
 = Storage Network
-:revdate: 2025-11-12
+:revdate: 2026-06-01
 :page-revdate: {revdate}
 
 {harvester-product-name} uses {longhorn-product-name} to provide block device volumes for virtual machines and pods. If you want to isolate {longhorn-product-name} replication traffic from `mgmt` (the built-in cluster network) or other cluster-wide workloads, you can use a dedicated storage network for better network bandwidth and performance.
@@ -29,9 +29,28 @@ The following addresses are reserved: `10.42.0.0/16`, `10.43.0.0/16`, `10.52.0.0
 +
 ** Covers the requirements of the cluster
 +
-The required number of IP addresses is calculated using the following formula: `Required number of IPs = (Number of nodes * 2) + (Number of disks * 2) + Number of images to be downloaded or uploaded`
+The required number of IP addresses depends on whether the xref:networking/rwx-network.adoc[RWX network] shares the storage network.
 +
-Example: If a cluster has five nodes with two disks each, and ten images are to be uploaded simultaneously, the IP range should be greater than or equal to `/26` (calculation: (5 x 2) + (5 x 2) + 10 = 30).
+*** *Without RWX network sharing* (`share-storage-network` is set to `false`):
++
+`Required IPs = (Number of nodes × 2) + (Number of disks × 2) + Number of concurrent image uploads/downloads`
++
+Example: A cluster with 5 nodes, 2 disks per node, and 10 concurrent image uploads requires at least 30 IPs. Use `/26` or larger (calculation: (5 × 2) + (5 × 2) + 10 = 30).
++
+*** *With RWX network sharing* (`share-storage-network` is set to `true`):
++
+`Required IPs = (Number of nodes × 3) + (Number of disks × 2) + Number of concurrent image uploads/downloads + 32`
++
+The `longhorn-csi-plugin` DaemonSet (one pod per node) also uses the storage network, requiring one additional IP per node. 32 is an arbitrary buffer to accommodate future RWX volume growth.
++
+Example: A cluster with 5 nodes, 2 disks per node, and 10 concurrent image uploads requires at least 67 IPs. Use `/25` or larger (calculation: (5 × 3) + (5 × 2) + 10 + 32 = 67).
++
+[CAUTION]
+====
+{harvester-product-name} requires additional IPs during cluster upgrades. Mounted RWX volumes hold their allocated IPs throughout the upgrade. The upgrade repository deployment uses a {longhorn-product-name} RWX volume, consuming one additional IP. {longhorn-product-name} pods may run in both old and new versions simultaneously. 
+
+IP exhaustion can cause the upgrade process to stall, so the IP range must account for these requirements. For more information about IP usage during upgrades, see <<Best practices>>.
+====
 +
 ** Excludes IP addresses that {longhorn-product-name} pods and the storage network must not use, such as addresses reserved for xref:integrations/rancher/csi-driver.adoc#_rwx_volumes_support[RWX volumes], the gateway, and other components.
 
@@ -426,5 +445,15 @@ Once the configuration is verified, you can manually start virtual machines when
 ** `backing-image-ds` pods: These pods process on-the-fly uploads and downloads of backing image data sources, and are removed once the image uploads and downloads are completed.
 +
 ** `backing-image-manager` pods: Each disk requires one IP address. During an upgrade, both old and new versions of these pods exist, and the old version is deleted once the upgrade is completed.
+
+If you configured the xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting and `share-storage-network` is set to `true`, the following pods also use the storage network:
+
+* `longhorn-csi-plugin` pods: One pod per node (DaemonSet), each requiring one IP address.
+* `share-manager` pods: One pod per active RWX volume, each requiring one IP address.
++
+[NOTE]
+====
+During a cluster upgrade, the {harvester-product-name} upgrade repository deployment is backed by an RWX volume. This creates an additional `share-manager` pod and consumes one extra IP for the duration of the upgrade.
+====
 
 * Configure the storage network on a non-`mgmt` cluster network to ensure complete separation of the {longhorn-product-name} replication traffic from the Kubernetes control plane traffic. Using `mgmt` is possible but not recommended because of the negative impact (resource and bandwidth contention) on the control plane network performance. Use `mgmt` only if your cluster has NIC-related constraints and if you can completely segregate the traffic.
