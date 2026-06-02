@@ -23,12 +23,6 @@ Live migration can occur when the following requirements are met:
 
 A virtual machine is considered non-migratable if it has one or more of the following:
 
-* Volume with the following properties:
-
-** Type: `CD-ROM` or `Container Disk`
-** Access mode: `ReadWriteOnce`
-** StorageClass replica count: `1` (This is not detected in all cases.)
-
 * Host devices passthrough such as `PCI` and `vGPU`
 
 * xref:virtual-machines/create-vm.adoc#_node_scheduling[Node selector] that binds the virtual machine to a specific node
@@ -199,3 +193,16 @@ An outage on the VM migration network can affect the migration process in the fo
 The migration process runs in peer-to-peer mode, which means that the libvirt daemon (libvirtd) on the source node controls the migration by calling the destination daemon directly. A built-in keepalive mechanism ensures that the client connection remains active during the migration process. If the connection remains inactive for a specific period, it is closed, and the migration process is aborted.
 
 By default, the keepalive interval is set to 5 seconds, and the retry count is set to 5. Given these default values, the migration process is aborted if the connection is inactive for 30 seconds. However, the migration may fail earlier or later, depending on the actual cluster conditions.
+
+== Known issues
+
+=== Failure to migrate a virtual machine after ejecting an image from a CD-ROM device
+
+For xref:virtual-machines/create-windows-vm.adoc#_volumes_tab[Windows virtual machines], a dependency in KubeVirt causes migrations to fail if an image is ejected from a CD-ROM. Specifically, the issue occurs if `Container` volumes are declared after `Image Volume` volumes (with `cd-rom` type) within the manifest.
+
+Until the upstream issue is fixed, perform one of the following workarounds:
+
+* Migrate the virtual machine without ejecting images from the CD-ROM devices.
+* During virtual machine creation, declare all `Container` volumes before the first `Image Volume` (with `cd-rom` type).
+
+Related issue: https://github.com/harvester/harvester/issues/10221[#10221]
