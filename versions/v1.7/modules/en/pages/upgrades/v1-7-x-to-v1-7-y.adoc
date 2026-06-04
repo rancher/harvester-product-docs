@@ -1,5 +1,5 @@
 = Upgrade from v1.7.x to v1.7.y
-:revdate: 2026-01-08
+:revdate: 2026-06-04
 :page-revdate: {revdate}
 
 == General information
@@ -33,3 +33,108 @@ During the node draining process, the `upgrade-repo` deployment may get stuck wh
 The workaround is to delete the {longhorn-product-name} replica of the `upgrade-repo` volume on the drained node. This allows the volume to attach and the upgrade flow to continue. Note that any node being drained during the upgrade may encounter this issue, so this workaround may need to be applied whenever it occurs.
 
 Related issues: https://github.com/harvester/harvester/issues/9597[#9597] and https://github.com/longhorn/longhorn/issues/12226[#12226]
+
+=== Unnecessary live migrations during the upgrade
+
+{harvester-product-name} v1.6.x enables xref:virtual-machines/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+
+To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
+
+[NOTE]
+====
+Starting with v1.8.0, this process is handled automatically. The workaround is only necessary when upgrading to a version earlier than v1.8.0.
+====
+
+==== Pre-upgrade workaround steps
+
+. Disable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods: []
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource to prevent drift warnings.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Add the following entry to the `spec.diff.comparePatches` field:
++
+[,yaml]
+----
+   spec:
+     diff:
+       comparePatches:
+       # Keep existing entries
+       - apiVersion: kubevirt.io/v1
+         jsonPointers:
+         - /spec/workloadUpdateStrategy/workloadUpdateMethods
+         kind: KubeVirt
+         name: kubevirt
+----
++
+You must preserve the existing entries.
+
+. Verify that the ManagedChart resource is ready.
++
+[,bash]
+----
+   kubectl get managedchart.management.cattle.io harvester -n fleet-local 
+----
+
+With these changes, virtual machines will not be scheduled for live migration because of `virt-launcher` pod image mismatches during the upgrade.
+
+[IMPORTANT]
+====
+CPU and memory hot-plugging is temporarily unavailable during the upgrade. For more information about decoupling this feature from workload update flags, see https://github.com/kubevirt/kubevirt/issues/17329[KubeVirt issue #17329].
+====
+
+==== Post-upgrade workaround steps
+
+After the upgrade completes successfully, restore the `LiveMigrate` workload update method to re-enable CPU and memory hot-plugging.
+
+. Re-enable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods:
+       - LiveMigrate
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+  
+. Remove the entry you added to the `spec.diff.comparePatches` field.
+
+. Verify that the `LiveMigrate` method has been restored.
++
+[,bash]
+----
+   kubectl get kubevirt kubevirt -n harvester-system -o yaml | grep -A 3 workloadUpdateStrategy
+----
++
+Expected output:
++
+[,yaml]
+----
+   workloadUpdateStrategy:
+     workloadUpdateMethods:
+     - LiveMigrate
+----
+
+Related issue: https://github.com/harvester/harvester/issues/10349[#10349]
