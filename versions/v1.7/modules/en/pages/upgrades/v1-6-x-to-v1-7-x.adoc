@@ -1,5 +1,5 @@
 = Upgrade from v1.6.x to v1.7.x
-:revdate: 2026-05-05
+:revdate: 2026-06-05
 :page-revdate: {revdate}
 
 == General information
@@ -45,13 +45,16 @@ You must use a compatible version (v1.7.x) of the Harvester UI Extension to impo
 During upgrades, {harvester-product-name} generates new NetworkManager connection profiles using the original installation settings stored in `/oem/harvester.config`. The legacy `ifcfg` files in `/oem/90_custom.yaml` remain on the system, but NetworkManager ignores these files and instead stores its configuration under `/etc/NetworkManager`.
 
 |===
-| Scenario | Action Required
+| Scenario | Action Required?
 
 | You installed v1.1 or later, and never manually modified the management interface or DNS configuration.
-| None
+| No
+
+| You originally installed v1.1 or earlier.
+| Yes (Rename the configuration file and update the `/oem/harvester.config` schema.)
 
 | You manually modified the management interface configuration by editing the `/oem/90_custom.yaml` file or by adding CloudInit resources to the `ifcfg` files.
-| **Required** (Custom configuration will be ignored after the upgrade to v1.7.0.)
+| Yes (Custom configuration will be ignored after the upgrade to v1.7.0.)
 |===
 
 If action is required, choose one of the following methods:
@@ -60,7 +63,28 @@ If action is required, choose one of the following methods:
 +
 [NOTE]
 ====
-If you initially installed v1.0, ensure that `install.management_interface` follows the updated schema required by later {harvester-product-name} versions.
+If you originally installed v1.1 or earlier, perform the following actions before starting the upgrade:
+
+* Verify that the `install.management_interface` setting in `/oem/harvester.config` follows the xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[schema] required by later {harvester-product-name} versions.
+
+* Rename the `/oem/99_custom.yaml` file to `/oem/90_custom.yaml`.
+
+As a best practice, run the https://github.com/harvester/upgrade-helpers/tree/main/pre-check[pre-check script] on a {harvester-product-name} control plane node before starting the upgrade. The script determines if either of the listed steps is necessary.
+
+Example:
+
+[,shell]
+----
+Starting network config check...
+Waiting for validator to finish on all nodes...
+Network Config Check FAILED:
+[pod/upgrade-helper-network-check-pxcqt/validator] RESULT: h161-w: Validation completed.
+[pod/upgrade-helper-network-check-s6j8r/validator] ERROR: h161-1: /oem/99_custom.yaml must be renamed to /oem/90_custom.yaml
+[pod/upgrade-helper-network-check-s6j8r/validator] RESULT: h161-1: Validation completed.
+[pod/upgrade-helper-network-check-t757l/validator] ERROR: h161-0: /oem/harvester.config uses old v1.0 schema for management interface config
+[pod/upgrade-helper-network-check-t757l/validator] RESULT: h161-0: Validation completed.
+Network-Config Test: Failed
+----
 ====
 
 * Post-upgrade: Use the `nmcli` tool to manually re-apply your custom configuration to the new NetworkManager connection profiles.
@@ -145,7 +169,7 @@ The DHCP server should return the original IP address and the affected node shou
 
 [NOTE]
 ====
-Propagation of the DHCP client ID from wicked to NetworkManager occurs automatically when upgrading from v1.6.x to v1.7.1. This workaround is only required when upgrading to v1.7.0.
+Propagation of the DHCP client ID from wicked to NetworkManager occurs automatically when upgrading from v1.6.x to v1.7.1 or v1.7.2. This workaround is only required when upgrading to v1.7.0.
 ====
 
 Related issues: https://github.com/harvester/harvester/issues/9260[#9260] and https://github.com/harvester/harvester/issues/3418[#3418]
@@ -233,10 +257,26 @@ $ grub2-editenv /oem/grubenv set \
 
 [NOTE]
 ====
-This workaround is only necessary when upgrading to v1.7.0. In v1.7.1 and later versions, these `ifname=` arguments are automatically added to prevent network disruptions during driver updates.
+This workaround is only necessary when upgrading to v1.7.0 or using bonded interfaces. In v1.7.1 and later versions, these `ifname=` arguments are automatically added to prevent network disruptions during driver updates.
+
+|===
+| Version | Interface | Manual workaround
+
+| v1.7.0
+| Any
+| Required
+
+| v1.7.1+
+| Standalone
+| Not required (automated)
+
+| v1.7.1+
+| Bonded
+| Required
+|===
 ====
 
-Related issues: https://github.com/harvester/harvester/issues/9815[#9815] and https://github.com/harvester/harvester/issues/9802[#9802]
+Related issues: https://github.com/harvester/harvester/issues/9815[#9815], https://github.com/harvester/harvester/issues/9802[#9802], and https://github.com/harvester/harvester/issues/10397[#10397]
 
 === Running virtual machines show "Restart action is required ..."
 
@@ -300,3 +340,108 @@ Example:
 To clear the message, restart the affected virtual machines at your next scheduled maintenance window.
 
 Related issue: https://github.com/harvester/harvester/issues/9751[#9751]
+
+=== Unnecessary live migrations during the upgrade
+
+{harvester-product-name} v1.6.x enables xref:virtual-machines/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+
+To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
+
+[NOTE]
+====
+Starting with v1.8.0, this process is handled automatically. The workaround is only necessary when upgrading to a version earlier than v1.8.0.
+====
+
+==== Pre-upgrade workaround steps
+
+. Disable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods: []
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource to prevent drift warnings.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Add the following entry to the `spec.diff.comparePatches` field:
++
+[,yaml]
+----
+   spec:
+     diff:
+       comparePatches:
+       # Keep existing entries
+       - apiVersion: kubevirt.io/v1
+         jsonPointers:
+         - /spec/workloadUpdateStrategy/workloadUpdateMethods
+         kind: KubeVirt
+         name: kubevirt
+----
++
+You must preserve the existing entries.
+
+. Verify that the ManagedChart resource is ready.
++
+[,bash]
+----
+   kubectl get managedchart.management.cattle.io harvester -n fleet-local 
+----
+
+With these changes, virtual machines will not be scheduled for live migration because of `virt-launcher` pod image mismatches during the upgrade.
+
+[IMPORTANT]
+====
+CPU and memory hot-plugging is temporarily unavailable during the upgrade. For more information about decoupling this feature from workload update flags, see https://github.com/kubevirt/kubevirt/issues/17329[KubeVirt issue #17329].
+====
+
+==== Post-upgrade workaround steps
+
+After the upgrade completes successfully, restore the `LiveMigrate` workload update method to re-enable CPU and memory hot-plugging.
+
+. Re-enable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods:
+       - LiveMigrate
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+  
+. Remove the entry you added to the `spec.diff.comparePatches` field.
+
+. Verify that the `LiveMigrate` method has been restored.
++
+[,bash]
+----
+   kubectl get kubevirt kubevirt -n harvester-system -o yaml | grep -A 3 workloadUpdateStrategy
+----
++
+Expected output:
++
+[,yaml]
+----
+   workloadUpdateStrategy:
+     workloadUpdateMethods:
+     - LiveMigrate
+----
+
+Related issue: https://github.com/harvester/harvester/issues/10349[#10349]

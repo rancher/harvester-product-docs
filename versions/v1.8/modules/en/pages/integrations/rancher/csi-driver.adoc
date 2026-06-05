@@ -1,17 +1,18 @@
 = Harvester CSI Driver
-:revdate: 2026-05-06
+:revdate: 2026-06-03
 :page-revdate: {revdate}
 
-The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the host cluster and hot-plugs host volumes to the virtual machines to provide native storage performance.
+The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the {harvester-product-name} cluster and hot-plugs volumes to the virtual machines to provide native storage performance.
 
 The Harvester CSI Driver supports the following features:
 
 |===
-| Harvester CSI Driver Version | {harvester-product-name} Version | Storage Tiering | RWX Volumes | Online Resizing | Third-Party Storage | Volume Snapshots
+| Harvester CSI Driver Version | {harvester-product-name} Version | Storage Tiering | RWX Volumes | Online Resizing | Third-Party Storage | Volume Snapshots | Volume Backups
 
 | 0.1.15
 | All versions
 | &#10004;
+| &#10006;
 | &#10006;
 | &#10006;
 | &#10006;
@@ -24,6 +25,7 @@ The Harvester CSI Driver supports the following features:
 | &#10006;
 | &#10006;
 | &#10006;
+| &#10006;
 
 | 0.1.24
 | v1.6 and later
@@ -32,12 +34,14 @@ The Harvester CSI Driver supports the following features:
 | &#10004;
 | &#10004;
 | &#10006;
+| &#10006;
 
 | 0.1.25
 | v1.7 and later
 | &#10004;
 | &#10004;
 | &#10004; 
+| &#10004;
 | &#10004;
 | &#10004;
 |===
@@ -84,27 +88,27 @@ Currently, the Harvester CSI Driver only supports single-node read-write (RWO) v
 
 === Deploying with Harvester RKE2 node driver
 
-When spinning up a Kubernetes cluster using Rancher RKE2 node driver, the Harvester CSI driver will be deployed automatically when Harvester cloud provider is selected.
+When spinning up a Kubernetes cluster using Rancher RKE2 node driver, the Harvester CSI Driver will be deployed automatically when Harvester Cloud Provider is selected.
 
 image::rancher/rke2-cloud-provider.png[select-harvester-cloud-provider]
 
 === Install CSI driver manually in the RKE2 cluster
 
-If you prefer to install the Harvester CSI driver without enabling the Harvester cloud provider, you can refer to the following steps:
+If you prefer to install the Harvester CSI Driver without enabling the Harvester Cloud Provider, you can refer to the following steps:
 
 ==== Prerequisites of manual install
 
 Ensure that you have the following prerequisites in place:
 
 * You have `kubectl` and `jq` installed on your system.
-* You have the `kubeconfig` file for your bare-metal Harvester cluster. You can find the `kubeconfig` file from one of the Harvester management nodes in the `/etc/rancher/rke2/rke2.yaml` path.
+* You have the `kubeconfig` file for your {harvester-product-name} cluster. You can find the `kubeconfig` file from one of the management nodes in the `/etc/rancher/rke2/rke2.yaml` path.
 +
 [,shell]
 ----
   export KUBECONFIG=/path/to/your/harvester-kubeconfig
 ----
 
-Perform the following steps to deploy the Harvester CSI driver manually:
+Perform the following steps to deploy the Harvester CSI Driver manually:
 
 ==== Deploy Harvester CSI driver
 
@@ -170,9 +174,9 @@ image::rancher/donot_change_cloud_config_path.png[]
 
 [NOTE]
 ====
-If you prefer not to install the Harvester CSI driver using Rancher
+If you prefer not to install the Harvester CSI Driver using Rancher
 (*Apps* > *Charts*), you can use https://helm.sh[Helm] instead.
-The Harvester CSI driver is https://github.com/harvester/charts/tree/master/charts/harvester-csi-driver[packaged as a Helm chart].
+The Harvester CSI Driver is https://github.com/harvester/charts/tree/master/charts/harvester-csi-driver[packaged as a Helm chart].
 For more information, see https://charts.harvesterhci.io.
 ====
 
@@ -191,11 +195,11 @@ The only difference is in generating the `cloud-init` config where you need to s
 
 == Customize the Default StorageClass
 
-The Harvester CSI driver provides the interface for defining the default StorageClass. If the default StorageClass in unspecified, the Harvester CSI driver uses the default StorageClass of the host Harvester cluster.
+The Harvester CSI Driver provides the interface for defining the default StorageClass. If the default StorageClass in unspecified, the Harvester CSI Driver uses the default StorageClass of the {harvester-product-name} cluster.
 
 You can use the parameter `host-storage-class` to customize the default StorageClass.
 
-. Create a StorageClass for the host Harvester cluster.
+. Create a StorageClass for the {harvester-product-name} cluster.
 +
 Example:
  image:rancher/create-new-sc.png[]
@@ -205,7 +209,7 @@ Example:
 Example:
  image:rancher/deploy-csi-driver-with-host-storage-class.png[]
 
-. Verify that the Harvester CSI driver is ready.
+. Verify that the Harvester CSI Driver is ready.
  .. On the *PersistentVolumeClaims* screen, create a PVC. Select *Use a Storage Class to provision a new Persistent Volume* and specify the StorageClass you created.
 +
 Example:
@@ -223,7 +227,7 @@ Example:
 
 == Passthrough Custom StorageClass
 
-Beginning with Harvester CSI driver v0.1.15, it's possible to create a PersistentVolumeClaim (PVC) using a different Harvester StorageClass on the guest Kubernetes Cluster.
+Beginning with Harvester CSI Driver v0.1.15, you can create a PersistentVolumeClaim (PVC) using a different {harvester-product-name} StorageClass on the guest Kubernetes Cluster.
 
 [NOTE]
 ====
@@ -232,7 +236,7 @@ A compatible Harvester CSI Driver is built into each supported RKE2 version.
 
 === Prerequisites
 
-Add the following prerequisites to your Harvester cluster to ensure the Harvester CSI driver displays error messages correctly. Proper RBAC settings are essential for error message visibility, especially when creating a PVC with a non-existent StorageClass, as shown in the image below:
+Add the following prerequisites to your {harvester-product-name} cluster to ensure the Harvester CSI Driver displays error messages correctly. Proper RBAC settings are essential for error message visibility, especially when creating a PVC with a non-existent StorageClass, as shown in the image below:
 
 image::rancher/error_event_csi_driver.png[]
 
@@ -304,48 +308,36 @@ Make sure the `serviceaccount name` and `namespace` match your cloud provider se
 
 Now you can create a new StorageClass that you intend to use in your guest Kubernetes cluster.
 
-. For administrators, you can create a desired xref:../../storage/storageclass.adoc[StorageClass] (e.g., named *replica-2*) in your bare-metal Harvester cluster.
+. For administrators, you can create a desired xref:../../storage/storageclass.adoc[StorageClass] (e.g., named *replica-2*) in your {harvester-product-name} cluster.
 +
 image::rancher/sc-replica-2.png[]
 
-. Then, on the guest Kubernetes cluster, create a new StorageClass associated with the StorageClass named *replica-2* from the Harvester Cluster:
+. Then, on the guest Kubernetes cluster, create a new StorageClass associated with the StorageClass named *replica-2* from the {harvester-product-name} Cluster:
 +
 image::rancher/downstream-cluster-sc-creation.png[]
 +
 
 [NOTE]
 ====
- ** When choosing a *Provisioner*, select *Harvester (CSI)*. The *Host StorageClass* parameter should match the StorageClass name created on the Harvester Cluster.
- ** For guest Kubernetes owners, you may request that the Harvester cluster administrator create a new StorageClass.
- ** If you leave the `Host StorageClass` field empty, the default StorageClass of the Harvester cluster will be used.
+ ** When choosing a *Provisioner*, select *Harvester (CSI)*. The *Host StorageClass* parameter should match the StorageClass name created on the {harvester-product-name} cluster.
+ ** For guest Kubernetes cluster owners, you may request that the {harvester-product-name} cluster administrator create a new StorageClass.
+ ** If you leave the `Host StorageClass` field empty, the default StorageClass of the {harvester-product-name} cluster will be used.
 ====
 
-. You can now create a PVC based on this new *StorageClass*, which utilizes the *Host StorageClass* to provision volumes on the bare-metal Harvester cluster.
+. You can now create a PVC based on this new *StorageClass*, which utilizes the *Host StorageClass* to provision volumes on the {harvester-product-name} cluster.
 
 == RWX Volume Support
 
-[CAUTION]
-====
-RWX volumes currently only work with a dedicated storage network. https://github.com/harvester/harvester/issues/7218[Issue #7218] tracks the enhancement that will allow RWX volumes to use various VLANs on guest clusters.
-====
-
 === Prerequisites
 
-* Harvester v1.4 or later is installed on the host cluster.
+* The xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting is configured on the {harvester-product-name} cluster.
++
+To prevent IP conflicts with guest cluster virtual machines, use the `exclude` field to reserve their IP addresses.
++
+** *Share Storage Network* mode (`share-storage-network` is set to `true`): Configure the `exclude` field in the xref:installation-setup/config/settings.adoc#_storage_network[`storage-network`] setting.
+** *Dedicated Network* mode (`share-storage-network` is set to `false` and the `network` field is not configured): Configure the `exclude` field in the xref:installation-setup/config/settings.adoc#_rwx_network[`rwx-network`] setting.
 
-* A xref:../../networking/storage-network.adoc[storage network] is configured on the Harvester cluster.
-+
-Use *exclude* to reserve a range of IP addresses for the guest cluster virtual machines. 
-+
-image::rancher/configure-storage-network-01.png[]
-
-* The *Storage Network for RWX Volume* setting on the embedded Longhorn UI is enabled. 
-+
-Go to *General*, and then select *Storage Network for RWX Volume Enabled*.
-+
-image::rancher/enable-rwx-storage-network-01.png[]
-
-* You have created an RWX StorageClass on the host Harvester cluster.
+* You have created an RWX StorageClass on the {harvester-product-name} cluster.
 +
 On the *Storage Class: Create* screen, click *Edit as YAML* and specify the following:
 +
@@ -377,7 +369,7 @@ image::rancher/create-rwx-sc-host-cluster-03.png[]
 +
 https://kubernetes.io/docs/reference/access-authn-authz/rbac/[RBAC authorization] uses a specific Kubernetes API group to drive authorization decisions regarding access to computer or network resources.
 +
-The Harvester CSI driver requires the new RBAC settings to support RWX volumes. To check the RBAC settings, run the command `+kubectl get clusterrole harvesterhci.io:csi-driver -o yaml+`.
+The Harvester CSI Driver requires the new RBAC settings to support RWX volumes. To check the RBAC settings, run the command `+kubectl get clusterrole harvesterhci.io:csi-driver -o yaml+`.
 +
 [,yaml]
 ----
@@ -428,11 +420,11 @@ harvester-networkfs-manager-8tst2                       1/1     Running     4 (3
 harvester-networkfs-manager-xvkgp                       1/1     Running     4 (37m ago)    3h41m
 ----
 
-* The Harvester CSI driver version is v0.1.20 or later.
+* The Harvester CSI Driver version is v0.1.20 or later.
 +
 image::rancher/harvester-csi-driver-version.png[]
 
-* The virtual machine has two network interfaces: a default network interface for intra-cluster communications and allowing access from the infrastructure network (external to the Harvester cluster); and a network that can connect to the storage network.
+* The virtual machine has two network interfaces: a default network interface for intra-cluster communications and allowing access from the infrastructure network (external to the {harvester-product-name} cluster); and a network that can connect to the storage network.
 +
 The NAD *default/vlan101* is used for the storage network.
 +
@@ -464,7 +456,7 @@ An IP that is assigned using the given commands does not persist after a reboot.
 
 . Create a new StorageClass on the guest cluster.
 +
-On the *StorageClass: Create* screen, add a *Host Storage Class* parameter and specify the RWX StorageClass that you created on the host Harvester cluster.  
+On the *StorageClass: Create* screen, add a *Host Storage Class* parameter and specify the RWX StorageClass that you created on the {harvester-product-name} cluster.  
 +
 image::rancher/new-sc-associated-with-rwx.png[]
 +
@@ -525,7 +517,7 @@ Starting with *v0.1.25*, the Harvester CSI Driver supports https://kubernetes.io
 The Harvester CSI Driver supports volume snapshots starting with version *v0.1.25*. Using this feature may require additional steps depending on your Kubernetes distribution.
 
 * RKE2 (recommended): The CSI snapshot controller is deployed by default.
-* Other Kubernetes distributions: You must install the CSI snapshot controller on the guest cluster before upgrading the Harvester CSI Driver to *v0.1.25*. For installation instructions, refer to your distribution's documentation (example: https://documentation.suse.com/cloudnative/storage/latest/en/snapshots-backups/csi-snapshots/enable-csi-snapshot-creation.html({longhorn-product-name}).
+* Other Kubernetes distributions: You must install the CSI snapshot controller on the guest cluster before upgrading the Harvester CSI Driver to *v0.1.25*. For installation instructions, refer to your distribution's documentation (example: https://documentation.suse.com/cloudnative/storage/1.11/en/snapshots-backups/csi-snapshots/enable-csi-snapshot-creation.html[{longhorn-product-name}]).
 ====
 
 === Upgrade RKE2
@@ -545,3 +537,9 @@ You can upgrade K3s using the Rancher UI.
 . Find the CSI driver chart and select *⋮* > *Edit/Upgrade*.
 . Select *Version*.
 . Select *Next* > *Update*.
+
+== RBAC changes for Harvester CSI Driver
+
+Because newer versions of the Harvester CSI Driver have more capabilities, you may need to update your RBAC permissions. Some features and enhancements may not function correctly if you lack the necessary permissions.
+
+For more information, see the https://github.com/harvester/harvester/blob/v1.8/deploy/charts/harvester/templates/rbac.yaml[RBAC configuration] in the GitHub repository.

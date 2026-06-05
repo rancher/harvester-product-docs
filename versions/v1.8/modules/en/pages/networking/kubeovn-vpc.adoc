@@ -1,5 +1,5 @@
 = Virtual Private Cloud
-:revdate: 2026-05-06
+:revdate: 2026-06-05
 :page-revdate: {revdate}
 
 [NOTE]
@@ -40,22 +40,7 @@ The following table outlines the key components of a VPC:
 
 The following diagram illustrates how VPCs, subnets, overlay networks, and virtual machines are logically connected in {harvester-product-name} with Kube-OVN. This architecture includes public and private subnets, allowing separation of internet-facing traffic from internal resources. Moreover, this architecture enables scalable, isolated L3 and L2 network structures across the cluster.
 
-----
-                                 [ VPC: vpc-1 ]
-                                        │
-                  ┌─────────────────────┴─────────────────────┐
-                  │                                           │
-     [ Subnet: vswitch1-subnet ]                 [ Subnet: vswitch2-subnet ]
-       CIDR: 172.20.10.0/24                          CIDR: 172.20.20.0/24
-       Gateway: 172.20.10.1                          Gateway: 172.20.20.1
-                  │                                           │
-     [ Overlay Network: vswitch1 ]               [ Overlay Network: vswitch2 ]
-                  │                                           │
-         ┌────────┴────────┐                         ┌────────┴────────┐
-         │                 │                         │                 │
-[VM: vm1-vswitch1] [VM: vm2-vswitch1]                [VM: vm1-vswitch2]
-IP: 172.20.10.X     IP: 172.20.10.Y                    IP: 172.20.20.Z
-----
+image::networking/kubeovn-integration.svg[SUSE Virtualization and Kube-OVN integration]
 
 |===
 | Component | Platform | Logical Responsibility
@@ -503,40 +488,7 @@ VPC peering offers the following benefits:
 
 The following diagram shows how VPCs and subnets in Kube-OVN map to overlay networks and virtual machines in {harvester-product-name}. This architecture enables you to create scalable and isolated L3 and L2 network structures across the cluster.
 
-----
-                                          ┌───────────────────────────────────────────┐
-                                          │                 Kube-OVN                  │
-                                          │          (SDN Controller / IPAM)          │
-                                          └───────────────────────────────────────────┘
-                                                                │
-         ┌──────────────────────────────────────────────────────┴──────────────────────────────────────────────────────────┐
-         │                                                      │                                                          │
- ┌──────────────┐                                       ┌──────────────┐                                           ┌──────────────┐
- │  VPC: vpc-1  │                                       │VPC: vpcpeer-1│      ◀────────── peering ──────────▶      │VPC: vpcpeer-2│
- └──────────────┘                                       └──────────────┘                                           └──────────────┘
-        │                                                       │                                                         │
-        ▼                                                       ▼                                                         ▼
-┌──────────────────────────────┐                 ┌──────────────────────────────┐                    ┌──────────────────────────────┐
-│ Subnet: vswitch1-subnet      │                 │ Subnet: vswitch3-subnet      │                    │ Subnet: vswitch4-subnet      │
-│ CIDR: 172.20.10.0/24         │                 │ CIDR: 10.0.0.0/24            │                    │ CIDR: 20.0.0.0/24            │
-│ Gateway: 172.20.10.1         │                 │ Gateway: 10.0.0.1            │                    │ Gateway: 20.0.0.1            │
-└──────────────────────────────┘                 └──────────────────────────────┘                    └──────────────────────────────┘
-            │  (1:1 mapping - Provider binding)                 │                                                    │
-            ▼                                                   ▼                                                    ▼
-┌──────────────────────────────┐                 ┌──────────────────────────────┐                    ┌──────────────────────────────┐
-│ Overlay: vswitch1            │                 │ Overlay: vswitch3            │                    │ Overlay: vswitch4            │
-│ Type: OverlayNetwork         │                 │ Type: OverlayNetwork         │                    │ Type: OverlayNetwork         │
-└──────────────────────────────┘                 └──────────────────────────────┘                    └──────────────────────────────┘
-            │                                                   │                                                    │
-            ▼                                                   ▼                                                    ▼
-┌──────────────────────┐                            ┌──────────────────────┐                              ┌──────────────────────┐
-│   VM: vm1-vswitch1   │                            │   VM: vm1-vswitch3   │                              │   VM: vm1-vswitch4   │
-│   IP: 172.20.10.5    │   ◀ ──────── X ──────── ▶  │   IP: 10.0.0.2       │     ◀── Connected via ──▶    │   IP: 20.0.0.2       │
-└──────────────────────┘                            └──────────────────────┘       vswitch (overlay)      └──────────────────────┘
-            ▲
-            │
-VM launched and managed by {harvester-product-name}
-----
+image::networking/sdn-virtualization-mapping.svg[Mapping of VPCs and subnets to overlay networks and virtual machines]
 
 ==== VPC peering configuration examples
 
@@ -764,3 +716,34 @@ Answer: `169.254.0.0/16` is *not part* of the RFC 1918 private address space (`1
 ==== VPC peering limitation
 
 Peering only works between custom VPCs. Any attempt to establish a peering connection between the default VPC (`ovn-cluster`) and a custom VPC will fail.
+
+== VPC topology
+
+The {harvester-product-name} UI provides an interactive topology map of your VPC infrastructure, displaying the relationships between VPCs, subnets, overlay networks, and virtual machines.
+
+To view the topology for a VPC, go to *Networks -> Virtual Private Cloud*, locate your target VPC, and click *Topology*.
+
+image::networking/vpc-network-topology.png[VPC network topology]
+
+=== Topology layout
+
+The topology map uses a hierarchical layout (VPC -> subnet -> overlay network -> virtual machine) that allows you to audit network paths and manage visibility dynamically.
+
+|===
+| Component | Description
+
+| *VPC*
+| Virtual private cloud that contains the visualized components
+
+| *Peered VPC*
+| Other VPCs connected via peering (labeled with "Peering" badge)
+
+| *Subnet*
+| Subnet with CIDR, gateway, and provider
+
+| *Overlay network*
+| Overlay network mapped to subnet (displayed when a non-OVN provider is used)
+
+| *Virtual machine*
+| Virtual machine with network interfaces, IP addresses, and MAC addresses
+|===
