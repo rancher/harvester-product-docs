@@ -1,0 +1,68 @@
+= Network Resilience
+:revdate: 2026-05-19
+:page-revdate: {revdate}
+
+== NIC bonding and redundancy
+
+|===
+| Bond Mode | Link Aggregation | Operation | Switch Requirement | Notes
+
+| mode 1 (`active-backup`)
+| None
+| Only one NIC is active; another NIC takes over on failure
+| None
+| Simplest failover
+
+| mode 4 (`802.3ad`)
+| Link Aggregation Control Protocol (LACP)
+| All NICs are active (active load balancing + failover)
+| LACP-capable switch
+| Recommended for production environments
+
+| mode 5 (`balance-tlb`)
+| None
+| Adaptive transmit load balancing
+| None
+| Balances performance and configuration complexity
+|===
+
+Sample configuration for 802.3ad bonding:
+
+[,yaml]
+----
+install:
+  management_interface:
+    interfaces:
+      - name: ens5
+      - name: ens6
+    bond_options:
+      mode: 802.3ad
+      miimon: 100 # Link check every 100 ms
+      lacp_rate: fast # LACP packets every second
+    method: static
+    ip: 10.0.0.11/24
+    gateway: 10.0.0.1
+    dns: 10.0.0.2
+----
+
+== Network segmentation for resilience and security
+
+|===
+| Network | Function | Resilience Measure
+
+| `mgmt-bo`
+| kubectl, etcd, Kubernetes API, VIP, {harvester-product-name} UI
+| Two or more NICs; 802.3ad
+
+| VM network
+| Virtual machine traffic, VLAN trunks
+| Separate NICs
+
+| Storage network
+| {longhorn-product-name} replication traffic
+| Dedicated VLAN
+
+| Out-of-band networks, including IPMI
+| iDRAC, iLO hardware management
+| Physically separate network
+|===
