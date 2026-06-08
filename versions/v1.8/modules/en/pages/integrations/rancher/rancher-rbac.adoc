@@ -1,0 +1,305 @@
+= Rancher Role-Based Access Control
+:revdate: 2026-06-08
+:page-revdate: {revdate}
+
+[NOTE]
+====
+The RBAC integration between {harvester-product-name} and {rancher-product-name} is available in {rancher-short-name} 2.14.1 as an experimental feature. While API-level permissions are fully enforced and tested, the UI remains under development. Notably, read-only users may see UI options they lack permissions to execute. {harvester-product-name} will reject any unauthorized actions with "permission denied" errors.
+
+For more information, see GitHub issue https://github.com/harvester/harvester/issues/10241[#10241].
+====
+
+{harvester-product-name} provides roles that govern the operational privileges of {rancher-short-name} users. A {rancher-short-name} administrator can assign these roles to team members, ensuring they have the cluster- and project-scoped permissions required for a multi-tenant environment.
+
+These roles are defined using https://documentation.suse.com/cloudnative/rancher-manager/v2.14/en/rancher-admin/users/authn-and-authz/manage-role-based-access-control-rbac/custom-roles.html[role templates] derived from {rancher-short-name}'s built-in roles. They complement the existing {harvester-product-name} and {rancher-short-name} integration model, which seamlessly maps {rancher-short-name} user permissions to {harvester-product-name} resources.
+
+== Installation
+
+The RBAC integration is available as a Helm chart in {rancher-short-name} 2.14.1 and later, accessible directly from the https://documentation.suse.com/cloudnative/rancher-manager/v2.14/en/cluster-admin/helm-charts-in-rancher/helm-charts-in-rancher.html#_access_charts[charts catalog].
+
+. Go to *☰ -> Cluster Management*.
+
+. Locate the `local` cluster, and then click *Explore*.
+
+. In the left navigation menu on the *Cluster Dashboard* screen, select *Apps -> Charts*.
+
+. Search for "Harvester RBAC".
+
+. Follow the on-screen instructions for installing the chart.
+
+Once the chart is installed, the following roles are added to {rancher-short-name}:
+
+|===
+| Role | Scope
+
+| *View Virtualization Resources*
+| Cluster
+
+| *Manage Virtualization Resources*
+| Cluster
+
+| *View Virtualization Resources*
+| Project
+
+| *Manage Virtualization Resources*
+| Project
+|===
+
+You can view the permissions for each role on the *Role Template* screen (*Users & Authentication -> Role Template* -> *Cluster* or *Project* tab).
+
+== Cluster roles
+
+The following cluster-scoped roles are available:
+
+* *View Virtualization Resources*: Provides cluster operators a unified, read-only view of cluster assets. This role automatically inherits the permissions of the built-in "View Cluster Member" role.
+
+* *Manage Virtualization Resources*: Provides advanced users with full management access to all virtualization resources on a {harvester-product-name} cluster. This role automatically inherits the permissions of the built-in "Cluster Member" role.
+
+The default aggregated permissions of these roles do not exceed those of their parent roles. Consequently, users assigned to these roles lack permissions to view or modify guest clusters they do not own. They also cannot modify global settings, such as {rancher-short-name} membership or node driver configuration.
+
+|===
+| Object | *View Virtualization Resources* Role | *Manage Virtualization Resources* Role
+
+| Workload resources (virtual machines, images, volumes, StorageClasses, and others)
+| View only
+| Modify
+
+| Backup, restore, and snapshot resources
+| View only
+| Modify
+
+| Infrastructure resources (hosts, disks, networks, and others)
+| View only
+| Modify
+
+| Host devices (PCI, SR-IOV, vGPU, and others)
+| View only
+| Modify
+
+| SSH keys, templates, and secrets
+| View only
+| Modify
+
+| Projects and namespaces
+| View only
+| Modify
+
+| Advanced cluster settings
+| View only
+| Modify
+
+| Cluster membership
+| View only
+| Modify
+
+| Project membership
+| View only
+| Modify
+
+| Cluster and workload metrics
+| View only
+| View only
+
+| Support bundles
+| Generate
+| Generate
+
+| Cluster operating system
+| No access
+| Upgrade
+|===
+
+Users with these roles _cannot_ perform the following actions:
+
+* Access and modify resources in {harvester-product-name} clusters where they lack membership
+* Access and modify global {rancher-short-name} settings associated with membership, node driver configuration, and others
+
+=== Assigning cluster roles
+
+An administrator can add users to a {harvester-product-name} cluster using the *Virtualization Management* screen.
+
+. Go to *☰ -> Virtualization Management*.
+
+. Locate the target {harvester-product-name} cluster, and then click *Edit Config*.
+
+. In the *Member Roles* section, click *Add*.
+
+. In the *Member* list, select the target user.
+
+. In the *Cluster Permissions* section, select an appropriate cluster role, and then click *Add*.
+
+Alternatively, administrators can assign cluster roles during the import process. When importing a {harvester-product-name} cluster into {rancher-short-name}, user roles can be configured in the *Member Roles* section of the cluster creation screen.
+
+== Project roles
+
+The following project-scoped roles are available:
+
+* *View Virtualization Resources*: Provides users a unified, read-only view of specific projects in {harvester-product-name}. This role automatically inherits the built-in "Read-Only" role.
+
+* *Manage Virtualization Resources*: Inherits the permissions of the built-in "Project User" role.
+
+Their default aggregated permissions do not exceed those of their parent roles. Consequently, these roles lack permissions to access resources in other projects on the same {harvester-product-name} cluster. They also cannot view or modify guest clusters that the users do not own.
+
+|===
+| Object | *View Virtualization Resources* Role | *Manage Virtualization Resources* Role
+
+| Virtualization resources within the project
+| View only
+| Modify
+
+| SSH keys, templates, and secrets within the project
+| View only
+| Modify
+
+| Namespaces within the project
+| View only
+| Modify
+
+| Project membership
+| No access
+| No access
+
+| Infrastructure resources
+| No access
+| No access
+
+| Host devices (PCI, SR-IOV, vGPU, and others)
+| No access
+| No access
+
+| Monitoring metrics
+| No access
+| No access
+|===
+
+=== Assigning project roles
+
+An administrator can add users to specific projects in {harvester-product-name} using the *Virtualization Management* screen.
+
+. Go to *☰ -> Virtualization Management*.
+
+. Locate the {harvester-product-name} cluster, and then click its name to access the {harvester-product-name} UI.
+
+. Go to *Projects/Namespaces*.
+
+. Locate the project, and then click *Edit Config*.
+
+. In the *Members* section, click *Add*.
+
+. In the *Member* list, locate the target user.
+
+. In the *Cluster Permissions* section, select an appropriate cluster role, and then click *Add*.
+
+== Adding new permissions
+
+If the permissions provided by these roles are insufficient for your requirements, you can extend their scope by creating custom roles that inherit from the existing ones and include additional permissions.
+
+[CAUTION]
+====
+Because the permission scopes of roles are additive, a user assigned multiple roles receives the combined permissions of all of them. When creating custom roles and appending permissions, carefully review the configuration to prevent unintentional privilege escalation.
+====
+
+Example:
+
+{harvester-product-name} does not allow non-administrators to create or modify logging output resources for security reasons. Only administrators and system service accounts can modify these resources. To allow specific cluster operators to manage logging resources, you can create a custom role that inherits from the *Manage Virtualization Resources* cluster role and append the necessary permissions to it.
+
+. Go to *☰ -> Users & Authentication -> Role Template*.
+
+. On the *Cluster* tab, click *Create Cluster Role*.
+
+. Configure the following settings:
++
+** *Name*: "Manage Logging Resources"
+** *Description*: "Cluster role for managing {harvester-product-name} logging output resources"
+** **Grant Resources**:
+*** *Verbs*: "*""
+*** *Resource*: "*""
+*** *API Groups*: "logging.banzaicloud.io"
+** *Inherit From*: "Manage Virtualization Resources"
+
+. Click *Create*.
+
+Assign this new role to the cluster operators who need to manage logging resources. They will inherit all privileges of the *Manage Virtualization Resources* role plus the additional permissions required for logging administration.
+
+=== Custom settings
+
+The {harvester-product-name}-{rancher-short-name} RBAC Helm chart also provides the following custom settings that enable you to append permissions to the existing roles:
+
+|===
+| Role | Scope | Setting
+
+| *View Virtualization Resources*
+| Cluster
+| `clusterRole.virtClusterView`
+
+| *Manage Virtualization Resources*
+| Cluster 
+| `clusterRole.virtClusterManage`
+
+| *View Virtualization Resources*
+| Project
+| `projectRole.virtProjectView`
+
+| *Manage Virtualization Resources*
+| Project
+| `projectRole.virtProjectManage`
+|===
+
+For example, to allow _all_ users with the cluster-scoped *Manage Virtualization Resources* role to manage logging resources, you can add the following permissions to the `clusterRole.virtClusterManage` chart value:
+
+[,yaml]
+----
+clusterRole:
+  virtClusterManage:
+    additionalRules:
+    - apiGroups: ["logging.banzaicloud.io"]
+      resources: ["*"]
+      verbs: ["*"]
+----
+
+[IMPORTANT]
+====
+Permissions added through Helm chart values apply to all users that were assigned that role. Ensure that the additional permissions align with the intended scope of the role.
+
+Resources in the `default` and `harvester-public` namespaces are accessible to all cluster and project members.
+====
+
+== Guest cluster permissions
+
+By default, users only have access to guest clusters they own, allowing them to view and modify resources within those specific clusters.
+
+|===
+| Role | Scope | Guest Cluster Creation
+
+| *View Virtualization Resources*
+| Cluster
+| Not allowed
+
+| *Manage Virtualization Resources*
+| Cluster
+| Allowed in any project on the {harvester-product-name} cluster
+
+| *View Virtualization Resources*
+| Project
+| Not allowed
+
+| *Manage Virtualization Resources*
+| Project
+| Allowed only within projects where membership is held
+|===
+
+A {rancher-short-name} administrator can add users as members of existing guest clusters.
+
+. Go to *☰ -> Cluster Management*.
+
+. Locate the target guest cluster, and then click *Edit Config*.
+
+. In the *Member Roles* section, click *Add*.
+
+. In the *Member* list, select the target user.
+
+. In the *Cluster Permissions* section, select an appropriate role, and then click *Add*.
+
+== Support bundle permissions
+
+Only cluster-scoped users can generate support bundles. Project-scoped users lack the necessary permissions because the controller requires access to system namespaces and underlying hosts for data collection. Granting project users access to these system namespaces and hosts introduces significant security risks.
