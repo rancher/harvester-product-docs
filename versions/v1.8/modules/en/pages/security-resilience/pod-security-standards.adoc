@@ -1,0 +1,58 @@
+= Cluster Pod Security Standards
+:revdate: 2026-06-10
+:page-revdate: {revdate}
+
+Starting with v1.8.0, {harvester-product-name} enables cluster administrators to apply https://kubernetes.io/docs/concepts/security/pod-security-standards/[Kubernetes Pod Security Standards (PSS)] using a global setting. PSS define policies that can be applied to clusters and namespaces to control and restrict how workloads are executed.
+
+== Background
+
+If you run bare-metal workloads in large multi-tenant environments, you must prevent privilege escalation. One way to do this is to manually apply PSS by following the steps in https://harvesterhci.io/kb/2025/05/08/using-pod-security-standard[this Knowledge Base article]. The new `cluster-pod-security-standard` setting simplifies this setup by allowing cluster-wide enforcement. This setting is disabled by default.
+
+[,json]
+----
+{
+  "enabled":false,
+  "whitelistedNamespacesList":"", 
+  "privilegedNamespacesList":"",
+  "restrictedNamespacesList":""
+}
+----
+
+The setting includes the following fields:
+
+* `enabled`: enabled: When set to `true`, the https://kubernetes.io/docs/concepts/security/pod-security-standards/#baseline[Baseline] PSS profile is enforced on all non-{harvester-product-name} system namespaces. Core {harvester-product-name} features are fully validated to run at this _Baseline_ level. Once you enable this setting, you cannot modify namespace PSS configurations directly. You must make all changes through the {harvester-product-name} UI or API.
+
+* `whitelistedNamespacesList`: Namespaces to be exempted from PSS enforcement.
+
+* `privilegedNamespacesList`: Namespaces that will have the [Privileged](https://kubernetes.io/docs/concepts/security/pod-security-standards/#privileged) PSS profile enforced.
+
+* `restrictedNamespacesList`: Namespaces that will have the [Restricted](https://kubernetes.io/docs/concepts/security/pod-security-standards/#restricted) PSS profile enforced.
+
+== Configuring Pod Security Standards
+
+Cluster-wide PSS can be applied using the `cluster-pod-security-standard` setting.
+
+. Check the current value of the setting.
++
+[,shell]
+----
+kubectl get settings.harvesterhci.io cluster-pod-security-standard
+NAME                            VALUE
+cluster-pod-security-standard
+----
+
+. Update the setting as follows:
++
+[,shell]
+----
+kubectl patch settings.harvesterhci.io cluster-pod-security-standard --type='json' -p='[{"op": "replace", "path": "/value", "value": "{\"enabled\":true,\"whitelistedNamespacesList\":\"default\",\"restrictedNamespacesList\":\"demo,restricted-ns\",\"privilegedNamespacesList\":\"demo2,privileged-ns\"}"}]'
+----
+
+. Verify that the setting was applied.
++
+[,shell]
+----
+kubectl get settings.harvesterhci.io cluster-pod-security-standard
+NAME                            VALUE
+cluster-pod-security-standard   {"enabled":true,"whitelistedNamespacesList":"default","restrictedNamespacesList":"demo,restricted-ns","privilegedNamespacesList":"demo2,privileged-ns"}
+----
