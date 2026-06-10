@@ -1,0 +1,1087 @@
+= Archivo de configuración
+:page-languages: [en, de, es, fr, ja, pt, zh]
+:revdate: 2026-01-20
+:page-revdate: {revdate}
+
+== Ejemplo de configuración
+
+Se puede proporcionar un archivo de configuración durante la instalación manual o automática para configurar varios ajustes. A continuación se muestra un ejemplo de configuración:
+
+[,yaml]
+----
+scheme_version: 1
+server_url: https://cluster-VIP:443
+token: TOKEN_VALUE
+os:
+  ssh_authorized_keys:
+    - ssh-rsa AAAAB3NzaC1yc2EAAAADAQAB...
+    - github:username
+  write_files:
+  - encoding: ""
+    content: test content
+    owner: root
+    path: /etc/test.txt
+    permissions: '0755'
+  hostname: myhost
+  modules:
+    - kvm
+    - nvme
+  sysctls:
+    kernel.printk: "4 4 1 7"
+    kernel.kptr_restrict: "1"
+  dns_nameservers:
+    - 8.8.8.8
+    - 1.1.1.1
+  ntp_servers:
+    - 0.suse.pool.ntp.org
+    - 1.suse.pool.ntp.org
+  password: rancher
+  environment:
+    http_proxy: http://myserver
+    https_proxy: http://myserver
+  labels:
+    topology.kubernetes.io/zone: zone1
+    foo: bar
+    mylabel: myvalue
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+  additionalKernelArguments: "multipath=on"
+install:
+  mode: create
+  management_interface:
+    interfaces:
+    - name: ens5
+      hwAddr: "B8:CA:3A:6A:64:7C"
+    method: dhcp
+  force_efi: true
+  device: /dev/sda
+  data_disk: /dev/sdb
+  silent: true
+  iso_url: http://myserver/test.iso
+  poweroff: true
+  no_format: true
+  debug: true
+  tty: ttyS0
+  vip: 10.10.0.19
+  vip_hw_addr: 52:54:00:ec:0e:0b
+  vip_mode: dhcp
+  cluster_pod_cidr: 10.52.0.0/16
+  cluster_service_cidr: 10.53.0.0/16
+  cluster_dns: 10.53.0.10
+  force_mbr: false
+  addons:
+    harvester_vm_import_controller:
+      enabled: false
+      values_content: ""
+    harvester_pcidevices_controller:
+      enabled: false
+      values_content: ""
+    rancher_monitoring:
+      enabled: true
+      values_content: ""
+    rancher_logging:
+      enabled: false
+      values_content: ""
+    harvester_seeder:
+      enabled: false
+      values_content: ""
+system_settings:
+  auto-disk-provision-paths: ""
+----
+
+== Referencia de configuración
+
+A continuación se presenta una referencia de todas las claves de configuración.
+
+[CAUTION]
+====
+*Riesgos de seguridad*: El archivo de configuración contiene credenciales que deben mantenerse en secreto. Por favor, no haga que el archivo de configuración sea accesible públicamente.
+====
+
+[NOTE]
+====
+*Prioridad de configuración*: Cuando proporcione un archivo de configuración remoto durante la instalación, el archivo de configuración no sobrescribirá los valores de las entradas que había rellenado y seleccionado previamente.  Se da prioridad a los valores que introduzca durante la instalación guiada.
+Por ejemplo, si ha especificado `os.hostname` en su archivo de configuración y durante la instalación rellena el campo de `hostname` cuando se le solicite, el valor que introduzca tendrá prioridad sobre el `os.hostname` de su archivo de configuración.
+====
+
+=== `scheme_version`
+
+==== Definición
+
+La versión del esquema reservada para la migración de configuración futura.
+
+Esta configuración es obligatoria para migrar la configuración a una nueva versión del esquema. Especifica la versión anterior y la necesidad de migrar.
+
+[CAUTION]
+====
+Asegúrese de que su configuración personalizada siempre tenga la versión correcta del esquema.
+====
+
+
+=== `server_url`
+
+==== Definición
+
+`server_url` es la URL del clúster {harvester-product-name}, que se utiliza para que el nuevo `node` se una al clúster.
+
+Esta configuración es obligatoria cuando la instalación está en modo `JOIN`. El formato predeterminado de `server_url` es `https://cluster-VIP:443`.
+
+[NOTE]
+====
+
+Para asegurar una alta disponibilidad (HA) {harvester-product-name} del clúster, utiliza ya sea el <<_install_vip, VIP>> del clúster o un nombre de dominio en `server_url`.
+====
+
+
+==== Ejemplo
+
+[,yaml]
+----
+server_url: https://cluster-VIP:443
+install:
+  mode: join
+----
+
+=== `token`
+
+==== Definición
+
+El secreto del clúster o el token del nodo. Si el valor coincide con el formato de un token de nodo, se asumirá automáticamente que es un token de nodo. De lo contrario, se tratará como un secreto del clúster.
+
+Para que un nuevo nodo se una al clúster, el token debe coincidir con lo que tiene el servidor.
+
+==== Ejemplo
+
+[,yaml]
+----
+token: myclustersecret
+----
+
+O un token de nodo
+
+[,yaml]
+----
+token: "K1074ec55daebdf54ef48294b0ddf0ce1c3cb64ee7e3d0b9ec79fbc7baf1f7ddac6::node:77689533d0140c7019416603a05275d4"
+----
+
+'''
+
+&nbsp;
+
+=== `os.ssh_authorized_keys`
+
+==== Definición
+
+Una lista de claves SSH autorizadas que deben añadirse al usuario por defecto, `rancher`. Las claves SSH se pueden obtener de las cuentas de usuario de GitHub utilizando el formato `github:${USERNAME}`. Esto se hace descargando las claves de `https://github.com/${USERNAME}.keys`.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  ssh_authorized_keys:
+    - "ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQC2TBZGjE+J8ag11dzkFT58J3XPONrDVmalCNrKxsfADfyy0eqdZrG8hcAxAR/5zuj90Gin2uBR4Sw6Cn4VHsPZcFpXyQCjK1QDADj+WcuhpXOIOY3AB0LZBly9NI0ll+8lo3QtEaoyRLtrMBhQ6Mooy2M3MTG4JNwU9o3yInuqZWf9PvtW6KxMl+ygg1xZkljhemGZ9k0wSrjqif+8usNbzVlCOVQmZwZA+BZxbdcLNwkg7zWJSXzDIXyqM6iWPGXQDEbWLq3+HR1qKucTCSxjbqoe0FD5xcW7NHIME5XKX84yH92n6yn+rxSsyUfhJWYqJd+i0fKf5UbN6qLrtd/D"
+    - "github:ibuildthecloud"
+----
+
+=== `os.write_files`
+
+Una lista de archivos que se escribirán en el disco al arrancar. El campo `encoding` especifica la codificación del contenido. Los valores válidos de `encoding` son:
+
+* `""`: los datos del contenido se escriben en texto plano. En este caso, el campo `encoding` también se puede omitir.
+* `b64`, `base64`: los datos del contenido están codificados en base64.
+* `gz`, `gzip`: los datos del contenido están comprimidos en gzip.
+* `gz+base64`, `gzip+base64`, `gz+b64`, `gzip+b64`: los datos del contenido se comprimen primero en gzip y luego se codifican en base64.
+
+Ejemplo
+
+[,yaml]
+----
+os:
+  write_files:
+  - encoding: b64
+    content: CiMgVGhpcyBmaWxlIGNvbnRyb2xzIHRoZSBzdGF0ZSBvZiBTRUxpbnV4...
+    owner: root:root
+    path: /etc/connman/main.conf
+    permissions: '0644'
+  - content: |
+      # My new /etc/sysconfig/samba file
+
+      SMDBOPTIONS="-D"
+    path: /etc/sysconfig/samba
+  - content: !!binary |
+      f0VMRgIBAQAAAAAAAAAAAAIAPgABAAAAwARAAAAAAABAAAAAAAAAAJAVAAAAAA
+      AEAAHgAdAAYAAAAFAAAAQAAAAAAAAABAAEAAAAAAAEAAQAAAAAAAwAEAAAAAAA
+      AAAAAAAAAwAAAAQAAAAAAgAAAAAAAAACQAAAAAAAAAJAAAAAAAAcAAAAAAAAAB
+      ...
+    path: /bin/arch
+    permissions: '0555'
+  - content: |
+      15 * * * * root ship_logs
+    path: /etc/crontab
+----
+
+=== `os.persistent_state_paths`
+
+==== Definición
+
+La opción `os.persistent_state_paths` te permite configurar vías personalizadas donde las modificaciones realizadas a los archivos persistirán entre reinicios. Cualquier cambio en los archivos de estas vías no se perderá después de un reinicio.
+
+==== Ejemplo
+
+Consulta el siguiente ejemplo de configuración para instalar `rook-ceph`:
+
+[,yaml]
+----
+os:
+  persistent_state_paths:
+    - /var/lib/rook
+    - /var/lib/ceph
+  modules:
+    - rbd
+    - nbd
+----
+
+=== `os.after_install_chroot_commands`
+
+==== Definición
+
+Puedes añadir paquetes de software adicionales con `after_install_chroot_commands`. La etapa `after-install-chroot`, proporcionada por https://rancher.github.io/elemental-toolkit/docs/[elemental-toolkit], te permite ejecutar comandos que no están restringidos por problemas de escritura en el sistema de archivos, asegurando la persistencia de los comandos definidos por el usuario incluso después de un reinicio del sistema.
+
+==== Ejemplo
+
+Consulta el siguiente ejemplo de configuración para instalar un paquete RPM en {harvester-product-name}:
+
+[,yaml]
+----
+os:
+  after_install_chroot_commands:
+    - rpm -ivh <the url of rpm package>
+----
+
+La resolución DNS no está disponible en el `after-install-chroot stage`, y el `nameserver` puede no estar disponible. Si necesitas acceder a un nombre de dominio para instalar un paquete utilizando una URL, crea primero un archivo `/etc/resolv.conf` temporal. Por ejemplo:
+
+[,yaml]
+----
+os:
+  after_install_chroot_commands:
+    - "echo 'nameserver 8.8.8.8' | sudo tee /etc/resolv.conf"
+    - "mkdir /usr/local/bin"
+    - "curl -fsSL -o get_helm.sh https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 && chmod 700 get_helm.sh && ./get_helm.sh"
+    - "rm -f /etc/resolv.conf"
+----
+
+[NOTE]
+====
+
+Actualizar {harvester-product-name} provoca que se pierdan los cambios en el sistema operativo en la etapa `after-install-chroot`. También debes configurar el `after-upgrade-chroot` para que tus cambios sean persistentes a través de una actualización. Consulta https://rancher.github.io/elemental-toolkit/docs/customizing/runtime_persistent_changes/[Cambios persistentes en tiempo de ejecución] antes de actualizar.
+====
+
+
+=== `os.hostname`
+
+==== Definición
+
+Establece el nombre del sistema. El instalador generará un nombre de host aleatorio si el usuario no proporciona un valor.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  hostname: myhostname
+----
+
+=== `os.modules`
+
+==== Definición
+
+Una lista de módulos del kernel que se cargarán al inicio.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  modules:
+    - kvm
+    - nvme
+----
+
+=== `os.sysctls`
+
+==== Definición
+
+Kernel sysctl que se debe configurar al inicio. Estas son las configuraciones típicas que se encuentran en `/etc/sysctl.conf`.
+Los valores deben especificarse como cadenas.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  sysctls:
+    kernel.printk: 4 4 1 7 # the YAML parser will read as a string
+    kernel.kptr_restrict: "1" # force the YAML parser to read as a string
+----
+
+=== `os.dns_nameservers`
+
+==== Definición
+
+*Fallback* servidores DNS que se utilizarán si DNS no está configurado por DHCP o en el sistema operativo.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  dns_nameservers:
+    - 8.8.8.8
+    - 1.1.1.1
+----
+
+=== `os.ntp_servers`
+
+==== Definición
+
+*Fallback* servidores NTP que se utilizarán si NTP no está configurado en otro lugar del sistema operativo. Se recomienda encarecidamente configurar `os.ntp_servers` para evitar problemas de sincronización de tiempo entre máquinas.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  ntp_servers:
+    - 0.suse.pool.ntp.org
+    - 1.suse.pool.ntp.org
+----
+
+=== `os.password`
+
+==== Definición
+
+La contraseña para el usuario predeterminado, `rancher`. Por defecto, no hay contraseña para el usuario `rancher`.
+Si estableces una contraseña en tiempo de ejecución, se restablecerá en el próximo arranque. El valor de la contraseña puede ser texto claro o una forma cifrada. La forma cifrada más fácil de obtener es cambiar tu contraseña en un sistema Linux y copiar el valor del segundo campo de `/etc/shadow`. También puedes cifrar una contraseña utilizando OpenSSL. Para los algoritmos de cifrado soportados, consulta la tabla a continuación.
+
+[cols="^,^,^"]
+|===
+| Algoritmo | Comando | Asistencia
+
+| SHA-512
+| `openssl passwd -6`
+| Sí
+
+| SHA-256
+| `openssl passwd -5`
+| Sí
+
+| MD5
+| `openssl passwd -1`
+| Sí
+
+| MD5, variante de Apache
+| `openssl passwd -apr1`
+| Sí
+
+| AIX-MD5
+| `openssl passwd -aixmd5`
+| No
+|===
+
+==== Ejemplo
+
+Encrypted:
+
+[,yaml]
+----
+os:
+  password: "$6$kZYUnRaTxNdg4W8H$WSEJydGWsNpaRbbbRdTDLJ2hDLbkizxSFGW2RtexlqG6njEATaGQG9ssztjaKDCsaNUPBZ1E1YdsvSLMAi/IO/"
+----
+
+O texto claro:
+
+[,yaml]
+----
+os:
+  password: supersecure
+----
+
+=== `os.environment`
+
+==== Definición
+
+Variables de entorno que deben establecerse en K3s y otros procesos como el proceso de arranque.
+El uso principal de este campo es establecer el proxy HTTP.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  environment:
+    http_proxy: http://myserver
+    https_proxy: http://myserver
+----
+
+[NOTE]
+====
+
+Este ejemplo establece el proxy HTTP(S) para *componentes fundamentales del sistema operativo*.
+Para configurar un proxy HTTP(S) para los componentes {harvester-product-name} como la obtención de imágenes externas y la copia de seguridad en servicios S3, consulta xref:installation-setup/config/settings.adoc#_http_proxy[Configuraciones/proxy-http].
+====
+
+=== `os.labels`
+
+==== Definición
+
+Etiquetas que se añadirán a este nodo.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  labels:
+    topology.kubernetes.io/zone: zone1
+    foo: bar
+    mylabel: myvalue
+----
+
+=== `os.externalStorageConfig`
+
+==== Definición
+
+Configuración que habilita el soporte para dispositivos de almacenamiento externos (por ejemplo, dispositivos de red de área de almacenamiento (SAN)) que utilizan E/S de múltiples rutas (MPIO). En la configuración de múltiples rutas (`multiPathConfig`), puedes añadir dispositivos a la lista negra y a la lista blanca según criterios específicos: proveedor, nombres de productos o Identificadores Mundiales (WWIDs).
+
+Cuando la configuración está habilitada, {harvester-product-name} genera el archivo `/etc/multipath.conf` con la configuración especificada, que el daemon multipath utiliza para gestionar dispositivos de almacenamiento.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  externalStorageConfig:
+    enabled: true
+    multiPathConfig:
+      blacklist:
+      - vendor: "!QEMU"
+        product: "!QEMU HARDDISK"
+      blacklistWwids:
+      - ".*"
+      blacklistExceptions:
+      - vendor: "DELL"
+        product: "POWERVAULT"
+      blacklistExceptionWwids:
+      - "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+----
+
+Esta configuración genera el siguiente archivo `/etc/multipath.conf`:
+
+[,conf]
+----
+blacklist {
+    device {
+        vendor "!QEMU"
+        product "!QEMU HARDDISK"
+    }
+    wwid ".*"
+}
+blacklist_exceptions {
+    device {
+        vendor "DELL"
+        product "POWERVAULT"
+    }
+    wwid "^0QEMU_QEMU_HARDDISK_disk[0-9]+"
+}
+----
+
+=== `os.additionalKernelArguments`
+
+==== Definición
+
+Parámetros adicionales del kernel que se pasarán al kernel de Linux durante el arranque. Estos argumentos se añaden a la línea de comandos del kernel de Linux por defecto y pueden utilizarse para habilitar características específicas del kernel, configurar ajustes de hardware o modificar el comportamiento del kernel. Los casos de uso comunes incluyen habilitar el soporte de múltiples rutas, configurar ajustes específicos de hardware o opciones de depuración.
+
+==== Ejemplo
+
+[,yaml]
+----
+os: 
+  additionalKernelArguments: "multipath=on"
+----
+
+=== `os.sshd.sftp`
+
+==== Definición
+
+Subsistema utilizado para configurar el daemon OpenSSH (sshd). {harvester-product-name} actualmente solo admite `sftp`.
+
+==== Ejemplo
+
+[,yaml]
+----
+os:
+  sshd:
+    sftp: true  #  The SFTP subsystem is enabled.
+----
+
+'''
+
+&nbsp;
+
+=== `install.addons`
+
+*Definición*: Configuración que define el estado predeterminado del complemento. Los complementos {harvester-product-name} están desactivados por defecto.
+
+*Valores admitidos*:
+
+* `vm-import-controller` (nombre del gráfico: harvester-vm-import-controller)
+* `pcidevices-controller` (nombre del gráfico: harvester-pcidevices-controller)
+* `rancher-monitoring`
+* `rancher-logging`
+* `harvester-seeder` (experimental)
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  addons:
+    rancher_monitoring:
+      enabled: true
+    rancher_logging:
+      enabled: false
+----
+
+=== `install.automatic`
+
+*Definición*: Configuración que obliga al instalador a omitir los pasos interactivos en el proceso de instalación.
+
+Cuando está habilitado, la configuración se recupera del valor de `harvester.install.config_url` o se define individualmente utilizando parámetros del kernel.
+
+=== `install.data_disk`
+
+*Definición*: Dispositivo predeterminado para almacenar datos de VM.
+
+Al instalar mediante arranque PXE, utiliza `/dev/disk/by-id/$id` o `/dev/disk/by-path/$path` para especificar el dispositivo de almacenamiento si el servidor contiene múltiples volúmenes físicos.
+
+*Valor por defecto*: Dispositivo de almacenamiento configurado en la configuración `install.device`
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  data_disk: /dev/sdb
+----
+
+=== `install.debug`
+
+*Definición*: Configuración que habilita el registro adicional y la depuración durante la instalación.
+
+=== `install.device`
+
+*Definición*: Dispositivo en el que está instalado el sistema operativo {harvester-product-name}.
+
+Al instalar mediante arranque PXE, utiliza `/dev/disk/by-id/$id` o `/dev/disk/by-path/$path` para especificar el dispositivo de almacenamiento si el servidor contiene múltiples volúmenes físicos.
+
+=== `install.force_efi`
+
+*Definición*: Configuración que obliga a la instalación EFI incluso cuando no se detecta EFI.
+
+*Valor por defecto*: `false`
+
+=== `install.force_mbr`
+
+*Definición*: Configuración que obliga al uso de particionamiento MBR en sistemas BIOS.
+
+{harvester-product-name} utiliza particionamiento GPT en sistemas UEFI y BIOS por defecto. Los problemas de compatibilidad pueden requerir que utilices particionamiento MBR en su lugar.
+
+Si especificas el mismo dispositivo de almacenamiento para `install.device` y `install.data_disk`, {harvester-product-name} crea una partición adicional para almacenar datos de VM. Esta partición adicional no se crea cuando se fuerza el uso de particionamiento MBR. En su lugar, los datos de la VM se almacenan en una partición que almacena datos del sistema operativo.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  force_mbr: true
+----
+
+=== `install.harvester.longhorn.default_settings.guaranteedInstanceManagerCPU`
+
+*Definición*: Porcentaje de la CPU total asignable en cada nodo que se reservará para cada pod de Longhorn Instance Manager.
+
+Se recomienda utilizar el valor predeterminado para una alta disponibilidad del sistema. Al desplegar clústeres de un solo nodo, puedes especificar un valor inferior a 12.
+
+Para más información sobre cómo establecer el valor correcto, consulta https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_guaranteed_instance_manager_cpu[CPU del Gestor de Instancias Garantizadas] en la documentación de {longhorn-product-name}.
+
+*Valor por defecto*: 12
+
+*Valores admitidos*: 0 a 12. Todos los demás valores se consideran 12.
+
+*Ejemplo*:
+
+----
+  harvester:
+    longhorn:
+      default_settings:
+        guaranteedInstanceManagerCPU: 6
+----
+
+=== `install.harvester.longhorn.default_settings.storageReservedPercentageForDefaultDisk`
+
+*Definición*: Porcentaje del espacio en disco que no se asignará al disco predeterminado en cada nuevo nodo de {longhorn-product-name}.
+
+{harvester-product-name} crea una partición dedicada en el disco de arranque para el disco predeterminado de {longhorn-product-name}, por lo que no necesitas reservar espacio para él en el disco raíz.
+
+*Valor por defecto*: 0
+
+*Valores admitidos*: 0 a 30. Todos los demás valores se consideran 30.
+
+*Ejemplo*:
+
+[,yaml]
+----
+  harvester:
+    longhorn:
+      default_settings:
+        storageReservedPercentageForDefaultDisk: 15
+----
+
+=== `install.harvester.storage_class.replica_count`
+
+*Definición*: Número de réplicas de la StorageClass predeterminada `harvester-longhorn`.
+
+Se recomienda utilizar el valor predeterminado para una alta disponibilidad de almacenamiento. Al desplegar clústeres de un solo nodo, debes establecer el valor en 1.
+
+Para más información, consulta https://documentation.suse.com/cloudnative/storage/1.8/en/longhorn-system/settings.html#_default_replica_count[Recuento de Réplicas Predeterminado] en la documentación de {longhorn-product-name}.
+
+*Valor por defecto*: 3
+
+*Valores admitidos*: 1 a 3. Todos los demás valores se consideran 3.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  harvester:
+    storage_class:
+      replica_count: 1
+----
+
+=== `install.iso_url`
+
+*Definición*: URL de la imagen ISO que se descargará y utilizará para instalar {harvester-product-name} al arrancar desde el núcleo de Linux o vmlinuz.
+
+=== `install.management_interface`
+
+*Definición*: Interfaces de red para la máquina host.
+
+{harvester-product-name} utiliza el https://www.freedesktop.org/software/systemd/man/systemd.net-naming-scheme.html[esquema de nombres de red de systemd]. Asegúrate de que el nombre de la interfaz esté presente en la máquina de destino antes de la instalación.
+
+*Campos*:
+
+* `method`: Método utilizado para asignar una IP a la red. Valores admitidos:
+ ** `dhcp`: Se solicita una IP al servidor DHCP.
+ ** `static`: Las direcciones IP y gateway se asignan manualmente.
+* `ip`: IP estática asignada a la red. Este campo es obligatorio cuando el valor de `method` es `static`.
+* `subnet_mask`: Máscara de subred de la red. Este campo es obligatorio cuando el valor de `method` es `static`.
+* `gateway`: Dirección de gateway asignada a la red. Este campo es obligatorio cuando el valor de `method` es `static`.
+* `interfaces`: Array de interfaces de red. El instalador combina las interfaces especificadas (esclavas) en una única interfaz lógica de enlace.
+ ** `interfaces.name`: Nombre de una interfaz esclava.
+ ** `interfaces.hwAddr`: Dirección MAC de hardware de una interfaz esclava. Este campo es opcional.
+* `bond_options`: Opciones para https://www.kernel.org/doc/Documentation/networking/bonding.txt[interfaces de enlace]. Cuando no se especifica, se utilizan las siguientes opciones:
+ ** `mode`: Modo de enlace. El valor por defecto es `active-backup`.
+ ** `miimon`: Frecuencia de monitoreo de enlace MII en milisegundos. El valor por defecto es `100`.
+* `mtu`: Unidad máxima de transmisión (MTU) para la interfaz. El valor por defecto es `1500`.
+* `vlan_id`: ID de VLAN para la interfaz. El valor predeterminado es `0`, lo que significa que la interfaz está en modo sin etiquetar.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  mode: create
+  management_interface:
+    interfaces:
+    - name: ens5
+      hwAddr: "B8:CA:3A:6A:64:7D"  # Optional
+    method: dhcp
+    bond_options:
+      mode: balance-tlb
+      miimon: 100
+    mtu: 1492
+    vlan_id: 101
+----
+
+[NOTE]
+====
+Los switches físicos conectados a interfaces de enlace deben configurarse estrictamente como puertos troncales. Estos puertos deben aceptar tráfico etiquetado y enviar tráfico etiquetado con el ID de VLAN utilizado por la red de VM.
+====
+
+=== `install.mode`
+
+*Definición*: Modo de instalación.
+
+*Valores admitidos*:
+
+* `create`: Crear un nuevo clúster {harvester-product-name}.
+* `join`: Unirse a un clúster {harvester-product-name} existente. Debes especificar el `server_url`.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  mode: create
+----
+
+=== `install.no_format`
+
+Definición: Configuración que impide la partición y el formateo del disco de instalación.
+
+=== `install.persistent_partition_size`
+
+*Definición*: Tamaño de la partición COS_PERSISTENT en Gi o Mi.
+
+Esta partición almacena datos como paquetes del sistema e imágenes de contenedores. El valor mínimo es 150 Gi.
+
+*Valor por defecto*: 150 Gi
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  persistent_partition_size: 150Gi
+----
+
+=== `install.poweroff`
+
+*Definición*: Configuración que apaga (en lugar de reiniciar) el servidor después de la instalación.
+
+=== `install.rawdiskimagepath`
+
+*Definición*: Configuración que obliga al instalador a instalar únicamente el hipervisor {harvester-product-name} (sin ninguna configuración). Debes habilitar `harvester.install.automatic` para usar esta configuración.
+
+=== `install.role`
+
+*Definición*: Rol asignado a un nodo en el momento de la instalación. Cuando no se especifica, se asigna el rol `default`.
+
+* `default`: Permite que un nodo funcione como nodo de gestión o nodo de trabajo.
+* `management`: Permite que un nodo sea priorizado cuando {harvester-product-name} promueve nodos a nodos de gestión.
+* `worker`: Restringe un nodo a ser un nodo trabajador (nunca promovido a nodo de gestión) en un clúster específico.
+* `witness`: Restringe un nodo a ser un nodo testigo (solo funciona como un nodo etcd) en un clúster específico.
+
+=== `install.silent`
+
+____
+Definición: Reservado
+____
+
+=== `install.skipchecks`
+
+*Definición*: Configuración que permite que la instalación continúe incluso si no se cumplen los requisitos mínimos para el uso en producción.
+
+El instalador comprueba automáticamente si el hardware cumple con los xref:installation-setup/requirements.adoc#_hardware_requirements[requisitos mínimos] para el uso en producción. Al realizar una instalación automatizada a través de xref:installation-setup/methods/pxe-boot-install.adoc[PXE Boot], si alguna de las comprobaciones falla, la instalación se detiene y se imprimen advertencias en la consola del sistema y se guardan en `/var/log/console.log` en el entorno de instalación.
+
+Para anular este comportamiento, configure `install.skipchecks=true`. Cuando se establece en `true`, los mensajes de advertencia aún se guardan en `/var/log/console.log`, pero la instalación continúa incluso si no se cumplen los requisitos de hardware para el uso en producción.
+
+*Valor por defecto*: `false`
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  skipchecks: true
+----
+
+=== `install.tty`
+
+*Definición*: Dispositivo TTY utilizado para la consola.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  tty: ttyS0,115200n8
+----
+
+=== `install.vip`
+
+*Definición*: VIP del {harvester-product-name} punto final de gestión.
+
+Después de la instalación, puede acceder a la interfaz de usuario en `https://<VIP>`.
+
+=== `install.vip_mode`
+
+*Definición*: Modo de asignación del VIP.
+
+*Valores admitidos*:
+
+* `dhcp`: Se envían solicitudes DHCP para obtener el VIP. Debe especificar la dirección de hardware utilizando el campo `install.vip_hw_addr`.
+* `static`: Se utiliza un VIP estático.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  vip: 192.168.0.100
+  vip_mode: static
+----
+
+=== `install.vip_hw_addr`
+
+*Definición*: Dirección de hardware correspondiente al VIP.
+
+Debe configurar un servidor DHCP in situ para ofrecer el VIP configurado. Este campo es obligatorio cuando el valor de `install.vip_mode` es `dhcp`. Para obtener más información, consulte xref:installation-setup/management-address.adoc[Dirección de gestión].
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  vip: 10.10.0.19
+  vip_mode: dhcp
+  vip_hw_addr: 52:54:00:ec:0e:0b
+----
+
+=== `install.cluster_pod_cidr`
+
+*Definición*: CIDR de los {harvester-product-name} pods.
+
+Utilice este campo para anular el CIDR de pods predeterminado de `10.52.0.0/16`.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  cluster_pod_cidr: 172.16.0.0/16
+----
+
+=== `install.cluster_service_cidr`
+
+*Definición*: CIDR de los {harvester-product-name} servicios.
+
+Utilice este campo para anular el CIDR de servicio predeterminado de `10.53.0.0/16`.
+
+[IMPORTANT]
+====
+Si cambia este CIDR, debe asegurarse de que la IP DNS del clúster (`install.cluster_dns`) esté dentro de este rango.
+====
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  cluster_service_cidr: 172.22.0.0/16
+----
+
+=== `install.cluster_dns`
+
+*Definición*: IP del {harvester-product-name} servicio DNS.
+
+Utilice este campo para anular la IP del servicio DNS predeterminado de `10.53.0.10`.
+
+[IMPORTANT]
+====
+Esta IP debe estar dentro del rango definido por el campo `cluster_service_cidr`.
+====
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  cluster_dns: 172.16.0.10
+----
+
+=== `install.webhooks`
+
+*Definición*: Webhooks que te permiten recibir notificaciones para ciertos eventos relacionados con el instalador.
+
+El instalador envía solicitudes HTTP a la URL especificada. Se pueden enviar múltiples solicitudes para un solo evento, pero si una solicitud falla, las solicitudes restantes no se envían.
+
+*Campos*:
+
+* `event`: Tipo de evento que activa una acción HTTP en el webhook.
+ ** `STARTED`: La instalación ha comenzado.
+ ** `SUCCEEDED`: La instalación se completó sin errores.
+ ** `FAILED`: La instalación no fue exitosa.
+* `method`: Método HTTP
+* `url`: URL a la que se envían las solicitudes HTTP
+* `insecure`: Cuando se establece en `true`, {harvester-product-name} no verifica el certificado del servidor. El valor por defecto es `false`.
+* `basicAuth`: Cuando se establece en `true`, se utiliza el esquema de autenticación HTTP "Basic".
+* `headers`: Cuando se establece en `true`, se incluyen encabezados personalizados en las solicitudes HTTP. Encabezados como `Content-Length` se incluyen automáticamente.
+* `payload`*: Cuando se establece en `true`, los datos de carga se envían con las solicitudes HTTP. Es posible que necesite establecer el encabezado Content-Type correcto en el campo `headers` para asegurarse de que el servidor acepte la solicitud.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  webhooks:
+    - event: SUCCEEDED
+      method: GET
+      url: http://10.100.0.100/cblr/svc/op/nopxe/system/{{.Hostname}}
+    - event: STARTED
+      method: GET
+      url: https://10.100.0.100/started/{{.Hostname}}
+      insecure: true
+      basicAuth:
+        user: admin
+        password: p@assword
+    - event: FAILED
+      method: POST
+      url: http://10.100.0.100/record
+      headers:
+        Content-Type:
+           - 'application/json; charset=utf-8'
+      payload: |
+        {
+          "host": "{{.Hostname}}",
+          "device": "hd"
+        }
+----
+
+=== `install.wipedisks`
+
+[NOTE]
+====
+Esta configuración fue eliminada en la v1.5.0. Consulta <<_install_wipe_all_disks, `install.wipe_all_disks`>> y <<_install_wipe_disks_list, `install.wipe_disks_list`>>.
+====
+
+*Definición*: Configuración que utiliza el comando `sgdisk` para borrar todas las particiones de disco en el host.
+
+=== `install.wipe_all_disks`
+
+*Definición*: Configuración que utiliza el comando `sgdisk` para borrar todas las particiones de disco en el host que tienen la etiqueta `COS_OEM`.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  wipe_all_disks: true
+----
+
+=== `install.wipe_disks_list`
+
+*Definición*: Configuración que utiliza el comando `sgdisk` para borrar una lista de particiones de disco en el host que tienen la etiqueta `COS_OEM`.
+
+*Ejemplo*:
+
+[,yaml]
+----
+install:
+  wipe_disks_list:
+    - /dev/sda
+    - /dev/sdb
+----
+
+=== `install.with-net-images`
+
+*Definición*: Configuración que determina si las imágenes se descargan de Internet después de la instalación.
+
+El valor de este campo se deriva típicamente del parámetro del kernel `harvester.install.with_net_images`. Cuando el valor es `true`, {harvester-product-name} no precarga imágenes empaquetadas en el medio de instalación, y en su lugar descarga imágenes de Internet cuando es necesario.
+
+'''
+
+=== `sans` (Nombres alternativos del sujeto)
+
+*Definición*: Nombres de host adicionales y direcciones IP (IPv4 o IPv6) que deben asociarse con la clave pública en el certificado TLS de un servidor.
+
+*Ejemplo*:
+
+`example.com` se añade como un Nombre Alternativo del Sujeto.
+
+[,yaml]
+----
+sans:
+  - example.com
+----
+
+Para validar esto, puede imprimir la información del certificado y buscar `example.com` en el campo `X509v3 Subject Alternative Name`.
+
+[,shell]
+----
+> openssl x509 -in /var/lib/rancher/rke2/server/tls/serving-kube-apiserver.crt -text -noout
+Certificate:
+    Data:
+        Version: 3 (0x2)
+        Serial Number: 927360019122894648 (0xcdea50626b83738)
+        Signature Algorithm: ecdsa-with-SHA256
+        Issuer: CN = rke2-server-ca@1740650146
+        Validity
+            Not Before: Feb 27 09:55:46 2025 GMT
+            Not After : Feb 27 09:55:46 2026 GMT
+        Subject: CN = kube-apiserver
+        Subject Public Key Info:
+            Public Key Algorithm: id-ecPublicKey
+                Public-Key: (256 bit)
+                pub:
+                    04:23:6a:e5:22:52:d0:82:3b:48:64:e4:1c:72:11:
+                    c9:b4:96:b5:ae:de:82:a3:e3:a5:fe:e5:b3:21:04:
+                    43:32:f6:f2:7e:54:73:99:e9:65:80:07:82:54:fb:
+                    33:45:b7:e1:4a:1e:30:4f:be:7f:b8:60:cc:86:54:
+                    f6:39:0c:7d:94
+                ASN1 OID: prime256v1
+                NIST CURVE: P-256
+        X509v3 extensions:
+            X509v3 Key Usage: critical
+                Digital Signature, Key Encipherment
+            X509v3 Extended Key Usage:
+                TLS Web Server Authentication
+            X509v3 Authority Key Identifier:
+                keyid:02:33:86:86:97:C3:32:3C:16:E0:C6:66:19:59:0B:93:C9:A0:5B:B5
+
+            X509v3 Subject Alternative Name:
+                DNS:kubernetes, DNS:kubernetes.default, DNS:kubernetes.default.svc, DNS:kubernetes.default.svc.cluster.local, DNS:example.com, DNS:localhost, DNS:harvester-node-0, IP Address:192.168.3.131, IP Address:127.0.0.1, IP Address:0:0:0:0:0:0:0:1, IP Address:192.168.3.30, IP Address:10.53.0.1
+    Signature Algorithm: ecdsa-with-SHA256
+         30:46:02:21:00:af:b7:81:97:f4:d1:fe:bb:62:a1:46:48:30:
+         ab:e8:02:ae:32:44:d8:cb:96:87:e5:85:33:ce:7c:83:cb:c7:
+         48:02:21:00:ac:93:b4:62:f6:65:0a:42:8b:9c:69:51:54:47:
+         6a:1d:12:96:4a:bd:e9:5e:4e:eb:a4:55:a2:39:bd:b3:48:80
+----
+
+'''
+
+=== `system_settings`
+
+*Definición*: Configuración que le permite sobrescribir la configuración predeterminada del sistema.
+
+Para obtener más información, consulta xref:installation-setup/config/settings.adoc[Configuración].
+
+[NOTE]
+====
+La configuración del sistema solo puede ser sobrescrita cuando creas un nuevo {harvester-product-name} clúster, lo que implica instalar el sistema operativo y otros componentes en el primer nodo. Los nodos que se unen al clúster heredan la configuración del sistema del primer nodo.
+====
+
+*Ejemplo*:
+
+El siguiente ejemplo sobrescribe la configuración predeterminada de `containerd-registry`, `http-proxy` y `ui-source`. Los valores deben ser un `string`.
+
+[,yaml]
+----
+system_settings:
+  containerd-registry: '{"Mirrors": {"docker.io": {"Endpoints": ["https://myregistry.local:5000"]}}, "Configs": {"myregistry.local:5000": {"Auth": {"Username": "testuser", "Password": "testpassword"}, "TLS": {"InsecureSkipVerify": false}}}}'
+  http-proxy: '{"httpProxy": "http://my.proxy", "httpsProxy": "https://my.proxy", "noProxy": "some.internal.svc"}'
+  ui-source: auto
+----
