@@ -1,5 +1,5 @@
 = Harvester Cloud Provider
-:revdate: 2026-05-06
+:revdate: 2026-06-12
 :page-revdate: {revdate}
 
 You can provision xref:../../integrations/rancher/node-driver/rke2-cluster.adoc[RKE2] clusters in Rancher using the built-in Harvester Node Driver. Harvester provides <<Load Balancer Support,load balancer>> and Harvester cluster xref:./csi-driver.adoc[storage passthrough] support to the guest Kubernetes cluster.
@@ -400,3 +400,28 @@ When you delete a guest cluster that has the Harvester Cloud Provider enabled, {
 * Resource management: Automatic cleanup prevents orphaned load balancers from consuming IP addresses after the guest cluster is deleted.
 
 * Zero manual intervention: The lifecycle of the load balancer is tied directly to the lifecycle of the guest cluster.
+
+== Stale cloud credentials after cluster registration
+
+If you remove a {harvester-product-name} cluster from {rancher-short-name} and later re-register the same cluster, {rancher-short-name} may retain stale cloud credentials that reference the previous management cluster ID. This mismatch causes provisioning of guest clusters (such as RKE2 and K3s clusters) to fail.
+
+When this issue occurs, the system logs an error similar to the following:
+
+[,bash]
+----
+clusters.management.cattle.io "<old-cluster-id>" not found
+----
+
+The failure occurs because the existing cloud credential still points to the original {harvester-product-name} cluster ID, which no longer exists after the re-registration process.
+
+To mitigate the issue, perform the following workaround:
+
+. On the {rancher-short-name} UI, go to *☰ -> Cluster Management -> Cloud Credentials*.
+
+. Delete the stale cloud credential associated with the removed {harvester-product-name} cluster.
+
+. Create a new cloud credential using the updated {harvester-product-name} cluster details.
+
+. Provision the guest cluster again.
+
+Related issue: https://github.com/rancher/rancher/issues/53642[#53642]

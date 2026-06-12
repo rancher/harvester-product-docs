@@ -1,5 +1,5 @@
 = Host Management
-:revdate: 2026-06-03
+:revdate: 2026-06-12
 :page-revdate: {revdate}
 
 Users can view and manage {harvester-product-name} nodes from the host page. The first node always defaults to be a management node of the cluster. When there are three or more nodes, the two other nodes that first joined are automatically promoted to management nodes to form a HA cluster.
@@ -230,12 +230,22 @@ When multiple tags are specified for a volume, the disk and the nodes (that the 
 
 === Remove disks
 
-Before removing a disk, you must first evict {longhorn-product-name} replicas on the disk.
+Before removing a disk, you must first evict its {longhorn-product-name} replicas. The replica data is automatically rebuilt on another disk to maintain high availability.
 
-[NOTE]
-====
-The replica data would be rebuilt to another disk automatically to keep the high availability.
-====
+The disk removal operation is blocked if the disk contains the last healthy replica of a volume or backing image. Depending on your situation, you must perform additional actions before removing the disk.
+
+|===
+| Situation | Required Action
+
+| The target volume or backing image is configured with only one replica.
+| Move the replica to another disk or remove the object entirely to confirm it is no longer required.
+
+| A replication error occurred.
+| Repair the faulty replicas on the other disks before deleting the target disk.
+
+| A Longhorn V2 volume is unattached and has never been used.
+| Remove the volume first. Deleting its last replica incorrectly triggers a rebuild on another disk, marking it as healthy and leaving the original disk undeletable even though it does not contain valid data (see GitHub issue https://github.com/longhorn/longhorn/issues/12189[#12189]).
+|===
 
 ==== Identify the disk to remove
 
