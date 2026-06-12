@@ -99,3 +99,22 @@ When a `ResourceQuota` object has the annotation `harvesterhci.io/skipResourceQu
 ====
 You must set the annotation before the migration starts. If the annotation is set while the values are already being adjusted, {harvester-product-name} is unable to automatically restore the previous configuration.
 ====
+
+=== Automatic adjustment of ResourceQuota during migration when `additional-guest-memory-overhead-ratio` changes
+
+Increasing the value of the xref:installation-setup/config/settings.adoc#_additional_guest-memory_overhead_ratio[`additional-guest-memory-overhead-ratio`] setting affects all subsequent virtual machine cold starts and live migrations. For running virtual machines, subsequent migrations consume more memory, creating a cumulative challenge. After multiple live migrations, the combined memory usage of all virtual machines within a namespace can exceed the configured `ResourceQuota` limit and cause over-provisioning.
+
+When a `ResourceQuota` is scaled down, current usage may exceed the new limit. Although the system blocks the creation of new instances, it allows running instances to continue uninterrupted. Consequently, when a new migration is triggered in an already over-provisioned environment, the system may block the operation because the total namespace quota is insufficient to accommodate both the existing source virtual machine and the new target virtual machine instance. This restriction applies even when the quota is automatically scaled for the new instance's specific requirements.
+
+{harvester-product-name} automatically manages this bottleneck through the following workflow:
+
+* *Detection*: {harvester-product-name} identifies when a live migration is specifically blocked by `ResourceQuota` limitations, even after the quota has already been scaled up for that specific virtual machine.
+
+* *Delta Adjustment*: {harvester-product-name} calculates a temporary "quota delta" (additional capacity required to accommodate the cumulative memory footprint) and applies it to allow the migration to proceed.
+
+* *Cleanup*: Once the migration is completed, {harvester-product-name} removes the temporary adjustment, reverting the `ResourceQuota` to its configured state.
+
+[IMPORTANT]
+====
+To minimize reliance on automatic adjustments, manually update `ResourceQuota` settings whenever overhead configurations change. The virtual machine's final memory footprint must always comply with defined namespace limits, whether it is migrated or cold-rebooted.
+====
