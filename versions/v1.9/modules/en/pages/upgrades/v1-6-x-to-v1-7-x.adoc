@@ -1,0 +1,454 @@
+= Upgrade from v1.6.x to v1.7.x
+:revdate: 2026-06-10
+:page-revdate: {revdate}
+
+== General information
+
+An *Upgrade* button appears on the *Dashboard* screen whenever a new {harvester-product-name} version that you can upgrade to becomes available. For more information, see xref:upgrades/upgrades.adoc#_start_an_upgrade[Start an upgrade].
+
+Clusters running v1.6.x can upgrade to v1.7.x directly because {harvester-product-name} allows a maximum of one minor version upgrade for underlying components. v1.6.0 and v1.6.1 use the same minor version of RKE2 (v1.33), while {harvester-product-name} v1.7.0 and v1.7.1 use the next minor version (v1.34). For more information, see xref:upgrades/upgrades.adoc#_upgrade_paths[Upgrade paths].
+
+For information about upgrading {harvester-product-name} in air-gapped environments, see xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[Prepare an air-gapped upgrade].
+
+[CAUTION]
+====
+v1.7.x uses NetworkManager instead of wicked, which was used in earlier versions of {harvester-product-name}. If you modified the management interface configuration after the initial installation, you must perform additional manual steps to avoid issues during the upgrade. For more information, see <<#_migration_wicked_to_networkmanager>>.
+
+Additionally, <<#_persistent_names_may_change,persistent names of certain Intel network interfaces may change>> during upgrades. This breaks connectivity on the host and requires manual remediation steps.
+====
+
+[IMPORTANT]
+====
+Host IP addresses configured via DHCP may change during upgrades. This prevents the cluster from starting correctly and requires manual recovery steps. For more information, see <<#_host_ip_may_change>>.
+====
+
+=== Update the Harvester UI Extension on {rancher-product-name} v2.13
+
+You must use a compatible version (v1.7.x) of the Harvester UI Extension to import {harvester-product-name} v1.7.x clusters on {rancher-short-name} v2.13.
+
+. On the {rancher-short-name} UI, go to *local -> Apps -> Repositories*.
+
+. Locate the repository named *harvester*, and then select *⋮ -> Refresh*.
+
+. Go to the *Extensions* screen.
+
+. Locate the extension named *Harvester*, and then click *Update*.
+
+. Select a compatible version, and then click *Update*.
+
+. Allow some time for the extension to be updated, and then refresh the screen.
+
+[#_migration_wicked_to_networkmanager]
+=== Migration from wicked to NetworkManager
+
+{harvester-product-name} v1.7.x transitions from wicked to NetworkManager for network management. Because there is no direct 1:1 mapping between the legacy `ifcfg` files and NetworkManager's connection profiles, an in-place migration of the existing network configuration is not possible.
+
+During upgrades, {harvester-product-name} generates new NetworkManager connection profiles using the original installation settings stored in `/oem/harvester.config`. The legacy `ifcfg` files in `/oem/90_custom.yaml` remain on the system, but NetworkManager ignores these files and instead stores its configuration under `/etc/NetworkManager`.
+
+|===
+| Scenario | Action Required?
+
+| You installed v1.1 or later, and never manually modified the management interface or DNS configuration.
+| No
+
+| You originally installed v1.1 or earlier.
+| Yes (Rename the configuration file and update the `/oem/harvester.config` schema.)
+
+| You manually modified the management interface configuration by editing the `/oem/90_custom.yaml` file or by adding CloudInit resources to the `ifcfg` files.
+| Yes (Custom configuration will be ignored after the upgrade to v1.7.0.)
+|===
+
+If action is required, choose one of the following methods:
+
+* Pre-upgrade (Recommended): Edit the `/oem/harvester.config` file on each node. Configure the relevant network settings, particularly `os.dns_nameservers` and `install.management_interface`. For more information, see xref:installation-setup/config/configuration-file.adoc[Configuration File].
++
+[NOTE]
+====
+If you originally installed v1.1 or earlier, perform the following actions before starting the upgrade:
+
+* Verify that the `install.management_interface` setting in `/oem/harvester.config` follows the xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[schema] required by later {harvester-product-name} versions.
+
+* Rename the `/oem/99_custom.yaml` file to `/oem/90_custom.yaml`.
+
+As a best practice, run the https://github.com/harvester/upgrade-helpers/tree/main/pre-check[pre-check script] on a {harvester-product-name} control plane node before starting the upgrade. The script determines if either of the listed steps is necessary.
+
+Example:
+
+[,shell]
+----
+Starting network config check...
+Waiting for validator to finish on all nodes...
+Network Config Check FAILED:
+[pod/upgrade-helper-network-check-pxcqt/validator] RESULT: h161-w: Validation completed.
+[pod/upgrade-helper-network-check-s6j8r/validator] ERROR: h161-1: /oem/99_custom.yaml must be renamed to /oem/90_custom.yaml
+[pod/upgrade-helper-network-check-s6j8r/validator] RESULT: h161-1: Validation completed.
+[pod/upgrade-helper-network-check-t757l/validator] ERROR: h161-0: /oem/harvester.config uses old v1.0 schema for management interface config
+[pod/upgrade-helper-network-check-t757l/validator] RESULT: h161-0: Validation completed.
+Network-Config Test: Failed
+----
+====
+
+* Post-upgrade: Use the `nmcli` tool to manually re-apply your custom configuration to the new NetworkManager connection profiles.
+
+If you encounter any issues during the upgrade, you can perform the following workarounds:
+
+|===
+| Scenario | Workaround | Result
+
+| A node becomes stuck in "Waiting Reboot" state.
+| Log in via the console and verify the network configuration using the `nmcli` tool. If necessary, manually correct the configuration, then reboot the node.
+| The upgrade automatically resumes.
+
+| Errors occur when you manually change the configuration.
+| If you want to revert to the automatically generated NetworkManager connection profiles, run the command `harvester-installer generate-network-config`.
+| The NetworkManager connection profiles in `/etc/NetworkManager/system-connections/` are recreated based on the configuration specified in `/oem/harvester.config`.
+|===
+
+== Known issues
+
+[#_host_ip_may_change]
+=== Host IP address may change during upgrade when using DHCP
+
+v1.7.x uses NetworkManager instead of wicked, which was used in earlier versions of {harvester-product-name}. These two network stacks have different defaults for generating DHCP client IDs. 
+
+If the host IP addresses are configured using DHCP, a {harvester-product-name} upgrade and subsequent reboot may cause the DHCP server to assign IP addresses that are different from what hosts previously used. Consequently, the affected hosts are unable to join the cluster on startup because of the IP address change.
+
+This issue typically occurs when the DHCP server allocates IP addresses based solely on the DHCP client ID. You are unlikely to encounter this issue when the DHCP server is configured to allocate fixed IP addresses based on the MAC address (as demonstrated in the https://github.com/harvester/ipxe-examples[iPXE Examples]).
+
+The impact of this issue varies by cluster size:
+
+* Single-node clusters: {harvester-product-name} fails to start after rebooting because the IP address has changed.
+* Multi-node clusters: Management nodes become stuck in the "Waiting Reboot" state.
+
+To address the issue, perform the following steps:
+
+[IMPORTANT]
+====
+You must perform the steps for each affected node _after_ the upgrade is completed and the IP address has changed.
+====
+
+. Log in to the affected node. You can either access the node via SSH at its new IP address or use the console.
+
+. In the `/var/lib/wicked` directory, check for the lease XML file (named similar to `/var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml`).
++
+If you are using a VLAN, the file name includes the VLAN ID (for example, `/var/lib/wicked/lease-mgmt-br.2017-dhcp-ipv4.xml`).
+
+. View the file and identify the DHCP client ID.
++
+[,shell]
+----
+$ cat /var/lib/wicked/lease-mgmt-br-dhcp-ipv4.xml
+<lease>
+  ...
+  <ipv4:dhcp>
+    <client-id>ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05</client-id>
+    ...
+  </ipv4:dhcp>
+</lease>
+----
+
+. Use the `nmcli` command to set the DHCP client ID for the appropriate NetworkManager connection profile.
++
+The connection profile you need to modify depends on whether your node uses a VLAN.
++
+* VLAN used: Add the DHCP client ID to the `vlan-mgmt` connection profile.
+* No VLAN: Add the DHCP client ID to the `bridge-mgmt` connection profile.
++
+Example (no VLAN):
++
+[,shell]
+----
+$ nmcli con modify bridge-mgmt \
+    ipv4.dhcp-client-id \
+    ff:00:dd:c7:05:00:01:00:01:30:ae:a0:d3:52:54:00:dd:c7:05
+----
++
+You must replace the client ID in the example with the actual client ID from your wicked lease file.
+
+. Reboot the node.
+
+The DHCP server should return the original IP address and the affected node should be able to join the cluster.
+
+[NOTE]
+====
+Propagation of the DHCP client ID from wicked to NetworkManager occurs automatically when upgrading from v1.6.x to v1.7.1 or v1.7.2. This workaround is only required when upgrading to v1.7.0.
+====
+
+Related issues: https://github.com/harvester/harvester/issues/9260[#9260] and https://github.com/harvester/harvester/issues/3418[#3418]
+
+=== Upgrade is stuck in "Upgrading System Service"
+
+The upgrade process may become stuck in the "Upgrading System Service" phase. This issue is likely related to the `apply-manifest` job and to two known issues related to the {fleet-product-name} upgrade.
+
+You may encounter log messages similar to the following:
+
+[,console]
+----
+...
+Happy Containering!
+Wait for Rancher dependencies helm releases...
+wait helm release cattle-fleet-system fleet fleet-108.0.0+up0.14.0 0.14.0 deployed
+wait helm release cattle-fleet-system fleet-crd fleet-crd-108.0.0+up0.14.0 0.14.0 deployed
+----
+
+Check the Helm history to determine the cause and related workaround.
+
+* Scenario 1: The {fleet-product-name} upgrade status is `pending-upgrade` even after the upgrade has been completed.
++
+[,console]
+----
+$ helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                   APP VERSION     DESCRIPTION
+6               Tue Nov  4 06:22:34 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+7               Tue Nov  4 06:22:49 2025        superseded      fleet-105.0.2+up0.11.2  0.11.2          Upgrade complete
+8               Mon Dec  8 07:10:43 2025        superseded      fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+9               Mon Dec  8 07:26:49 2025        deployed        fleet-106.1.1+up0.12.3  0.12.3          Upgrade complete
+10              Mon Dec  8 07:27:10 2025        pending-upgrade fleet-106.1.1+up0.12.3  0.12.3          Preparing upgrade
+----
++
+To address the issue, perform the following workaround:
++
+.. Run the command `$ helm rollback fleet -n cattle-fleet-system`.
++
+.. Wait for the embedded Rancher to reconcile the `ClusterRepo` CRD and trigger the Helm chart upgrade. To accelerate the process, you can restart the embedded Rancher pods.
+
+* Scenario 2: The upgrade is stuck on a release candidate (RC) version. 
++
+This should not occur unless you are upgrading from an RC version to a stable version, which is not supported. For assistance, create a [GitHub issue](https://github.com/harvester/harvester/issues).
++
+[,console]
+----
+# helm history fleet -n cattle-fleet-system
+REVISION        UPDATED                         STATUS          CHART                           APP VERSION     DESCRIPTION
+2               Mon Dec  8 10:43:42 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+3               Mon Dec  8 10:49:51 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+4               Mon Dec  8 10:50:04 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+5               Mon Dec  8 10:56:30 2025        superseded      fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+6               Mon Dec  8 10:56:42 2025        deployed        fleet-108.0.0+up0.14.0-rc.1     0.14.0-rc.1     Upgrade complete
+----
+
+Related issues: https://github.com/harvester/harvester/issues/9738[#9738] and https://github.com/harvester/harvester/issues/9680[#9680]
+
+[#_persistent_names_may_change]
+=== Persistent names of certain network interfaces may change during upgrade
+
+{harvester-product-name} v1.7.x uses newer versions of the Linux kernel's `i40e` and `ice` network drivers, causing a port number to be added to the name of certain Intel network interfaces, such as the X710. For example, an interface named `enp6s0f0` on {harvester-product-name} v1.6.x is renamed to `enp6s0f0np0` during the upgrade to v1.7.0. This breaks connectivity on the host because existing network configurations still reference the original name.
+
+To resolve this issue, apply kernel arguments that restore the original names of the affected interfaces.
+
+. Retrieve the list of non-default kernel arguments (`third_party_kernel_args`) on the node.
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv list
+third_party_kernel_args=multipath=off
+----
+
+. Add `ifname=nicName:macAddress` for each network interface on the node to restore the original names.
++
+Ensure that `third_party_kernel_args` is included when you add the `ifname=` arguments.
++
+Example:
++
+[,console]
+----
+$ grub2-editenv /oem/grubenv set \
+    third_party_kernel_args="multipath=off ifname=enp6s0f0:d4:c9:ef:ce:30:68 ifname=enp6s0f1:d4:c9:ef:ce:30:69"
+----
+
+. Reboot the node.
+
+[NOTE]
+====
+This workaround is only necessary when upgrading to v1.7.0, or if using bonded interfaces with v1.7.1. In v1.7.2 and later versions, these `ifname=` arguments are automatically added to prevent network disruptions during driver updates.
+
+|===
+| Version | Interface | Workaround
+
+| v1.7.0
+| Any
+| Manual
+
+| v1.7.1
+| Standalone
+| Automated
+
+| v1.7.1
+| Bonded
+| Manual
+
+| v1.7.2+
+| Any
+| Automated
+|===
+====
+
+Related issues: https://github.com/harvester/harvester/issues/9815[#9815], https://github.com/harvester/harvester/issues/9802[#9802], and https://github.com/harvester/harvester/issues/10397[#10397]
+
+=== Running virtual machines show "Restart action is required ..."
+
+After the upgrade, the {harvester-product-name} UI may show the message `"Restart action is required ..."` for running virtual machines. This occurs because KubeVirt adds the following field to the virtual machine definition during the upgrade.
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      domain:
+          firmware:
+            uuid: <VALUE>
+----
+
+Check if the YAML definition of the affected virtual machines includes this field.
+
+Example:
+
+[,yaml]
+----
+  metadata:
+  ...
+    managedFields:
+    - apiVersion: kubevirt.io/v1
+      fieldsType: FieldsV1
+      fieldsV1:
+        f:metadata:
+          f:annotations:
+            f:kubevirt.io/latest-observed-api-version: {}
+            f:kubevirt.io/storage-observed-api-version: {}
+          f:finalizers:
+            v:"kubevirt.io/virtualMachineControllerFinalize"null: {}
+        f:spec:
+          f:template:
+            f:spec:
+              f:domain:
+                f:firmware:
+                  .: {}
+                  f:uuid: {}
+      manager: virt-controller
+      operation: Update
+      time: "2025-12-15T09:10:30Z"
+  ...
+  spec:
+    template:
+      spec:
+        domain:
+          firmware:
+            uuid: d633a622-2335-5606-93ae-d432b7c7f2d2
+  ...
+  status:
+    conditions:
+    - lastProbeTime: "null"
+      lastTransitionTime: "2025-12-15T09:10:30Z"
+      message: a non-live-updatable field was changed in the template spec
+      status: "True"
+      type: RestartRequired
+----
+
+To clear the message, restart the affected virtual machines at your next scheduled maintenance window.
+
+Related issue: https://github.com/harvester/harvester/issues/9751[#9751]
+
+=== Unnecessary live migrations during the upgrade
+
+{harvester-product-name} v1.6.x enables xref:virtual-machines/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+
+To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
+
+[NOTE]
+====
+Starting with v1.8.0, this process is handled automatically. The workaround is only necessary when upgrading to a version earlier than v1.8.0.
+====
+
+==== Pre-upgrade workaround steps
+
+. Disable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods: []
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource to prevent drift warnings.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Add the following entry to the `spec.diff.comparePatches` field:
++
+[,yaml]
+----
+   spec:
+     diff:
+       comparePatches:
+       # Keep existing entries
+       - apiVersion: kubevirt.io/v1
+         jsonPointers:
+         - /spec/workloadUpdateStrategy/workloadUpdateMethods
+         kind: KubeVirt
+         name: kubevirt
+----
++
+You must preserve the existing entries.
+
+. Verify that the ManagedChart resource is ready.
++
+[,bash]
+----
+   kubectl get managedchart.management.cattle.io harvester -n fleet-local 
+----
+
+With these changes, virtual machines will not be scheduled for live migration because of `virt-launcher` pod image mismatches during the upgrade.
+
+[IMPORTANT]
+====
+CPU and memory hot-plugging is temporarily unavailable during the upgrade. For more information about decoupling this feature from workload update flags, see https://github.com/kubevirt/kubevirt/issues/17329[KubeVirt issue #17329].
+====
+
+==== Post-upgrade workaround steps
+
+After the upgrade completes successfully, restore the `LiveMigrate` workload update method to re-enable CPU and memory hot-plugging.
+
+. Re-enable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods:
+       - LiveMigrate
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+  
+. Remove the entry you added to the `spec.diff.comparePatches` field.
+
+. Verify that the `LiveMigrate` method has been restored.
++
+[,bash]
+----
+   kubectl get kubevirt kubevirt -n harvester-system -o yaml | grep -A 3 workloadUpdateStrategy
+----
++
+Expected output:
++
+[,yaml]
+----
+   workloadUpdateStrategy:
+     workloadUpdateMethods:
+     - LiveMigrate
+----
+
+Related issue: https://github.com/harvester/harvester/issues/10349[#10349]

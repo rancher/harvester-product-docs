@@ -1,0 +1,140 @@
+= Upgrade from v1.7.x to v1.7.y
+:revdate: 2026-06-04
+:page-revdate: {revdate}
+
+== General information
+
+An *Upgrade* button appears on the *Dashboard* screen whenever a new {harvester-product-name} version that you can upgrade to becomes available. For more information, see xref:upgrades/upgrades.adoc#_start_an_upgrade[Start an upgrade].
+
+For information about upgrading {harvester-product-name} in air-gapped environments, see xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[Prepare an air-gapped upgrade].
+
+=== Update the Harvester UI Extension on {rancher-product-name} v2.13
+
+You must use a compatible version (v1.7.x) of the Harvester UI Extension to import {harvester-product-name} v1.7.x clusters on {rancher-short-name} v2.13.
+
+. On the {rancher-short-name} UI, go to *local -> Apps -> Repositories*.
+
+. Locate the repository named *harvester*, and then select *⋮ -> Refresh*.
+
+. Go to the *Extensions* screen.
+
+. Locate the extension named *Harvester*, and then click *Update*.
+
+. Select a compatible version, and then click *Update*.
+
+. Allow some time for the extension to be updated, and then refresh the screen.
+
+== Known issues
+
+=== Upgrade is stuck in the "Post-draining" state
+
+During the node draining process, the `upgrade-repo` deployment may get stuck when its {longhorn-product-name} volume remains in the "Attaching" state. This causes the upgrade flow to stall in the "Post-draining" phase, since the post-drain jobs wait for the `upgrade-repo` deployment to become ready before proceeding.
+
+The workaround is to delete the {longhorn-product-name} replica of the `upgrade-repo` volume on the drained node. This allows the volume to attach and the upgrade flow to continue. Note that any node being drained during the upgrade may encounter this issue, so this workaround may need to be applied whenever it occurs.
+
+Related issues: https://github.com/harvester/harvester/issues/9597[#9597] and https://github.com/longhorn/longhorn/issues/12226[#12226]
+
+=== Unnecessary live migrations during the upgrade
+
+{harvester-product-name} v1.6.x enables xref:virtual-machines/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+
+To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
+
+[NOTE]
+====
+Starting with v1.8.0, this process is handled automatically. The workaround is only necessary when upgrading to a version earlier than v1.8.0.
+====
+
+==== Pre-upgrade workaround steps
+
+. Disable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods: []
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource to prevent drift warnings.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Add the following entry to the `spec.diff.comparePatches` field:
++
+[,yaml]
+----
+   spec:
+     diff:
+       comparePatches:
+       # Keep existing entries
+       - apiVersion: kubevirt.io/v1
+         jsonPointers:
+         - /spec/workloadUpdateStrategy/workloadUpdateMethods
+         kind: KubeVirt
+         name: kubevirt
+----
++
+You must preserve the existing entries.
+
+. Verify that the ManagedChart resource is ready.
++
+[,bash]
+----
+   kubectl get managedchart.management.cattle.io harvester -n fleet-local 
+----
+
+With these changes, virtual machines will not be scheduled for live migration because of `virt-launcher` pod image mismatches during the upgrade.
+
+[IMPORTANT]
+====
+CPU and memory hot-plugging is temporarily unavailable during the upgrade. For more information about decoupling this feature from workload update flags, see https://github.com/kubevirt/kubevirt/issues/17329[KubeVirt issue #17329].
+====
+
+==== Post-upgrade workaround steps
+
+After the upgrade completes successfully, restore the `LiveMigrate` workload update method to re-enable CPU and memory hot-plugging.
+
+. Re-enable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods:
+       - LiveMigrate
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+  
+. Remove the entry you added to the `spec.diff.comparePatches` field.
+
+. Verify that the `LiveMigrate` method has been restored.
++
+[,bash]
+----
+   kubectl get kubevirt kubevirt -n harvester-system -o yaml | grep -A 3 workloadUpdateStrategy
+----
++
+Expected output:
++
+[,yaml]
+----
+   workloadUpdateStrategy:
+     workloadUpdateMethods:
+     - LiveMigrate
+----
+
+Related issue: https://github.com/harvester/harvester/issues/10349[#10349]
