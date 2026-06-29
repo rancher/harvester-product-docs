@@ -1,33 +1,33 @@
-= Creating Windows Virtual Machines with Cloudbase-Init
+= Creating Windows Virtual Machines Using Cloudbase-Init
 
-You can automate Windows virtual machine customization in Harvester using Cloudbase-Init. To standardize provisioning and efficiently deploy multiple identical instances, you should create a reusable Windows virtual machine template from a base image.
+You can create Windows virtual machines in {harvester-product-name} using https://cloudbase.it/cloudbase-init/[Cloudbase-Init]. To standardize provisioning and efficiently deploy multiple instances, you must create a reusable Windows virtual machine template from a base image.
 
 == Prerequisites
 
-* Harvester UI access
+* {harvester-product-name} UI access
 * Windows ISO file
-* https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio[VirtIO driver ISO]
+* https://fedorapeople.org/groups/virt/virtio-win/direct-downloads/archive-virtio[VirtIO driver ISO file]
 * https://cloudbase.it/cloudbase-init/[Cloudbase-Init installer]
 
-== Procedure
+== Configuration workflow
 
-. <<#_creating_windows_qcow2,Create a Windows QCOW2 image using a VirtIO driver.>>
+. <<#_creating_qcow2_using_virtio,Create a Windows QCOW2 image using a VirtIO driver.>>
 . <<#_installing_configuring_cloudbaseinit,Install and configure Cloudbase-Init.>>
 . <<#_exporting_converting_volume,Export and convert the operating system volume>>.
 . <<#_creating_cloudinit_userdata,Create the cloud-init user-data YAML>>.
-Step 5: Create a new Windows virtual machine using the cloud configuration template.
+. <<#_creating_vm_using_template,Create a Windows virtual machine using the cloud configuration template>>.
 
-[#_creating_windows_qcow2]
+[#_creating_qcow2_using_virtio]
 === Creating a Windows QCOW2 image using a VirtIO driver
 
-Create a Windows virtual machine in Harvester using disks configured with the VirtIO driver.
+Create a Windows virtual machine in {harvester-product-name} using disks configured with the VirtIO driver.
 
 [IMPORTANT]
 ====
 The target installation disk must use the VirtIO bus type. Otherwise, the Windows installer will fail to detect the disk.
 ====
 
-. On the Harvester UI, go to *Images* and xref:virtual-machines/vm-images/upload-image.adoc[upload] the following images:
+. On the {harvester-product-name} UI, go to *Images* and xref:virtual-machines/vm-images/upload-image.adoc[upload] the following:
 +
 * Windows ISO file
 * VirtIO driver ISO file
@@ -35,14 +35,14 @@ The target installation disk must use the VirtIO bus type. Otherwise, the Window
 . Go to *Virtual Machines* and xref:virtual-machines/create-windows-vm.adoc[create a virtual machine] with three volumes.
 +
 |===
-| Volume | Source | Bus type
+| Volume | Source | Bus Type
 
 | 1
-| Windows ISO installer
+| Windows ISO file
 | SATA
 
 | 2
-| VirtIO driver ISO
+| VirtIO driver ISO file
 | SATA
 
 | 3
@@ -52,11 +52,11 @@ The target installation disk must use the VirtIO bus type. Otherwise, the Window
 
 . Start the virtual machine, and then open the console.
 
-. Follow the Windows installation wizard.
+. Follow the instructions on the Windows installation wizard.
 +
-When prompted to select an installation target, load the VirtIO driver from the attached ISO if the disk is not automatically detected.
+When prompted to select an installation target, load the VirtIO driver from the attached ISO file if the disk is not automatically detected.
 
-. Log in to the Windows guest operating system and install all remaining drivers using the attached VirtIO ISO.
+. Log in to the Windows guest operating system and install all remaining drivers using the attached VirtIO ISO file.
 
 [#_installing_configuring_cloudbaseinit]
 === Installing and configuring Cloudbase-Init
@@ -65,17 +65,22 @@ Install and configure Cloudbase-Init on the Windows guest operating system.
 
 . Download and run the https://cloudbase.it/cloudbase-init/[Cloudbase-Init installer].
 
-. Follow the Cloudbase-Init setup wizard.
+. Follow the instructions on the Cloudbase-Init setup wizard.
 
 . On the *Configuration options* screen, you must select *Run Cloudbase-Init service as LocalSystem*.
 
-. After clicking *Install*, keep the setup wizard window open.
-
-. Access the folder `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf`.
-
-. Edit the files `cloudbase-init.conf` and `cloudbase-init-unattend.conf`.
+. Click *Install*.
 +
-Paste the following content into each file.
+[CAUTION]
+====
+You must keep the setup wizard window open after installation is completed. Do not click *Finish*.
+====
+
+. Access `C:\Program Files\Cloudbase Solutions\Cloudbase-Init\conf`.
+
+. Edit `cloudbase-init.conf` and `cloudbase-init-unattend.conf`.
++
+Paste the following settings into each file.
 +
 ** `cloudbase-init.conf`:
 +
@@ -136,7 +141,7 @@ metadata_services=cloudbaseinit.metadata.services.nocloudservice.NoCloudConfigDr
 
 . After saving the changes, go back to the Cloudbase-Init setup wizard.
 
-. Select *Run Sysprep* and *Shutdown when Sysprep terminates*.
+. Select *Run Sysprep to create a generalized image.* and *Shutdown when Sysprep terminates.*.
 
 . Click *Finish*.
 
@@ -148,13 +153,13 @@ Do not start the virtual machine before performing the next set of steps.
 [#_exporting_converting_volume]
 === Exporting and converting the operating system volume
 
-xref:storage/volumes/export-volume.adoc[Export the volume] containing your installed Windows operating system and convert it into an image for creating other virtual machines.
+xref:storage/volumes/export-volume.adoc[Export the volume] containing the operating system files and core system directories, and convert it to an image for creating other virtual machines.
 
-. On the Harvester UI, go to *Volumes*.
+. On the {harvester-product-name} UI, go to *Volumes*.
 
-. Locate the volume where the Windows operating system was installed, and then select *⋮ -> Export Image*.
+. Locate the operating system volume and select *⋮ -> Export Image*.
 
-. In the *Export to Image* window, configure the required settings, and then click *Create*.
+. In the *Export to Image* window, configure the required settings and click *Create*.
 
 . Go to *Images* and verify that the image was created.
 
@@ -168,18 +173,18 @@ Ensure that the image state changes to *Ready* before using it to create a virtu
 
 Create a cloud configuration template to be used with the Windows virtual machine.
 
-. On the Harvester UI, go to *Advanced -> Cloud Config Templates*.
+. On the {harvester-product-name} UI, go to *Advanced -> Cloud Config Templates*.
 
 . Click *Create*.
 
-. On the *Create Cloud Config Template* screen, perform the following actions:
+. On the *Create:Cloud Config Template* screen, perform the following actions:
 +
-** *Basics* section: Specify the required metadata (namespace and name).
-** *Template Settings* section: Under *User Data*, type the cloud-config YAML that handles operating system-level tasks. 
+** *Basics*: Specify the namespace and a unique name for the virtual machine.
+** *Template Settings*: Under *User Data*, type the cloud-config YAML that handles operating system-level tasks. 
 
 . Click *Create*.
 
-The following is an example of cloud-config YAML that can be used in a Cloud Config Template.
+The following is an example of cloud-config YAML that can be used in a template.
 
 [,yaml]
 ----
@@ -209,7 +214,7 @@ runcmd:
   - powershell.exe -Command "Enable-NetFirewallRule -DisplayGroup 'Remote Desktop'"
 ----
 
-This configuration uses Cloudbase-Init to automatically provision a Windows virtual machine on initial boot, eliminating the need for manual post-installation configuration.
+This cloud-config YAML automatically creates a Windows virtual machine with predefined settings on initial boot, eliminating the need for manual post-installation configuration.
 
 * Sets the hostname to `winserver01`
 * Sets the timezone to `America/Sao_Paulo`
@@ -222,3 +227,24 @@ This configuration uses Cloudbase-Init to automatically provision a Windows virt
 
 The resulting Windows virtual machine is ready to host web applications and can be accessed remotely using both SSH and RDP.
 
+[#_creating_vm_using_template]
+=== Creating a Windows virtual machine using the cloud configuration template
+
+When you create a new Windows virtual machine using the cloud configuration template, {harvester-product-name} automatically applies the predefined settings.
+
+. On the {harvester-product-name} UI, go to *Virtual Machines* and click *Create*.
+
+. On the *Create:Virtual Machine* screen, perform the following actions:
++
+** *Header*: Specify the namespace and a unique name for the virtual machine.
+** *Basics*: Assign the required CPU and memory resources.
+** *Volumes*: In the *Image Volume* section, select the Windows image that you converted earlier.
+** *Network*: Configure the settings according to your environment's requirements.
+** *Advanced Options*: In the *Cloud Config* section, select your template from the *User Data Template* list.
+
+. Click *Create*.
+
+[IMPORTANT]
+====
+The virtual machine will restart multiple times while Sysprep runs and Cloudbase-Init applies the settings defined in the cloud configuration template. Once the provisioning process is completed, you can log into the virtual machine to verify that the settings were correctly applied.
+====
