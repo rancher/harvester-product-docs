@@ -1,0 +1,122 @@
+= Storage Migration
+:revdate: 2026-06-02
+:page-revdate: {revdate}
+
+Storage migration allows you to move virtual machine volume data between different StorageClasses. This is useful for operations that require you to change the underlying storage, such as the following:
+
+* Migrating from replicated ({longhorn-product-name}) to local (LVM) storage for better performance
+* Migrating from local to replicated storage for higher data availability
+
+{harvester-product-name} supports two modes of storage migration:
+
+* *Online storage migration*: Migrates volumes while the virtual machine is running. The guest operating system is unaware of the underlying disk movement.
+* *Offline data migration*: Clones volume data to a new StorageClass when the volume is not attached to any running virtual machine.
+
+== Prerequisites
+
+* The target StorageClass already exists in the cluster.
+* The target storage backend has sufficient capacity to hold the volume data.
+* For online migration, the virtual machine is xref:virtual-machines/live-migration.adoc#_live_migratable_virtual_machines[live-migratable] and running.
+
+== Online storage migration
+
+Use online storage migration when a virtual machine must remain running while you switch its StorageClass. The process utilizes https://kubevirt.io/user-guide/storage/volume_migration/[KubeVirt's volume migration] mechanism to live-migrate the virtual machine while seamlessly copying volume data to the target destination in the background.
+
+=== Online storage migration steps
+
+. Create a new PVC using the target StorageClass. The PVC's capacity must be equal to or greater than the source volume.
+
+. On the {harvester-product-name} UI, go to the *Virtual Machines* screen.
+
+. Locate the target virtual machine, and then select *⋮ -> Migrate Storage*.
+
+. Select the volume you want to migrate and the target PVC.
+
+. Confirm the migration.
++
+{harvester-product-name} begins copying volume data in the background while the virtual machine continues running.
+
+. Monitor the progress on the virtual machine details screen.
+
+=== Canceling an online storage migration
+
+. On the {harvester-product-name} UI, go to the *Virtual Machines* screen.
+
+. Locate the target virtual machine, and then select *⋮ -> Cancel Storage Migration*.
++
+The controller aborts the ongoing migration and the virtual machine continues to run with the original volume. No data is lost.
+
+. (Optional) Delete the target PVC.
++
+The PVC is not automatically deleted. To avoid orphaned resources, manually delete the PVC if it is no longer required.
+
+=== Online storage migration limitations
+
+The following limitations are inherited from KubeVirt's volume migration:
+
+* The virtual machine must be migrated to a different node during storage migration. Same-node storage migration is not supported. 
+* Shareable disks are not supported due to data consistency concerns with multiple writers.
+* Hotplugged disks cannot be migrated.
+* `virtiofs` disks are not supported as they lack live-migration capability.
+* LUN disks cannot be migrated when the destination StorageClass differs from the source.
+* Migrating between two `ReadWriteOnce` PVCs backed by local storage is only permitted when the PVCs reside on different nodes.
+* Only `PersistentVolumeClaim` and `DataVolume` sources are supported.
+
+== Offline data migration
+
+Use offline migration for volumes that are not attached to a running virtual machine. This process utilizes the Containerized Data Importer (CDI) to clone data to a new PVC with the target StorageClass.
+
+=== Offline data migration steps
+
+. Verify that the volume is not attached to any running virtual machine.
+
+. On the {harvester-product-name} UI, go to the *Virtual Machines* screen.
+
+. Locate the target virtual machine, and then select *⋮ -> Data Migration*.
+
+. Specify the target volume and the target StorageClass.
+
+. Click *Confirm*.
++
+{harvester-product-name} creates a CDI DataVolume resource that clones the data from the source volume.
+
+. Monitor the progress on the *Volumes* screen (DataVolume status).
+
+Once the migration is completed, the new volume appears in the *Volumes* list. You can then replace it in a virtual machine.
+
+=== Offline data migration limitations
+
+* The source volume must be in `Bound` status and must not be attached to a running virtual machine.
+* The target volume name must not conflict with an existing PVC or DataVolume in the same namespace.
+* The target StorageClass must exist.
+
+== Troubleshooting
+
+=== Online storage migration failure
+
+Online migration can fail due to insufficient space on the target storage, network issues, node failures, and other reasons.
+
+When a failure occurs, KubeVirt automatically enters a retry loop that continues until the migration succeeds or you explicitly cancel it. To determine the root cause of a failure, check the virtual machine's status and conditions.
+
+=== `ManualRecoveryRequired` condition
+
+In some cases, a failed volume migration may set a `ManualRecoveryRequired` condition on the VirtualMachine resource. When this occurs, perform the following actions:
+
+. Check the condition message for details about the failure.
+
+. Resolve the underlying cause (for example, insufficient storage capacity or network connectivity issue).
+
+. Clear the condition by following the instructions in the https://kubevirt.io/user-guide/storage/volume_migration/[KubeVirt documentation].
+
+=== Offline data migration failure
+
+. Check the DataVolume resource's status for error details.
++
+[,shell]
+----
+kubectl get dv -n <namespace> <target-volume-name> -o yaml`.
+----
+
+. Resolve the underlying cause (for example, insufficient storage capacity or incompatible StorageClass configurations).
+
+. Delete the failed DataVolume resource and retry.
