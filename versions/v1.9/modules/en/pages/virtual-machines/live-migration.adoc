@@ -1,5 +1,5 @@
 = Live Migration
-:revdate: 2026-06-02
+:revdate: 2026-07-02
 :page-revdate: {revdate}
 
 Live migration means moving a virtual machine to a different host without downtime. A couple of comprehensive processes and tasks are done under the hood to fulfill the live migration.
@@ -200,6 +200,12 @@ The migration process runs in peer-to-peer mode, which means that the libvirt da
 
 By default, the keepalive interval is set to 5 seconds, and the retry count is set to 5. Given these default values, the migration process is aborted if the connection is inactive for 30 seconds. However, the migration may fail earlier or later, depending on the actual cluster conditions.
 
+== Overlay virtual machine migration
+
+Starting with v1.9.0, virtual machines using Kube-OVN overlay networks can be live migrated with less than 0.5 seconds of network traffic disruption.
+
+For information about migrating overlay virtual machines, see <<#_starting_migration>>. For architectural details, see https://kube-ovn.readthedocs.io/zh-cn/stable/en/kubevirt/live-migration/[Live Migration] in the Kube-OVN documentation.
+
 == Known issues
 
 === Failure to migrate a virtual machine after ejecting an image from a CD-ROM device
@@ -212,3 +218,11 @@ Until the upstream issue is fixed, perform one of the following workarounds:
 * During virtual machine creation, declare all `Container` volumes before the first `Image Volume` (with `cd-rom` type).
 
 Related issue: https://github.com/harvester/harvester/issues/10221[#10221]
+
+=== Network disruption due to multiple MAC address moves between source and target hosts
+
+During live migration, the virtual machine's MAC address moves between the source and target hosts *multiple times*. This causes external switches to register the same MAC address on different interfaces, resulting in a temporary network disruption.
+
+To resolve this issue, set `disableContainerInterface: true` within the `spec.config` field of the corresponding Multus `NetworkAttachmentDefinition` *before* starting a live migration. This configuration delays enabling of the pod interface until after the switchover occurs, preventing multiple MAC address moves. For more information, see https://www.cni.dev/plugins/current/main/bridge/#example-l2-only-disabled-interface-configuration[Example L2-only, disabled interface configuration] in the Container Network Interface (CNI) documentation.
+
+Related issue: https://github.com/harvester/harvester/issues/10653[#10653]

@@ -1,22 +1,76 @@
 = Clone a Virtual Machine
-:revdate: 2025-05-09
+:revdate: 2026-07-02
 :page-revdate: {revdate}
 
 Virtual machines can be cloned with or without data. This function doesn't need to take a virtual machine snapshot or set up a backup target first.
 
-== Clone a Virtual Machine with Volume Data
+The cloned virtual machine inherits the source's basic configuration. You can choose whether to include the source's volume data, as well as customize the clone's name and xref:virtual-machines/create-vm.adoc#_run_strategy[run strategy].
 
-. On the `Virtual Machines` page, click `Clone` of the VM actions.
-. Set a new virtual machine name and click `Create`.
+== Cloning a virtual machine with volume data
+
+. On the *Virtual Machines* screen, locate the target virtual machine and select *⋮ -> Clone*.
 +
-image::vm/clone-vm-with-data.png[clone-vm-with-data.png]
+image::vm/clone-vm-with-data.png[Cloning a virtual machine with volume data]
 
-== Clone a Virtual Machine without Volume Data
+. Specify a unique name for the cloned virtual machine.
 
-Cloning a virtual machine without volume data creates a new virtual machine with the same configuration as the source.
-
-. On the `Virtual Machines` page, click `Clone` of the VM actions.
-. Unclick the `clone volume data` checkbox.
-. Set a new virtual machine name and click `Create`.
+. Select a xref:virtual-machines/create-vm.adoc#_run_strategy[run strategy].
 +
-image::vm/clone-vm-without-data.png[clone-vm-without-data.png]
+The cloned virtual machine uses the source's run strategy by default.
+
+. Click *Create*.
+
+== Cloning a virtual machine without volume data
+
+. On the *Virtual Machines* screen, locate the target virtual machine and select *⋮ -> Clone*.
++
+image::vm/clone-vm-without-data.png[Cloning a virtual machine without volume data]
+
+. Clear *Clone volume data*.
+
+. Specify a unique name for the cloned virtual machine.
+
+. Select a xref:virtual-machines/create-vm.adoc#_run_strategy[run strategy].
++
+The cloned virtual machine uses the source's run strategy by default.
+
+. Click *Create*.
++
+image::vm/clone-vm-without-data-config.png[Cloned virtual machine without volume data configuration]
+
+== EFI and vTPM persistent states
+
+{harvester-product-name} supports cloning virtual machines that use persistent EFI or vTPM states. During cloning, {harvester-product-name} copies the underlying persistent data that the guest operating system depends on. This ensures the cloned virtual machine retains vital configuration details, such as EFI NVRAM settings and vTPM-stored data (including BitLocker recovery keys).
+
+You can enable EFI and/or vTPM independently before cloning. {harvester-product-name} preserves only the persistent state required by the cloned virtual machine.
+
+|===
+| EFI Status | vTPM Status | {harvester-product-name} Behavior
+
+| Enabled
+| Enabled
+| Preserves both persistent states
+
+| Enabled
+| Disabled
+| Preserves only the EFI state
+
+| Disabled
+| Enabled
+| Preserves only the vTPM state
+
+| Disabled
+| Disabled
+| Skips processing of persistent state storage
+|===
+
+The cloned virtual machine may remain in the `Pending` state while {harvester-product-name} prepares the persistent state storage.
+
+image::vm/efi-tpm-clone.png[EFI and vTPM persistent states]
+
+[CAUTION]
+====
+EFI and vTPM persistent states are stored separately from the volumes listed in `spec.template.spec.volumes`. {harvester-product-name} creates this storage only after the source virtual machine has been started at least once. If the source storage has never been started, cloning a virtual machine with EFI or vTPM persistent state can fail because the required source storage does not exist.
+
+Because the persistent state is copied directly from the source, the cloned virtual machine will inherit identical guest-visible firmware identifiers (including the firmware UUID). However, the clone retains its own virtual machine object identity within {harvester-product-name}.
+====
