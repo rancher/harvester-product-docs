@@ -1,0 +1,103 @@
+= Creating Users with SSH Access to Harvester Nodes
+
+The default `rancher` user account can access nodes via SSH, but you may need to create additional administrative users with SSH access. Because the Harvester operating system is immutable, user accounts created using the standard `useradd` command will be lost when the node restarts.
+
+To create persistent users with SSH access, perform the following steps:
+
+. Create a `cloud-init.yaml` file for public key authentication.
++
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: add-test-user
+spec:
+  matchSelector: {} # applies to all nodes
+  filename: 99_add_test_user.yaml
+  contents: |
+    #cloud-config
+    users:
+      - name: test-user
+        gecos: "admin_user"
+        groups: [users, admin]
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        ssh_authorized_keys:
+        - ssh-rsa AAAA.... # Full authorized public key
+----
++
+* `matchSelector`: Modify the value if you want to limit the user's access to specific nodes.
+* `#cloud-config`: This should be written exactly as is.
+* `groups`: The user must be part of the `admin` group.
+* `ssh_authorized_keys`: You must specify a full authorized public key (for example, from your `~/.ssh/id_rsa.pub` file).
+
+. Create a password hash.
++
+[,shell]
+----
+openssl passwd -6 'test'
+$6$zF26pcXOS2eaivX8$6ySoTzQC2cToz29mGFC0DuG5cVWTv3Mktc3k/g1KXTtrG2BhsFh8xs3N0zBmNx0D/H4f1W48a45vI1RK8Rzs.0
+----
++
+Replace `test` with your actual password.
+
+. Create a `cloud-init.yaml` file for password authentication.
++
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: add-test-user
+spec:
+  matchSelector: {} # applies to all nodes
+  filename: 99_add_test_user.yaml
+  contents: |
+    #cloud-config
+    users:
+      - name: test-user
+        gecos: "admin_user"
+        groups: [users, admin]
+        sudo: ALL=(ALL) NOPASSWD:ALL
+        shell: /bin/bash
+        lock_passwd: false
+        passwd: $6$zF26pcXOS2eaivX8$6ySoTzQC2cToz29mGFC0DuG5cVWTv3Mktc3k/g1KXTtrG2BhsFh8xs3N0zBmNx0D/H4f1W48a45vI1RK8Rzs.0
+----
++
+* `matchSelector`: Modify the value if you want to limit the user's access to specific nodes.
+* `#cloud-config`: This should be written exactly as is.
+* `groups`: The user must be part of the `admin` group.
+* `passwd`: Specify the hash you created.
+
+. Apply the YAML file.
++
+[,shell]
+----
+kubectl apply -f cloud-init.yaml
+----
++
+The following trailing file will be created:
++
+[,yaml]
+----
+cat /oem/99_add_test_user.yaml
+#cloud-config
+users:
+  - name: test-user
+    gecos: "admin_user"
+    groups: users, admin
+    sudo: ALL=(ALL) NOPASSWD:ALL
+    shell: /bin/bash
+    ...
+----
+
+. On the Harvester UI, go to *Hosts*.
+
+. Locate the target node, and then select *⋮ -> Enable Maintenance Mode*.
++
+Repeat this step for each node covered by the value of the `matchSelector` field in the `cloud-init.yaml` files.
+
+. Wait until the state changes to _Maintenance_, and then reboot the nodes.
+
+. On the *Hosts* screen, select *⋮ -> Disable Maintenance Mode* for each affected node.
