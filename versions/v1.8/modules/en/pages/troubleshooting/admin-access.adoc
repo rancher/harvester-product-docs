@@ -1,0 +1,141 @@
+= Password Recovery for UI and Console User Accounts
+:revdate: 2026-07-17
+:page-revdate: {revdate}
+
+You can regain administrative access to a {harvester-product-name} cluster after losing the password for either the `admin` or the `rancher` user account.
+
+== Lost admin password for the {harvester-product-name} UI
+
+You can reset the admin password for the {harvester-product-name} UI if you meet either of the following conditions:
+
+* You can access a management node using the `rancher` user account.
+* You have a local copy of the {harvester-product-name} cluster's `kubeconfig` file.
+
+. Access a management node via SSH using the `rancher` user account.
+
+. Switch to the `root` user.
++
+[,bash]
+----
+sudo su -
+----
+
+. Reset the password.
++
+[,bash]
+----
+kubectl -n cattle-system exec $(kubectl --kubeconfig $KUBECONFIG -n cattle-system get pods -l app=rancher --no-headers | head -1 | awk '{ print $1 }') -c rancher -- reset-password
+----
+
+== Lost `rancher` user password for the console
+
+The recovery path you can take depends on your current access level.
+
+=== Path A: You have a local copy of the cluster's kubeconfig file
+
+You can reset the `rancher` user account's password without accessing the console using one of the following methods:
+
+* Create and apply a CloudInit CRD to update the xref:installation-setup/config/update-configuration.adoc#_password_of_rancher_user[password] on the host.
+
+* Create additional xref:troubleshooting/ssh-users.adoc[user accounts with SSH access].
+
+=== Path B: You only have console access (no kubeconfig file)
+
+You must modify the persistent configuration file (`/oem/90_custom.yaml`) directly on each host. The recovery method depends on your environment.
+
+==== Option 1: Boot using the {harvester-product-name} installer ISO
+
+. Boot the host using the {harvester-product-name} installer ISO.
++
+[CAUTION]
+====
+Do not proceed with the regular installation process.
+====
+
+. Once the installer screen appears, press *Ctrl + Alt + F2* to switch to a virtual terminal (VT2).
+
+. Log in using the default credentials (username `rancher` and password `rancher`).
+
+. Switch to the root account.
++
+[,bash]
+----
+sudo -i
+----
+
+. Create a temporary mount point and mount the host's OEM configuration partition (`COS_OEM`).
++
+[,bash]
+----
+mkdir /tmp/oem
+mount -L COS_OEM /tmp/oem
+----
+
+. Open the custom configuration file (`90_custom.yaml`).
++
+[,bash]
+----
+vim /tmp/oem/90_custom.yaml
+----
+
+. Locate the `users` block and change the password.
++
+[,yaml]
+----
+  users:
+    rancher:
+      passwd: <PASSWORD>
+----
++
+[TIP]
+====
+Generate a secure SHA-512 hash using your operating system's built-in command-line tools or a standard programming library (for example, `openssl passwd -6`).
+====
+
+. Unmount the partition and restart the node.
++
+[,bash]
+----
+umount /tmp/oem
+reboot
+----
+
+==== Option 2: Edit the boot menu via GRUB
+
+Use this option if you cannot boot from external media but can access and reboot the host's console.
+
+. Reboot the host.
+
+. On the GRUB boot menu screen, select your boot target and press *E* to edit the kernel boot parameters.
+
+. Locate the line starting with `linux` and append `rd.break` to the end of that line.
+
+. Press *Ctrl + X* or *F10* to boot into the `dracut` emergency shell.
++
+The system partition will be mounted as read-only under `/sysroot`.
+
+. Temporarily force the default password into the system's shadow file.
++
+[,bash]
+----
+sed -i 's%rancher.*%rancher:$6$j0.h3TQv8RZPHJkB$3SbV978JLT2Qeq4KSCBZitErNlZZGfrDxnGW5HS0wHzWexGyPzeQBoQmQJetUhLFfquv/X5VWL6odxtlEec1u/:20468::::::%' /sysroot/etc/shadow
+----
++
+You must bypass the files using `sed` because this emergency recovery environment lacks text editors.
+
+. Press *Ctrl + D* to allow the system to finish booting.
+
+. Log into the host console using the username `rancher` and the _temporary_ password `rancher`.
++
+[IMPORTANT]
+====
+This shadow file bypass is temporary and will be lost on the next reboot.
+====
+
+. Immediately open the persistent configuration file `/oem/90_custom.yaml` and set a secure, permanent password.
++
+[,bash]
+----
+sudo -i
+vim /oem/90_custom.yaml
+----
