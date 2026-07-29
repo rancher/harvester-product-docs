@@ -1,5 +1,5 @@
 = Harvester CSI Driver
-:revdate: 2026-07-02
+:revdate: 2026-07-24
 :page-revdate: {revdate}
 
 The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the {harvester-product-name} cluster and hot-plugs volumes to the virtual machines to provide native storage performance.
@@ -517,6 +517,63 @@ Starting with *v0.1.25*, the Harvester CSI Driver supports https://kubernetes.io
 * {harvester-product-name} v1.7 or later
 * Harvester CSI Driver v0.1.25 or later
 * The CSI snapshot controller and the required manifests are properly deployed on the guest cluster. These components are deployed by default on RKE2.
+
+=== Enabling volume snapshots on guest clusters
+
+The volume snapshot feature depends on the snapshot controller and its associated CRDs. Both the controller and the CRDs operate independently of any specific CSI driver. 
+
+Kubernetes distributions such as RKE2 typically bundle and automatically deploy these components. If your distribution does not, you must manually install them on each guest cluster.
+
+. Download the required components from the https://github.com/kubernetes-csi/external-snapshotter[`kubernetes-csi/external-snapshotter`] repository.
++
+For example, to use v8.5.0, you must download the files from the following directories:
++
+** Snapshot CRDs: `client/config/crd`
+** Snapshot controller: `deploy/kubernetes/snapshot-controller`
++
+[IMPORTANT]
+====
+You must use matching versions for the CRDs and the controller to guarantee API compatibility.
+====
+
+. In the snapshot controller YAML files, update the namespace with a value that matches your environment.
++
+For example, on a standard Kubernetes cluster, change the namespace from `default` to `kube-system`. Ensure that you change both the workload namespace and the target namespace in the `ClusterRoleBinding` configurations.
+
+. Install the snapshot CRDs.
++
+[,bash]
+----
+kubectl create -k client/config/crd
+----
+
+. Install the snapshot controller.
++
+[,bash]
+----
+kubectl create -k deploy/kubernetes/snapshot-controller
+----
+
+. Verify that the snapshot CRDs are available on the cluster.
++
+[,bash]
+----
+kubectl get crd | grep snapshot.storage.k8s.io
+----
+
+. Apply a VolumeSnapshotClass manifest.
++
+Example:
++
+[,yaml]
+----
+apiVersion: snapshot.storage.k8s.io/v1
+deletionPolicy: Delete
+driver: driver.harvesterhci.io
+kind: VolumeSnapshotClass
+metadata:
+  name: harvester-snap
+----
 
 == Volume backups
 

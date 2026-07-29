@@ -1,6 +1,6 @@
 = CPU Pinning
 :page-languages: [en, de, es, fr, ja, pt, zh]
-:revdate: 2025-10-20
+:revdate: 2026-07-24
 :page-revdate: {revdate}
 
 {harvester-product-name} supports virtual machine CPU pinning. To use this feature, you must first enable the CPU Manager on the nodes, and then enable CPU pinning when you create the virtual machine.
@@ -53,6 +53,42 @@ image::vm/cpu-pinning-disable-cpu-manager.png[disable-cpu-manager]
 * The CPU Manager must be enabled or disabled on each management node separately. You must wait for the operation to be completed before starting another.
 +
 * Virtual machines with CPU pinning enabled must be stopped before CPU Manager is disabled on the corresponding node.
+
+=== Node selection and affinity
+
+When you enable the CPU Manager on nodes, {harvester-product-name} applies the following label to related `node` objects.
+
+[,yaml]
+----
+...
+metadata:
+  labels:
+    cpumanager: "true"
+...
+----
+
+When you enable CPU pinning during virtual machine creation, {harvester-product-name} applies an affinity rule that ensures the virtual machine is scheduled only on nodes where the CPU Manager is enabled.
+
+[,yaml]
+----
+spec:
+  template:
+    spec:
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: cpumanager
+                    operator: In
+                    values:
+                      - 'true'
+----
+
+[NOTE]
+====
+The virtual machine is xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable] if the CPU Manager is enabled on only one node.
+====
 
 == Enable CPU Pinning on a New Virtual Machine
 
