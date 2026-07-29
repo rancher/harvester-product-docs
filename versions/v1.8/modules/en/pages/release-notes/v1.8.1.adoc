@@ -1,0 +1,200 @@
+= {harvester-product-name} v1.8.1 Release Notes
+:revdate: 2026-07-30
+:page-revdate: {revdate}
+
+This release introduces several features, enhancements, and bug fixes that improve system quality and the overall user experience. The documentation is available at https://documentation.suse.com/cloudnative/virtualization/v1.8/en/introduction/overview.html.
+
+== Downloads
+
+=== AMD64
+
+==== Full ISO
+
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-amd64.iso
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-vmlinuz-amd64
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-initrd-amd64
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-rootfs-amd64.squashfs
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-amd64.sha512
+* https://releases.rancher.com/harvester/v1.8.1/version.yaml
+
+==== Net install ISO
+
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-amd64-net-install.iso
+
+=== ARM64
+
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-arm64.iso
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-vmlinuz-arm64
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-initrd-arm64
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-rootfs-arm64.squashfs
+* https://releases.rancher.com/harvester/v1.8.1/harvester-v1.8.1-arm64.sha512
+* https://releases.rancher.com/harvester/v1.8.1/version-arm64.yaml
+
+== Installation
+
+{harvester-product-name} can be installed using the https://documentation.suse.com/cloudnative/virtualization/v1.8/en/installation-setup/methods/iso-install.html[ISO image], a https://documentation.suse.com/cloudnative/virtualization/v1.8/en/installation-setup/methods/usb-install.html[bootable USB drive], and https://documentation.suse.com/cloudnative/virtualization/v1.8/en/installation-setup/methods/pxe-boot-install.html[PXE boot]. For more information, see the https://documentation.suse.com/cloudnative/virtualization/v1.8/en/installation-setup/requirements.html[Installation] section of the documentation.
+
+== Upgrades
+
+{harvester-product-name} only allows upgrades from supported versions. For more information about upgrade paths and procedures, see https://documentation.suse.com/cloudnative/virtualization/v1.8/en/upgrades/upgrades.html[Upgrades].
+
+[IMPORTANT]
+====
+When upgrading from v1.7 to v1.8, you may encounter an operating system image corruption issue if *all* of the following conditions are met:
+
+* {harvester-product-name} v1.4.1 or earlier was originally installed.
+* A separate data disk is used.
+* The cluster has been continually upgraded in place.
+
+For more information, see issue https://github.com/harvester/harvester/issues/10687[#10687].
+====
+
+== Highlights
+
+=== In-place storage live migration
+
+In {harvester-product-name} v1.8.0, you can seamlessly migrate a running VM's disks (or a subset of them) between different storage providers, such as {longhorn-product-name} or externally supported CSI volumes without any downtime. The guest OS remains completely unaware of the underlying storage transfer, ensuring minimal disruption to active workloads. This new capability includes full UI and API support with real-time progress tracking, as well as built-in safety mechanisms that verify destination capacity and temporarily block conflicting operations (like host-to-host live migrations) until the storage transfer is complete.
+
+https://youtu.be/3n_g1TYeeSQ[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/storage/storage-migration.html[Documentation] | https://github.com/harvester/harvester/issues/8285[GitHub issue]
+
+=== Live CD-ROM insertion and ejection
+
+{harvester-product-name} v1.8.0 introduces dynamic management for CD-ROM volumes, allowing users to insert or eject ISO images while a VM is running. While adding or removing the CD-ROM device itself still typically necessitates a reboot, swapping the media within that device is now seamless. Additionally, VMs with mounted CD-ROMs are live migratable.
+
+https://youtu.be/jucSGtUyPVA[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/virtual-machines/cdrom-hotplug.html[Documentation] | https://github.com/harvester/harvester/issues/9261[GitHub issue]
+
+=== Optimized {longhorn-product-name} resource reservations
+
+{harvester-product-name} v1.8.0 introduces reduced unnecessary CPU and memory consumption for clusters utilizing third-party storage solutions. {harvester-product-name} now detects when external storage is in use and dynamically lowers {longhorn-product-name}'s resource reservations. This update also introduces configurable options for users to manually adjust these allocations, improving overall cluster efficiency and freeing up resources for other workloads without impacting core {longhorn-product-name} functionalities.
+
+https://youtu.be/YdsF-UFiYyE[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/installation-setup/config/settings.html#_instance_manager_resources[Documentation] | https://github.com/harvester/harvester/issues/7867[GitHub issue]
+
+=== Pod Security Admission (PSA) support
+
+{harvester-product-name} v1.8.0 supports Pod Security Admission (PSA) to enforce Pod Security Standards (PSS). Built-in Kubernetes that validates and mutates the admission policies are used to enforce these standards on {harvester-product-name}'s system namespaces. This implementation guarantees that system-specific workloads remain unaffected and ensures a seamless upgrade path from non-PSA to PSA-enabled images. User namespaces remain unenforced, by default, preserving the flexibility for users to define their own security levels or independently deploy external policy engines (such as Kyverno, OPA Gatekeeper, or Kubewarden) without bloating the core upgrade path.
+
+https://youtu.be/_zi3vC1T2ro[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/security-resilience/pod-security-standards.html[Documentation] | https://github.com/harvester/harvester/issues/8196[GitHub issue]
+
+=== PVC Backup and Restore via harvester-csi-driver for Guest Cluster Workloads
+
+{harvester-product-name} v1.8.0 enables backup and restore operations for guest cluster workloads using the harvester-csi-driver. This allows users to protect their workload data by creating backups of Persistent Volume Claims (PVCs) in the guest cluster, which are then stored in the underlying storage provider (now only support {longhorn-product-name}) of the {harvester-product-name} cluster. Users can easily restore these backups to recover from data loss or to migrate workloads between clusters, providing enhanced data protection for applications running within {harvester-product-name}-managed guest clusters.
+
+https://youtu.be/GPecK2ONwcU[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/integrations/rancher/csi-driver.html#_volume_backups[Documentation] | https://github.com/harvester/harvester/issues/2661[GitHub issue]
+
+=== VM Pending Restart Notifications
+
+{harvester-product-name} v1.8.0 UI now proactively alerts users when a Virtual Machine requires a restart to fully apply configuration changes, such as interface binding updates or specific CPU/memory modifications. The dashboard continuously polls the VM's status conditions and displays a "Pending Restart" indicator when necessary. This prevents unapplied changes from silently blocking future live updates or resource hotplug operations, ensuring users can promptly resolve the state using the standard UI restart action.
+
+https://youtu.be/pg23e9eQh5M[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/virtual-machines/edit-vm.html#_pending_changes_notification[Documentation] | https://github.com/harvester/harvester/issues/8411[GitHub issue]
+
+=== Configurable VM CPU Models for Live Migration
+
+{harvester-product-name} v1.8.0 addresses an issue where live migrating VMs between hosts with different CPU generations (for example, AMD Ryzen 5th Gen to 3rd Gen) would fail due to strict CPU feature-matching checks by KubeVirt/libvirt. Users can now explicitly define a specific CPU model (for example, IvyBridge, host-model, or default) for a VM during creation via the {harvester-product-name} UI or Terraform provider. This ensures the VM is only scheduled and migrated across nodes that support the selected baseline CPU model, enabling reliable backward compatibility and successful live migrations in mixed-hardware clusters.
+
+https://youtu.be/TVQSRsJ6K4M[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/virtual-machines/cpu-model-selection.html[Documentation] | https://github.com/harvester/harvester/issues/3015[GitHub issue]
+
+=== Interactive VPC Network Topology
+
+In {harvester-product-name} v1.8.0, a dynamic visual topology diagram is added to the VPC detail page, providing a clear representation of logical switches and network relationships. The interactive map displays the complete hierarchy from VPCs and Subnets to Overlay Networks and individual VMs while accurately reflecting VM power states by graying out stopped or paused instances. Users can easily navigate complex network architectures using pan and zoom controls, legend toggles for filtering node types, click-to-highlight node relationships, and clickable VPC peering links that seamlessly redirect to associated topology pages.
+
+https://youtu.be/b9QHwFFkSao[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/networking/kubeovn-vpc.html#_vpc_topology[Documentation] | https://github.com/harvester/harvester/issues/9748[GitHub issue]
+
+=== Fine-Grained {harvester-product-name} RBAC Roles for Rancher
+
+{harvester-product-name} v1.8.0 introduces {harvester-product-name}-specific Role-Based Access Control (RBAC) roles within Rancher, fully enforced at the backend API-level. This allows administrators to assign highly specific, granular permissions based on user needs. New capabilities include read-only roles for viewing VM definitions and monitoring data, specialized roles for non-admins to manage hardware devices (PCI, USB, vGPU), and scoped "VM Admin" roles restricted to editing VMs within specific namespaces without granting access to underlying infrastructure like images or networks. Role permissions are additive, and for security purposes, sensitive cluster-level configurations, such as logging facilities remain strictly editable only by cluster admins, with non-admins restricted to read-only access.
+
+https://youtu.be/cm7fCswrrz8[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/integrations/rancher/rancher-rbac.html[Documentation] | https://github.com/harvester/harvester/issues/7909[GitHub issue]
+
+=== Layer 3 Underlay for Software-Defined Cluster Networks
+
+{harvester-product-name} v1.8.0 introduces Layer 3 connectivity support for software-defined cluster networks to act as a dedicated underlay for Kube-OVN. Previously, inter-node VM traffic was forced over the management interface (mgmt-bo), causing potential bandwidth overhead and a lack of traffic segregation. With the latest udpate, users can now assign a specific IP range to a custom cluster network, which {harvester-product-name} uses to automatically allocate IPs across nodes and provision dedicated OVS bridges. This enables complete segregation of VM data traffic from management traffic, improving overall network performance, isolation and architectural flexibility.
+
+https://youtu.be/EHbVrJ-HgYI[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/networking/host-network-config.html[Documentation] | https://github.com/harvester/harvester/issues/7834[GitHub issue]
+
+=== SUSE Observability Integration
+
+{harvester-product-name} v1.8.0 officially supports integration with the SUSE Observability Stack Pack. {harvester-product-name} clusters can now seamlessly register with SUSE Observability to track core metrics, ensuring reliable data continuity and accurate resource reporting (such as CPU, memory and node size) across cluster upgrades and dynamic scaling operations.
+
+https://youtu.be/8UeAceSBy-Q[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/add-ons/suse-observability-agent.html[Documentation] | https://github.com/harvester/harvester/issues/8282[GitHub issue]
+
+=== Stand-alone Upgrade Manager (Experimental)
+
+{harvester-product-name} v1.8.0 decouples the upgrade logic from the core harvester binary into a stand-alone upgrade-manager. This architectural change enables faster delivery and testing of upgrade-related features and bug fixes without waiting for full release cycles. The upgrade lifecycle is now efficiently managed by `components—upgrade-shim` (early stage preparation), `upgrade-repo` (metadata and image hub), and `upgrade-manager` (custom lifecycle controllers) improving the overall maintainability and upgrade reliability.
+
+https://youtu.be/pxqGzArkxNc[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/add-ons/upgrade-manager.html[Documentation] | https://github.com/harvester/harvester/issues/7112[GitHub issue]
+
+=== Enhanced Device Identification and Native Support for Non-WWN Disks
+
+{harvester-product-name} v1.8.0 introduces a reworked BlockDevice naming convention that removes the strict requirement for World Wide Names (WWNs). This allows disks without WWNs to be recognized and provisioned seamlessly across Longhorn V1, Longhorn V2, and LVM storage backends. This enhancement significantly streamlines disk attachment, particularly for NVMe devices and other hardware where WWNs may not be available.
+
+https://youtu.be/KK1VynmMVJo[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.8/en/hosts/hosts.html#_multi_disk_management[Documentation] | https://github.com/harvester/harvester/issues/6261[GitHub issue]
+
+== Features
+
+* [backport v1.8] [FEATURE] Allow particular ports access as default security policy https://github.com/harvester/harvester/issues/10327[#10327]
+
+== Enhancements
+
+* [backport v1.8] [ENHANCEMENT] Relax LB webhook with more backward compatibility https://github.com/harvester/harvester/issues/10528[#10528]
+* [backport v1.8] [ENHANCEMENT] Block parent vGPU device enable/disable actions https://github.com/harvester/harvester/issues/10439[#10439]
+* [backport v1.8] [ENHANCEMENT] Extra VM live migration during upgrade https://github.com/harvester/harvester/issues/10365[#10365]
+* [backport v1.8] [ENHANCEMENT] Support Storage Migration for VMs Restored from Snapshot or Backup https://github.com/harvester/harvester/issues/10353[#10353]
+* [backport v1.8] [ENHANCEMENT] Enhance the resource-quota processing when overhead-ratio is adjusted https://github.com/harvester/harvester/issues/10246[#10246]
+* [TASK] Bump Go version to 1.26 for v1.8.1 https://github.com/harvester/harvester/issues/10734[#10734]
+* [TASK] Component updates for v1.8.1 https://github.com/harvester/harvester/issues/10566[#10566]
+
+== Bug Fixes
+
+* [BUG] rancher-monitoring can't be enabled in v1.8.1-rc2 https://github.com/harvester/harvester/issues/11019[#11019]
+* [Doc] Update the lvm doc with right path to addon yaml https://github.com/harvester/harvester/issues/10798[#10798]
+* [backport v1.8] [BUG] `ifname=` kernel args don't always work to rename network interfaces https://github.com/harvester/harvester/issues/10789[#10789]
+* [BUG] Upgrade from v1.8.0 to v1.8-head stuck at waiting CAPI cluster fleet-local/local generation bump https://github.com/harvester/harvester/issues/10719[#10719]
+* [BUG] Can't enable SR-IOV GPU on https://github.com/harvester/harvester/issues/10707[#10707]
+* [backport v1.8] [BUG] install.wipe_disks_list should not error out if the disk doesn't exist https://github.com/harvester/harvester/issues/10613[#10613]
+* [backport v1.8] [BUG] f29abc8d airgapped master build fails to render dashboard https://github.com/harvester/harvester/issues/10577[#10577]
+* [backport v1.8] [BUG] Upgrade from v1.7.x to v1.8.0 stuck in Post-draining when storage-network is configured with RWX volumes https://github.com/harvester/harvester/issues/10537[#10537]
+* [backport v1.8] [BUG] Upgrade could fail without retrying when entering the node upgrade phase https://github.com/harvester/harvester/issues/10530[#10530]
+* [backport v1.8] [BUG] storage-validator : offline volume expansion test fails for Dell CSI drivers https://github.com/harvester/harvester/issues/10515[#10515]
+* [backport v1.8] [BUG] Stop using `rancher/kubectl` image https://github.com/harvester/harvester/issues/10467[#10467]
+* [backport v1.8] [BUG] pcidevice passthorugh is broken on VM with hot plugged volume https://github.com/harvester/harvester/issues/10371[#10371]
+* [backport v1.8] [BUG] UI shows incorrect info when deleting storage https://github.com/harvester/harvester/issues/10338[#10338]
+* [BUG] node names not listed under node scheduling while creating a VM in UI https://github.com/harvester/harvester/issues/10189[#10189]
+* [BUG] Rancher v2.14.0-alpha9 has chance to fail to provision RKE2 v1.35 guest cluster https://github.com/harvester/harvester/issues/10188[#10188]
+* [BUG] Virtual Machine's Node Scheduling Rules Are Incorrectly Truncated https://github.com/harvester/harvester/issues/9334[#9334]
+* [BUG] Can not reset node scheduling of a VM to `run on all available nodes` https://github.com/harvester/harvester/issues/9142[#9142]
+
+== Known Issues
+
+This section includes only issues identified before the release date. For information about all issues associated with v1.8.1, see https://github.com/harvester/harvester/issues?q=is:issue%20label:known-issue-v1.8.1[this page].
+
+* [BUG] v1.7.x → v1.8.0 OS-swap leaves two p11-kit files all-NUL in /usr/share on ~1/3 of nodes; breaks every TLS user on that host (containerd, Longhorn engine-image, kubelet) https://github.com/harvester/harvester/issues/10687[#10687]
+* [BUG] After upgraded to three Nodes with witness role to v1.8.0-rc6, vm failed to migrate with error "Kubevirt not ready" https://github.com/harvester/harvester/issues/10447[#10447]
+* [BUG] Failed to migrate VM after eject the windows image from CDROM device https://github.com/harvester/harvester/issues/10221[#10221]
+* [BUG] Fail to enable rancher-logging after negative upgrade cases https://github.com/harvester/harvester/issues/10220[#10220]
+
+== Components
+
+|===
+| Component | Version
+
+| CDI
+| https://github.com/kubevirt/containerized-data-importer/releases/tag/v1.64.0[v1.64.0]
+
+| Kube-OVN
+| https://github.com/kubeovn/kube-ovn/releases/tag/v1.15.4[v1.15.4]
+
+| KubeVirt
+| https://github.com/kubevirt/kubevirt/releases/tag/v1.7.0[v1.7.0]
+
+| {longhorn-product-name-tm}
+| https://github.com/longhorn/longhorn/releases/tag/v1.11.2[v1.11.2]
+
+| {rancher-product-name-tm} (embedded)
+| https://github.com/rancher/rancher/releases/tag/v2.14.2[v2.14.2]
+
+| {rke2-product-name}
+| https://github.com/rancher/rke2/releases/tag/v1.35.6%2Brke2r1[v1.35.6+rke2r1]
+
+| SUSE Linux Micro
+| https://github.com/harvester/os2/releases/tag/v1.8-20260605[6.2]
+|===
