@@ -1,0 +1,202 @@
+= {harvester-product-name} v1.6.1 Release Notes
+:revdate: 2026-07-31
+:page-revdate: {revdate}
+
+This release introduces several features, enhancements, and bug fixes that improve system quality and the overall user experience. The documentation is available at https://documentation.suse.com/cloudnative/virtualization/v1.6/en/introduction/overview.html.
+
+== Downloads
+
+=== AMD64
+
+==== Full ISO
+
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-amd64.iso
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-vmlinuz-amd64
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-initrd-amd64
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-rootfs-amd64.squashfs
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-amd64.sha512
+* https://releases.rancher.com/harvester/v1.6.1/version.yaml
+
+==== Net install ISO
+
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-amd64-net-install.iso
+
+=== ARM64
+
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-arm64.iso
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-vmlinuz-arm64
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-initrd-arm64
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-rootfs-arm64.squashfs
+* https://releases.rancher.com/harvester/v1.6.1/harvester-v1.6.1-arm64.sha512
+* https://releases.rancher.com/harvester/v1.6.1/version-arm64.yaml
+
+== Installation
+
+{harvester-product-name} can be installed using the https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/methods/iso-install.html[ISO image], a https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/methods/usb-install.html[bootable USB drive], and https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/methods/pxe-boot-install.html[PXE boot]. For more information, see the https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/requirements.html[Installation] section of the documentation.
+
+[IMPORTANT]
+====
+The {harvester-product-name} installer checks if the hardware meets the https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/requirements.html#_hardware_requirements[minimum requirements] for production use. If any of the checks fail, installation is stopped and warnings are printed to the system console. You can disable this behavior during iPXE installation (for testing purposes) by adding the kernel parameter https://documentation.suse.com/cloudnative/virtualization/v1.6/en/installation-setup/methods/pxe-boot-install.html#_harvester_install_skipcheckstrue[`harvester.install.skipchecks=true`] when you boot the system.
+====
+
+== Upgrades
+
+{harvester-product-name} only allows upgrades from supported versions. For more information about upgrade paths and procedures, see https://documentation.suse.com/cloudnative/virtualization/v1.6/en/upgrades/upgrades.html[Upgrades].
+
+== Highlights
+
+=== Experimental features
+
+[NOTE]
+====
+All new features that use Kube-OVN are considered experimental. The Kube-OVN implementation in {harvester-product-name} v1.6 does not support upgrades, virtual machine live migration, and the Harvester Node Driver for guest cluster provisioning.
+====
+
+==== Kube-OVN Operator
+
+The `kubeovn-operator` add-on is a tool for managing Kube-OVN as a secondary container network interface (CNI) on {harvester-product-name} clusters. Kube-OVN provides advanced software-defined networking (SDN) capabilities such as virtual private cloud (VPC) and subnets for virtual machine workloads. When you enable the add-on, it deploys Kube-OVN to your {harvester-product-name} cluster and creates the default `Configuration` CRD, which defines the desired state of the Kube-OVN installation.
+
+https://documentation.suse.com/cloudnative/virtualization/v1.6/en/add-ons/kubeovn-operator.html[Documentation] | https://github.com/harvester/harvester/issues/7397[GitHub issue]
+
+==== Overlay network
+
+The {harvester-product-name} network-controller leverages Kube-OVN to create an OVN-based virtualized network that supports advanced SDN capabilities such as VPCs and subnets for virtual machine workloads. An overlay network represents a virtual layer 2 switch that encapsulates and forwards traffic between virtual machines.
+
+https://documentation.suse.com/cloudnative/virtualization/v1.6/en/networking/vm-network.html#_overlay_network_experimental[Documentation] | https://github.com/harvester/harvester/issues/7397[GitHub issue]
+
+==== Virtual private cloud (VPC)
+
+In {harvester-product-name}, a VPC is a logical network container that you can use to manage and isolate subnets and traffic. {harvester-product-name} provides a default VPC named `ovn-cluster` and allows you to create custom VPCs. At a high level, VPC creation involves enabling the kubeovn-operator add-on, creating an overlay network and a subnet, and linking the two networks.
+
+The VPC implementation in v1.6 enables scalable, isolated L3 and L2 network structures across the cluster. Kube-OVN creates the VPC and its subnets, and manages all L3 logic (routing, NAT, VPC peering, and isolation). {harvester-product-name} defines the overlay networks and provisions virtual machines that are connected to those overlay networks. This architecture provides a clear separation of concerns: Kube-OVN handles SDN, while {harvester-product-name} handles virtualization.
+
+https://youtu.be/CgIKYy4oqms[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/networking/kubeovn-vpc.html[Documentation] | https://github.com/harvester/harvester/issues/7397[GitHub issue]
+
+==== VPC network connectivity
+
+In v1.6, virtual machines can connect with external networks if they are part of a subnet within the default VPC (`ovn-cluster`) and if the `natOutgoing` setting is enabled on that subnet. This setting enables network address translation (NAT) for all traffic leaving the subnet and heading to destinations outside of the VPC.
+
+Communication between virtual machines in different VPCs is also possible. To achieve this, you must configure a VPC peering connection and static routes that define how traffic is forwarded. However, peering is limited to custom VPCs. You cannot establish a peering connection between the default VPC (`ovn-cluster`) and a custom VPC.
+
+https://youtu.be/4AZ2oQ8Ek_A[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/networking/kubeovn-vpc.html#_natoutgoing_setting[Documentation] | https://github.com/harvester/harvester/issues/7397[GitHub issue]
+
+==== Virtual machine isolation
+
+Isolation between virtual machines is typically achieved using either VLANs (in traditional networks) or virtual switches (in Kube-OVN). If you want to isolate virtual machines within the same virtual switch network, you can use subnet access control lists (ACLs) and Kubernetes network policies to achieve the required micro-segmentation.
+
+https://youtu.be/XrZ82q9kdyw[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/networking/vm-isolation.html[Documentation] | https://github.com/harvester/harvester/issues/7397[GitHub issue]
+
+=== Fully supported features
+
+==== Containerized Data Importer (CDI) settings on UI
+
+{harvester-product-name} uses CDI to manage virtual machine image operations for certain StorageClasses. Starting with v1.6, you can use the UI to configure CDI settings when creating or updating a StorageClass. Each field on the *CDI Settings* tab corresponds to an annotation that modifies a specific StorageClass parameter. With this enhancement, you can avoid direct changes to the storage profile or CDI, which may result in unexpected system behavior. Instead, allow the {harvester-product-name} controller to synchronize and persist the storage profile configuration through the use of CDI annotations.
+
+https://youtu.be/yRUjYlS8h-U[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/storage/storageclass.html#_containerized_data_importer_cdi_settings[Documentation] | https://github.com/harvester/harvester/issues/8077[GitHub issue]
+
+==== CPU and memory hotplug
+
+Starting with v1.6, you can increase a virtual machine's CPU and memory resources while it is running. To use this feature, you must enable CPU and memory hotplug when you create the virtual machine. Once the virtual machine is created, you can add more CPU and memory resources at any time. {harvester-product-name} automatically migrates the virtual machine to a node that has the necessary resources.
+
+https://youtu.be/QujSXPH-SfI[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/virtual-machines/cpu-memory-hotplug.html[Documentation] | https://github.com/harvester/harvester/issues/5835[GitHub issue]
+
+==== Live migration progress monitoring
+
+In v1.6, you can monitor the progress of virtual machine live migration directly from the UI. The *Migration* tab of the virtual machine details screen displays migration event information and real-time metrics such as _remaining data_ and _memory transfer rate_. To view the information, you must ensure that the rancher-monitoring add-on is enabled.
+
+https://youtu.be/ZAsYSf7FdXU[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/observability/monitoring.html#_live_migration_status_and_metrics[Documentation] | https://github.com/harvester/harvester/issues/4352[GitHub issue]
+
+==== Online volume expansion
+
+v1.6 allows you to expand volumes that are in use, as long as the underlying storage provider supports the feature. This works for volumes that are attached to a running virtual machine, or that have persistent volume claims (PVCs) connected to a running pod in a guest cluster.
+
+The Longhorn V1 Data Engine fully supports online volume expansion, but the V2 Data Engine currently does not support it. For third-party storage, {harvester-product-name} blocks online volume expansion requests by default. To allow such requests, you must use the `csi-online-expand-validation` setting to validate the storage provider.
+
+https://youtu.be/e273Ve_INjA[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/storage/volumes/edit-volume.html#_online_volume_expansion[Documentation] | GitHub issues: https://github.com/harvester/harvester/issues/2811[#2811] and https://github.com/harvester/harvester/issues/7358[#7358]
+
+==== Third-party storage for guest clusters and workloads
+
+In v1.5, support for third-party storage is limited to provisioning of root and data volumes for virtual machines. v1.6 improves on this by also allowing you to provision guest clusters and their corresponding workloads with third-party storage solutions.
+
+In your guest cluster, you must first create a new StorageClass that references the StorageClass you created in {harvester-product-name} for the third-party storage solution. Then, you must create a PVC using this new StorageClass and mount it to your workload.
+
+https://youtu.be/e273Ve_INjA[Demo] | GitHub issues: https://github.com/harvester/harvester/issues/8075[#8075] and https://github.com/harvester/harvester/issues/8076[#8076]
+
+==== vm-import-controller support for third-party storage
+
+When importing virtual machine images using the vm-import-controller add-on, you can now specify a third-party storage solution instead of using {longhorn-product-name} by default. To use this functionality, simply add the `storageClass` field to the `VirtualMachineImport` spec and specify the StorageClass for the third-party storage solution. {harvester-product-name} handles the import and storage placement without requiring you to perform additional manual steps.
+
+https://youtu.be/nlyrs3jhl2g[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/add-ons/vm-import-controller.html[Documentation] | https://github.com/harvester/harvester/issues/8074[GitHub Issue]
+
+==== Virtual machine migration network
+
+By default, {harvester-product-name} migrates virtual machines over the built-in cluster network `mgmt`, which is limited to one interface and is shared with cluster-wide workloads. If network segregation is required, you can configure a VM migration network to isolate migration traffic and improve bandwidth utilization.
+
+Configuring a VM migration network involves enabling the `vm-migration-network` setting and constructing a Multus `NetworkAttachmentDefinition` CRD. Once the setting is applied, all `virt-handler` pods are restarted to apply the new network configuration.
+
+https://youtu.be/6TSnpNiVZQ0[Demo] | https://documentation.suse.com/cloudnative/virtualization/v1.6/en/networking/vm-migration-network.html[Documentation] | https://github.com/harvester/harvester/issues/5848[GitHub issue]
+
+== Enhancements
+
+* https://github.com/harvester/harvester/issues/9222[#9222] [backport v1.6] [ENHANCEMENT] Review the volume detacher behavior
+* https://github.com/harvester/harvester/issues/8766[#8766] [backport v1.6] [ENHANCEMENT] Support reserved memory in terraform-provider-rancher2 and docker-machine-driver-harvester
+
+== Bug fixes
+
+* https://github.com/harvester/harvester/issues/9314[#9314] [backport v1.6] [BUG] VM Image upload issue with 3rd-party storage
+* https://github.com/harvester/harvester/issues/9256[#9256] [backport v1.6] [BUG] v1.6.0-rc6 Cluster Network Config aka Vlan Config for Cluster Network, it's vlan status upon reboot becomes bad
+* https://github.com/harvester/harvester/issues/9249[#9249] [backport v1.6] [BUG] Harvester CDI backend crashes with OOM when HTTP server doesn't support range requests
+* https://github.com/harvester/harvester/issues/9244[#9244] [backport v1.6] [BUG] PCI Passthrough VMs Will Not Boot with Default Harvester Settings in 1.6.0
+* https://github.com/harvester/harvester/issues/9192[#9192] [backport v1.6] [BUG] StorageClass CDI validator miss storage class parameter
+* https://github.com/harvester/harvester/issues/9183[#9183] [BUG] RKE2 Pool & DHCP Guest Cluster LBs Not Working on Harvester v1.6-b192e41f-head + Rancher v2.12.2-alpha4
+* https://github.com/harvester/harvester/issues/9166[#9166] [backport v1.6] [BUG] Fail to create VM with L2VlanNetwork due to "Masquerade interface only implemented with pod network"
+* https://github.com/harvester/harvester/issues/9157[#9157] [backport v1.6] [BUG] Inherit mac address from enslaved interface for mgmt
+* https://github.com/harvester/harvester/issues/9121[#9121] [backport v1.6] [BUG] Network setup error during upgrade from v1.5.1 to v1.6.0
+* https://github.com/harvester/harvester/issues/9106[#9106] [backport v1.6] [BUG] Panic was observed on loadbalancer-harvester webhook
+* https://github.com/harvester/harvester/issues/9049[#9049] [backport v1.6] [BUG] Data Disk dropdown selects the wrong disk
+* https://github.com/harvester/harvester/issues/9038[#9038] [backport v1.6] [BUG] Existing status conditions are not updated
+* https://github.com/harvester/harvester/issues/8993[#8993] [BUG] ui-index and ui-plugin-index settings should use release-harvester-v1.6
+* https://github.com/harvester/harvester/issues/8960[#8960] [backport v1.6] [BUG] VM menu item prompt upward display truncated, can't click on some vm operation button
+* https://github.com/harvester/harvester/issues/8957[#8957] [backport v1.6] [BUG] Deleting a VM Network on mgmt cluster removes the mgmt vlan causing Harvester node to lose connectivity
+* https://github.com/harvester/harvester/issues/8956[#8956] [backport v1.6] [BUG][UI] Soft reboot button in VM VNC console not work
+* https://github.com/harvester/harvester/issues/8952[#8952] [BUG] Unable to select upgrade version on Harvester upgrade dashboard from Rancher v2.12.0
+* https://github.com/harvester/harvester/issues/8942[#8942] [BUG] Can't add member to project in Harvester v1.6.0-rc6 on Rancher v2.12.0 with UI extension v1.6.0-rc6
+* https://github.com/harvester/harvester/issues/8923[#8923] [BUG] Rancher v2.12.0 w/ Harvester v1.6.0-rc6 w/ Harvester UI Extension v1.6.0-rc6 Can't Add Cluster Members to imported Harvester Cluster
+* https://github.com/harvester/harvester/issues/8885[#8885] [BUG] Can't add volume to vm in Harvester from Rancher v2.12.0 integrate mode, available volume is hidden beneath the panel
+* https://github.com/harvester/harvester/issues/8884[#8884] [BUG] Can't migrate vm in Harvester from Rancher v2.12.0 integrate mode, no available target node in the list
+* https://github.com/harvester/harvester/issues/8851[#8851] [BUG] Unable to move namespace to another project on Rancher 2.12.0
+* https://github.com/harvester/harvester/issues/8834[#8834] [backport v1.6] [BUG] Can't add volume, delete and backup vm when vm enabled cpu pinning while cpu manager is `disabled`
+
+== Tasks
+
+* https://github.com/harvester/harvester/issues/9046[#9046] [backport v1.6] [TASK] Should not disable auto-cleanup-system-generated-snapshot during upgrade
+
+== Known issues
+
+This section includes only issues identified before the release date. For information about all issues associated with v1.6.1, https://github.com/harvester/harvester/issues?q=is:issue%20label:known-issue-v1.6.1[this page].
+
+* [BUG] VM Image upload issue with 3rd-party storage [#9313](https://github.com/harvester/harvester/issues/9313)
+
+== Components
+
+|===
+| Component | Version
+
+| Containerized Data Importer (CDI)
+| https://github.com/kubevirt/containerized-data-importer/releases/tag/v1.62.0[v1.62.0]
+
+| KubeVirt
+| https://github.com/kubevirt/kubevirt/releases/tag/v1.5.2[v1.5.2]
+
+| {longhorn-product-name-tm}
+| https://github.com/longhorn/longhorn/releases/tag/v1.9.2[v1.9.2]
+
+| {rancher-product-name-tm} (embedded)
+| https://github.com/rancher/rancher/releases/tag/v2.12.2[v2.12.2]
+
+| {rke2-product-name}
+| https://github.com/rancher/rke2/releases/tag/v1.33.5%2Brke2r1[v1.33.5]
+
+| SUSE Linux Micro
+| https://github.com/harvester/os2/releases/tag/v1.6-20251015[5.5]
+|===
