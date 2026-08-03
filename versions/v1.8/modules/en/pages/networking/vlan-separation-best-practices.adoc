@@ -1,0 +1,90 @@
+= Network Architecture Best Practices: VLAN Separation
+:revdate: 2026-08-04
+:page-revdate: {revdate}
+
+Implementing strict VLAN separation in {harvester-product-name} is critical for isolating data-center (management/control-plane) traffic from out-of-band (OOB) or tenant virtual machine traffic. 
+
+This guide outlines the architectural best practices for configuring physical switches, Harvester Cluster Networks, and VM Networks to ensure secure, high-performance L2 isolation.
+
+== Architectural Best Practices
+
+=== 1. Physical Infrastructure and Switch Configuration
+
+VLAN separation begins at the physical layer. The {harvester-product-name} network topology relies on Linux bridge networks backed by physical NICs.
+
+* *Physical NIC Separation*: To achieve true hardware-level separation and optimal performance, dedicate specific physical NICs exclusively for VM workloads. While testing environments can multiplex VM VLANs over the built-in `mgmt` network, production environments require at least two dedicated NICs for the management cluster network and at least two distinct, dedicated NICs for VM workload networks. For exact specifications, see xref:installation-setup/requirements.adoc#_hardware_requirements[Hardware Requirements].
+* *Trunk Port Requirement*: Starting with {harvester-product-name} v1.6.1, the CNI bridge plug-in no longer associates virtual Ethernet (veth) interfaces with the default VLAN ID 1. *Physical switches connected to {harvester-product-name} hosts must be configured as trunk ports*. These ports must explicitly accept tagged traffic and send traffic tagged with the VLAN IDs used by your VM networks. Untagged traffic arriving at network bridges for a VLAN-tagged veth interface is dropped.
+* *Link Aggregation Matching*: When configuring Link Aggregation on your physical switches, the switch mode must strictly match the bonding mode configured in the {harvester-product-name} `NetworkConfig`. Failure to align these will result in dropped packets and broken VLAN paths.
++
+|===
+| Harvester Bond Mode | Required Switch Link Aggregation Mode
+
+| `mode 0` (balance-rr)
+| manual
+
+| `mode 1` (active-backup)
+| none
+
+| `mode 4` (802.3ad)
+| LACP
+|===
++
+For a complete list of supported bond modes, see xref:networking/deep-dive.adoc#_external_networking[External Networking Deep Dive].
+
+=== 2. Cluster Network and Network Config Design
+
+A xref:networking/cluster-network.adoc#_concepts[Cluster Network] represents a traffic-isolated forwarding path. To implement VLAN separation, you must create custom Cluster Networks rather than relying solely on the built-in `mgmt` network.
+
+==== Custom Cluster Networks for Workloads
+
+Create dedicated custom Cluster Networks (for example, `tenant-data` or `oob-network`) for your virtual machine traffic. This ensures that heavy VM network load does not contend with the Kubernetes control plane, Longhorn storage replication, or node management traffic.
+
+==== Network Configuration and Node Selectors
+
+A Cluster Network requires one or more `Network Config` (backed by a `VlanConfig` CRD) to map the logical network to physical host NICs.
+* *Granular Node Selectors*: To simplify future node maintenance (such as replacing broken NICs), it is a best practice to create one network configuration per node or group of identical nodes. 
+* *Homogeneous Network Hardware*: If your cluster contains nodes with different physical NIC names (for example, `eno1` vs. `enp3s0`), you *must* use targeted Node Selectors to map the correct uplinks for each specific hardware profile.
+
+==== MTU Consistency and Inheritance
+
+Do not attempt to configure Maximum Transmission Unit (MTU) sizes at the guest OS or individual VM Network level.
+
+* You must enforce the MTU value at the *Cluster Network/Network Config* level. 
+* All xref:networking/vm-network.adoc#_vlan_network[VM Networks] attached to a Cluster Network automatically inherit its MTU. 
+* *Validation*: All cluster nodes and the upstream physical switch ports must use the exact same MTU value. The {harvester-product-name} webhook actively rejects new network configurations if the MTU does not match existing configurations on the same Cluster Network.
+
+=== 3. VM Network and Tagging Strategies
+
+When creating a VM Network (`NetworkAttachmentDefinition`) to expose a VLAN to a virtual machine, you must choose between `Access` mode and `Trunk` mode based on your isolation requirements.
+
+==== Access Mode (Recommended for Tenant Isolation)
+
+For standard VLAN separation, use *Access* mode (`L2VlanNetwork`). 
+
+* *Behavior*: The {harvester-product-name} network bridge automatically adds the configured VLAN tag to outbound traffic and strips it from inbound traffic. 
+* *Security*: The guest operating system is entirely unaware of the VLAN tag. This prevents a compromised guest VM from attempting VLAN hopping or sending unauthorized tagged packets into the infrastructure.
+
+==== Trunk Mode (For Virtual Appliances)
+
+Use *Trunk* mode only when deploying virtual network appliances (like vRouters, firewalls or load balancers) that must route traffic across multiple VLANs.
+
+* *Behavior*: You specify a minimum and maximum VLAN ID range. {harvester-product-name} allows the VM to send and receive tagged frames within this range.
+* *Security*: The guest OS handles the 802.1Q tagging. Ensure that the OS is trusted, as it has access to the raw L2 broadcast domains of the configured VLAN ranges.
+
+==== Connectivity Verification
+
+When defining the VM Network, always populate the *Route* tab (Auto/DHCP or Manual). {harvester-product-name} uses this gateway and CIDR information to actively verify that all targeted nodes have physical L2 connectivity to the VLAN. This ensures the UI accurately reports network health before you attach workloads.
+
+=== 4. VLAN Availability and VM Scheduling
+
+VLAN separation directly impacts virtual machine scheduling. {harvester-product-name} enforces strict network-aware scheduling to prevent VMs from starting on nodes that lack the required physical VLAN uplinks.
+
+* *Automatic Node Affinity*: When you attach a VM to a custom VM Network, the {harvester-product-name} webhook automatically injects a `nodeAffinity` rule into the VirtualMachine object (for example, `network.harvesterhci.io/<cluster-network-name>: "true"`).
+* *Migration Constraints*: A VM attached to a specific VLAN can only be scheduled on or live-migrated to nodes that are explicitly covered by a `Network Config` for the parent Cluster Network of that VLAN.
+* *Best Practice*: To ensure high availability and successful live migrations during xref:hosts/hosts.adoc#_node_maintenance[Maintenance Mode], ensure that custom Cluster Networks covering critical VLANs are fully configured across all eligible compute nodes in the cluster.
+
+=== 5. Further Micro-segmentation (Beyond VLANs)
+
+While VLANs provide strict Layer 2 broadcast domain separation, they do not inherently restrict traffic between VMs located on the *same* VLAN. 
+
+If your architecture requires zero-trust or micro-segmentation between VMs on the identical VLAN subnet, you must apply firewall rules within the guest OS. Alternatively, for workloads running on Kube-OVN overlay networks, you can use Subnet ACLs and Kubernetes Network Policies. For more information on intra-network isolation, see xref:networking/vm-isolation.adoc[Virtual Machine Isolation].
