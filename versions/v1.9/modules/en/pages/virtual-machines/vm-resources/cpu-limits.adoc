@@ -1,0 +1,35 @@
+= CPU Limits
+:revdate: 2026-08-04
+:page-revdate: {revdate}
+
+Every virtual machine in {harvester-product-name} runs inside a pod, which requests a specific CPU allocation from its assigned node. You can configure CPU limits to enforce execution ceilings for workloads during peak usage periods. Without CPU limits, virtual machines with unpredictable resource spikes can cause CPU contention, resulting in high context-switching latency and performance degradation for adjacent workloads on the same host.
+
+Additionally, if a virtual machine experiences a process spike or runaway loop, a CPU limit prevents the `virt-launcher` container from consuming all physical CPU cores on the host. This safeguard protects critical services running on the host, such as control plane components and storage replicas.
+
+=== How CPU limits are enforced
+
+In {harvester-product-name}, CPU settings map to two main fields in the virtual machine specification:
+
+* `spec.template.spec.domain.cpu.cores`: Defines the vCPU cores exposed to the guest operating system
+* `spec.template.spec.domain.resources`: Defines the CPU limits and requests enforced on the node
+
+For example, if you allocate 4 vCPUs to a virtual machine but configure a CPU limit of 2.0 cores (2000m), the following behavior occurs:
+
+* The guest operating system recognizes 4 vCPUs and schedules multi-threaded tasks across all 4 virtual cores.
+* The host kernel throttles the underlying QEMU process whenever its total CPU execution time reaches the 2.0 core limit within a given enforcement window.
+
+As a result, the guest operating system continues running without crashing, but application latency within the virtual machine increases significantly during high load.
+
+== Configuring CPU limits
+
+You can explicitly control resource requests and limits when xref:virtual-machines/create-vm.adoc[configuring a virtual machine] using the {harvester-product-name} UI (on the *Basics* tab of the *Virtual Machine: Create* screen) or a YAML manifest.
+
+As a best practice, the number of vCPUs allocated to a virtual machine should not exceed the number of physical processor threads available on the underlying host.
+
+== Overcommitting CPU resources
+
+{harvester-product-name} allows you to xref:virtual-machines/vm-resources/resource-overcommit.adoc[overcommit resources] on compute nodes. If you do not expect virtual machines to continuously consume their full CPU allocations, you can use the xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] setting to optimize physical resource utilization.
+
+Specifying values greater than 100% allows {harvester-product-name} to schedule additional virtual machines on a node, even when physical resources are nominally fully allocated. With the default setting `"cpu":1600` (a 1600% allocation ratio), you can schedule up to 16 times the number of physical CPU cores available on the host.
+
+For more information, see https://kubevirt.io/user-guide/compute/node_overcommit/#node-cpu-allocation-ratio[Node CPU allocation ratio] in the KubeVirt documentation.
