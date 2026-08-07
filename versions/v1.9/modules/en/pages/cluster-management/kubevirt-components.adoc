@@ -1,5 +1,5 @@
 = KubeVirt Components
-:revdate: 2026-08-03
+:revdate: 2026-08-07
 :page-revdate: {revdate}
 
 == Resource limits
@@ -30,9 +30,42 @@ Adjusting the resource limits for these components may be necessary as you scale
 
 === Modifying resource limits
 
-To ensure your changes persist across upgrades, modify the {harvester-product-name} `ManagedChart` resource directly rather than the `KubeVirt` resource. Changes to `ManagedChart` are automatically applied to `KubeVirt`.
+To ensure your changes persist across upgrades, modify the {harvester-product-name} `ManagedChart` resource directly 
+rather than the `KubeVirt` resource. Changes to `ManagedChart` are automatically applied to `KubeVirt`.
 
-When patching `ManagedChart`, include all existing elements under https://github.com/harvester/harvester/blob/ba08b5d8201e0292628a3f80c93fe1f19456e084/deploy/charts/harvester/values.yaml#L106-L123[`customizeComponents.patches`]. This ensures that default configurations are preserved rather than overwritten.
+You can retrieve the current default component configuration by running the following command on each node:
+
+[,shell]
+----
+helm get values harvester -n harvester-system --all | yq '.kubevirt.spec.customizeComponents.patches'
+----
+
+Copy the output and modify the values as necessary.
+
+[,yaml]
+----
+- patch: '{"webhooks":[{"name":"kubevirt-validator.kubevirt.io","failurePolicy":"Ignore"},{"name":"kubevirt-update-validator.kubevirt.io","failurePolicy":"Ignore"}]}'
+  resourceName: virt-operator-validator
+  resourceType: ValidatingWebhookConfiguration
+  type: strategic
+- patch: '{"spec":{"template":{"spec":{"containers":[{"name":"virt-api", "resources":{"limits":{"cpu":"400m","memory":"1100Mi"}}}]}}}}'
+  resourceName: virt-api
+  resourceType: Deployment
+  type: strategic
+- patch: '{"spec":{"template":{"spec":{"containers":[{"name":"virt-controller", "resources":{"limits":{"cpu":"800m","memory":"1300Mi"}}}]}}}}'
+  resourceName: virt-controller
+  resourceType: Deployment
+  type: strategic
+- patch: '{"spec":{"template":{"spec":{"containers":[{"name":"virt-handler", "resources":{"limits":{"cpu":"700m","memory":"1600Mi"}}}]}}}}'
+  resourceName: virt-handler
+  resourceType: DaemonSet
+  type: strategic
+----
+
+[IMPORTANT]
+====
+When patching `ManagedChart`, include all existing elements under `customizeComponents.patches`. This ensures that default configurations are preserved rather than overwritten.
+====
 
 The following example increases the CPU and memory limits for `virt-handler`:
 
