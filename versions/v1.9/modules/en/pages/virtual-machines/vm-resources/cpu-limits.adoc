@@ -1,5 +1,5 @@
 = CPU Limits
-:revdate: 2026-08-04
+:revdate: 2026-08-07
 :page-revdate: {revdate}
 
 Every virtual machine in {harvester-product-name} runs inside a pod, which requests a specific CPU allocation from its assigned node. You can configure CPU limits to enforce execution ceilings for workloads during peak usage periods. Without CPU limits, virtual machines with unpredictable resource spikes can cause CPU contention, resulting in high context-switching latency and performance degradation for adjacent workloads on the same host.
@@ -10,21 +10,70 @@ Additionally, if a virtual machine experiences a process spike or runaway loop, 
 
 In {harvester-product-name}, CPU settings map to two main fields in the virtual machine specification:
 
-* `spec.template.spec.domain.cpu.cores`: Defines the vCPU cores exposed to the guest operating system
-* `spec.template.spec.domain.resources`: Defines the CPU limits and requests enforced on the node
+* `spec.template.spec.domain.cpu.cores`: Defines the CPU topology (sockets, cores, and threads) exposed to the guest operating system
++
+Example (CPU topology):
++
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+spec:
+  domain:
+    cpu:
+      sockets: 2
+      cores: 1
+      threads: 1
+      dedicatedCpuPlacement: true
+    resources:
+      limits:
+        memory: 2Gi
+[...]
+----
 
-For example, if you allocate 4 vCPUs to a virtual machine but configure a CPU limit of 2.0 cores (2000m), the following behavior occurs:
+* `spec.template.spec.domain.resources[requests/limits].cpu`: Defines the CPU limits and requests enforced on the node level
++
+Example (CPU resource limits):
++
+[yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+spec:
+  domain:
+    cpu:
+      dedicatedCpuPlacement: true
+    resources:
+      limits:
+        cpu: 2
+        memory: 2Gi
+[...]
+----
 
-* The guest operating system recognizes 4 vCPUs and schedules multi-threaded tasks across all 4 virtual cores.
-* The host kernel throttles the underlying QEMU process whenever its total CPU execution time reaches the 2.0 core limit within a given enforcement window.
+If no explicit topology is defined in `spec.domain.cpu`, {harvester-product-name} calculates the vCPU count based on the value of `spec.domain.resources.requests.cpu` or `spec.domain.resources.limits.cpu`.
 
-As a result, the guest operating system continues running without crashing, but application latency within the virtual machine increases significantly during high load.
+[CAUTION]
+====
+To avoid performance degradation, avoid manually specifying values for both `spec.domain.cpu` and `spec.domain.resources.limits.cpu`.
 
-== Configuring CPU limits
+For example, if you allocate 4 vCPUs to a virtual machine in `spec.domain.cpu` but manually set a CPU limit of `2` (`2000m`) in `spec.domain.resources.limits.cpu`:
 
-You can explicitly control resource requests and limits when xref:virtual-machines/create-vm.adoc[configuring a virtual machine] using the {harvester-product-name} UI (on the *Basics* tab of the *Virtual Machine: Create* screen) or a YAML manifest.
+* The guest operating system detects 4 vCPUs and schedules multi-threaded tasks across all 4 virtual cores.
+* The host Linux kernel throttles the underlying QEMU process whenever its total execution time reaches the 2-core limit within a cgroup quota period.
 
-As a best practice, the number of vCPUs allocated to a virtual machine should not exceed the number of physical processor threads available on the underlying host.
+Although the guest operating system will not crash, workloads can experience severe latency spikes during peak usage periods due to host-level CPU throttling.
+====
+
+== Configuring CPU Limits
+
+{harvester-product-name} dynamically calculates and manages resource requests and limits for virtual machine pods based on the defined CPU topology and the cluster's xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] setting. Allow {harvester-product-name} to calculate these values automatically unless your workload specifically requires explicit manual allocation.
+
+If necessary, you can explicitly set resource requests and limits when xref:virtual-machines/create-vm.adoc[creating a virtual machine] using the {harvester-product-name} UI (on the *Basics* tab of the *Create Virtual Machine* screen) or via a YAML manifest.
+
+[TIP]
+====
+As a best practice, the number of vCPUs allocated to a virtual machine should not exceed the total number of physical CPU threads available on the underlying host.
+====
 
 == Overcommitting CPU resources
 
