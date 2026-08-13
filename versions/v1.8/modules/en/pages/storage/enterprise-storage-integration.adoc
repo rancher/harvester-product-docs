@@ -1,0 +1,118 @@
+= Enterprise Storage Integration (CSI)
+:revdate: 2026-08-13
+:page-revdate: {revdate}
+
+{harvester-product-name} ships with {longhorn-product-name} as the built-in storage system. However, {harvester-product-name} also supports the provisioning of root volumes and data volumes using external container storage interface (CSI) drivers. This enhancement allows you to select drivers that meet specific requirements, such as integration with existing enterprise storage solutions.
+
+== 1. Preventing Storage Conflicts
+
+When presenting external storage block devices to {harvester-product-name} nodes, you must ensure that the built-in {longhorn-product-name} engine does not attempt to claim them.
+
+* *File System-Type Disks*: {longhorn-product-name} creates a default file system-type disk at `/var/lib/longhorn`. Do not mount your external storage to this path.
+* *Block-Type Disks*: The V2 Data Engine requires raw block devices. If your external storage presents raw block devices (for example, NVMe or VirtIO) to the host, do not add these paths to the {longhorn-product-name} UI or `spec.disks` configuration.
+* *Auto-Provisioning*: Be cautious if using the `node.longhorn.io/create-default-disk: 'config'` label alongside the `node.longhorn.io/default-disks-config` annotation. Ensure this configuration does not target your external storage paths.
+
+== 2. Host OS Preparation
+
+{harvester-product-name}'s operating system follows an immutable design, meaning that most OS files revert to their pre-configured state after a reboot. Some enterprise CSI drivers require additional software packages (like `multipathd`) or persistent paths on the host. 
+
+You can add persistent paths to xref:installation-setup/config/configuration-file.adoc#_os_persistent_state_paths[`os.persistent_state_paths`] and install packages with xref:installation-setup/config/configuration-file.adoc#_os_after_install_chroot_commands[`os.after_install_chroot_commands`] in the configuration file.
+
+For example, the `multipathd` service is disabled by default. If your CSI requires it, this process can be automated across the cluster using a `CloudInit` CRD:
+
+[,yaml]
+----
+apiVersion: node.harvesterhci.io/v1beta1
+kind: CloudInit
+metadata:
+  name: start-multipathd
+spec:
+  matchSelector:
+    harvesterhci.io/managed: "true"
+  filename: 99-start-multipathd
+  contents: |
+    stages:
+      initramfs:
+        - name: "start multipathd"
+          systemctl:
+            enable:
+              - multipathd
+            start:
+              - multipathd
+  paused: false
+----
+
+== 3. Installing the CSI Driver
+
+To enable {harvester-product-name} to function well, use CSI drivers that support the following capabilities:
+
+* Volume expansion (online resizing)
+* Snapshot creation (volume and virtual machine snapshots)
+* Cloning (volume and virtual machine clones)
+* Usage of Read-Write-Many (RWX) volumes for xref:../virtual-machines/live-migration.adoc[Live Migration]
+
+Refer to xref:troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[How can I access the kubeconfig file?] to get the kubeconfig of the cluster.
+
+== 4. StorageClass and CDI Configuration
+
+{harvester-product-name} integrates with the Containerized Data Importer (CDI) to handle VM image management. If the StorageClass provisioner is not in the list of provisioners of CDI with default access and volume modes, you must annotate the StorageClass. Without this annotation, the Helm installation or image deployment may fail.
+
+You must apply the {harvester-product-name} CDI annotations directly to the third-party StorageClass. Avoid changing the storage profile or CDI directly. 
+
+The following is an example of a StorageClass YAML configuration using CDI annotations (using LVM as the example provisioner):
+
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: lvm
+  annotations:
+    cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
+    cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: lvm-snapshot
+    cdi.harvesterhci.io/filesystemOverhead: '0.05'
+----
+
+== 5. Validating the Integration
+
+The `storage-validator` utility performs basic tests that validate a storage solution's compatibility with {harvester-product-name} virtual machine and volume lifecycle operations, including volume expansion, snapshot creation, and live migration.
+
+. Download the `storage-validator` executable file from the https://github.com/harvester/storage-validator/releases[Releases] page.
+. Create a configuration file named `config.yml`. Note that snapshot creation requires that the StorageClass and VolumeSnapshotClass use the same provisioner (CSI driver).
++
+Example of `config.yml` content:
++
+[,yaml]
+----
+namespace: default 
+imageURL: "https://download.opensuse.org/repositories/Cloud:/Images:/Leap_15.6/images/openSUSE-Leap-15.6.x86_64-NoCloud.qcow2"
+storageClass: lvm
+snapshotClass: lvm-snapshot
+vmConfig:
+  cpu: 2
+  memory: 2Gi
+  diskSize: 10Gi
+skipCleanup: false
+timeout: 600
+----
+
+. Run the utility:
++
+[,shell]
+----
+storage-validator -config ./config.yaml
+----
+
+== 6. Using the CSI Driver
+
+Once the CSI driver is installed and the {harvester-product-name} cluster is configured, the external storage solution can be used in tasks that involve storage management.
+
+=== Virtual Machine Creation
+
+When creating a virtual machine using the {harvester-product-name} UI (*Virtual Machine -> Create*), navigate to the *Volumes* tab. If you are using external storage, ensure that the correct *StorageClass* and *Volume Mode* are selected. For example, a volume with the *nfs-csi* StorageClass must use the *Filesystem* volume mode.
+
+=== Limitations
+
+* *Backups*: Backup support is currently limited to {longhorn-product-name} volumes. {harvester-product-name} is unable to create backups of volumes in external storage.
+* *Converting PVCs*: There is a limitation in the CDI which prevents {harvester-product-name} from converting attached PVCs to virtual machine images. Before exporting a volume in external storage, ensure that the PVC is not attached to workloads. This prevents the resulting image from getting stuck in the *Exporting* state.
