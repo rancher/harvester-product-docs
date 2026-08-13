@@ -1,5 +1,5 @@
 = Upload Images
-:revdate: 2025-11-12
+:revdate: 2026-08-13
 :page-revdate: {revdate}
 
 Currently, there are three ways that are supported to create an image: uploading images via URL, uploading images via local files, and creating images via volumes.
@@ -15,7 +15,7 @@ To import virtual machine images in the *Images* page, enter a URL that can be a
 [NOTE]
 ====
 * The image name is auto-filled using the file name in the URL address. You can customize the image name at any time.
-* Avoid using a daily build URL (for example, the https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[Ubuntu Jammy daily build]). When all replicas of a Longhorn backing image are lost, Longhorn attempts to download the file again for self-healing purposes. Using a daily build URL is problematic because the URL itself changes, causing a checksum mismatch and a conflict that results in lost replicas.
+* Avoid using a daily build URL (for example, the https://cloud-images.ubuntu.com/jammy/current/jammy-server-cloudimg-amd64.img[Ubuntu Jammy daily build]). When all replicas of a {longhorn-product-name} backing image are lost, {longhorn-product-name} attempts to download the file again for self-healing purposes. Using a daily build URL is problematic because the URL itself changes, causing a checksum mismatch and a conflict that results in lost replicas.
 ====
 +
 [CAUTION]
@@ -126,9 +126,30 @@ image:img-ingress-request-proxy-buffering.png[]
 
 . Delete the stuck image, and then restart the upload process.
 
+=== Failure to upload an image with a third-party StorageClass
+
+When uploading a large `qcow2` image with a third-party `StorageClass`, the upload progress may pause at *99%* before failing with a `context canceled` error.
+
+This issue occurs because CDI requires extra time to convert the `qcow2` image during the final upload stage. If the image conversion exceeds {harvester-product-name}'s default ingress proxy timeout, the request times out.
+
+A timeout error does not always mean the upload has failed. Image processing often continues in the background, and the virtual machine image may eventually transition to a `Healthy` state. You can verify whether the process is still running by checking the status of the corresponding `cdi-upload-*` pod.
+
+To prevent request timeouts during large image uploads, increase the ingress proxy timeout values. The following example increases the proxy timeout to 30 minutes (1800 seconds):
+
+[,shell]
+----
+kubectl annotate ingress rancher-expose \
+  -n cattle-system \
+  nginx.ingress.kubernetes.io/proxy-read-timeout="1800" \
+  nginx.ingress.kubernetes.io/proxy-send-timeout="1800" \
+  --overwrite
+----
+
+This increases the proxy timeout to 30 minutes.
+
 === Uploading Images Previously Downloaded from {harvester-product-name}
 
-Starting with *v1.5.5*, Longhorn https://github.com/longhorn/backing-image-manager/pull/153[compresses backing images for downloading]. If you attempt to upload a compressed backing image, {harvester-product-name} rejects the attempt and displays the message *Upload failed: the uploaded file size xxxx should be a multiple of 512 bytes since Longhorn uses directIO by default* because the compressed data violates Longhorn's data alignment.
+Starting with *v1.5.5*, {longhorn-product-name} https://github.com/longhorn/backing-image-manager/pull/153[compresses backing images for downloading]. If you attempt to upload a compressed backing image, {harvester-product-name} rejects the attempt and displays the message *Upload failed: the uploaded file size xxxx should be a multiple of 512 bytes since Longhorn uses directIO by default* because the compressed data violates {longhorn-product-name}'s data alignment.
 
 Before uploading, decompress backing images using the command `gzip -d <file name>`.
 
