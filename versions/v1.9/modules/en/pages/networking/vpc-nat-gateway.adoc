@@ -1,5 +1,5 @@
 = VPC NAT Gateway
-:revdate: 2026-05-11
+:revdate: 2026-08-14
 :page-revdate: {revdate}
 
 [NOTE]
@@ -27,6 +27,142 @@ When using SNAT or DNAT with Kube-OVN, you can build isolated private subnets an
 In {harvester-product-name} v1.6.x and v1.7.x, outbound and inbound connectivity for virtual machines works only when they are attached to subnets created on a default VPC (`ovn-cluster`) with the `natOutgoing` setting set to `true`.
 
 With the introduction of Kube-OVN as the secondary CNI in {harvester-product-name} v1.8.0, outbound and inbound connectivity for virtual machines also works on subnets created on custom VPCs using the VPC NAT gateway functionality.
+
+=== Creating a tenant network
+
+. xref:networking/vm-network.adoc#_creating_an_overlay_network[Create an overlay network].
+
+. xref:networking/kubeovn-vpc.adoc#_vpc_settings[Create a custom VPC].
+
+. xref:networking/kubeovn-vpc.adoc#_subnet_settings[Create a subnet] inside the VPC created in the previous step.
++
+    ![](/img/subnetinternal.png)
++
+[IMPORTANT]
+====
+When creating a subnet for a tenant network, ensure DHCP is enabled, `dns_server` is set to a valid DNS server IP address (for example, `8.8.8.8`), and `natOutgoing` is set to `true`. This configuration ensures that a default route is installed and DNS is resolved on virtual machines attached to these subnets.
+====
+
+The examples in this document use the following settings:
+
+* *Overlay network*: `vswitchinternal`
+* *VPC*: `commonvpc`
+* *Subnet* (in `commonvpc`): `subnetinternal`
+
+=== Creating an external network
+
+Follow the instructions in xref:networking/pure-underlay.adoc#_underlay_configuration[Underlay Configuration] to create an external network.
+
+=== VPC NAT gateway
+
+. On the Harvester UI, go to *Overlay Networks -> NAT & Internet -> Gateways*.
++
+    ![](/img/vpc-nat-config.png)
+
+. Click *Create*.
+
+. Specify a unique name for the VPC NAT gateway.
+
+. On the *Basic* tab, configure the following settings:
++
+** *Internal Tenant Network*: Name of the internal tenant network (for example, `vswitchinternal`)
+** *VPC* VPC of the internal tenant network subnet (for example, `commonvpc`)
+** *Subnet*: Subnet of the internal tenant network (for example, `subnetinternal`)
+** *LAN IP*: Gateway IP address of the internal tenant network
+
+. On the *External Subnets* tab, configure the following settings:
++
+** *Subnet*: Subnet of the underlay external network (for example, `subnetexternal`)
+
+. Click *Create*.
+
+==== Verification and sample outputs
+
+. Verify that a new StatefulSet (`vpc-nat-gw`) and associated pod were created.
+
+[,shell]
+----
+kubectl get statefulset -n kube-system vpc-nat-gw-gw1 -o yaml
+    apiVersion: apps/v1
+    kind: StatefulSet
+    metadata:
+      creationTimestamp: "2026-06-05T22:42:17Z"
+      generation: 1
+      labels:
+        app: vpc-nat-gw-gw1
+        ovn.kubernetes.io/vpc-nat-gw: "true"
+      name: vpc-nat-gw-gw1
+      namespace: kube-system
+      resourceVersion: "18233827"
+      uid: ae7c9895-8a7f-46f6-b71d-be9f9b36b79a
+    spec:
+      persistentVolumeClaimRetentionPolicy:
+        whenDeleted: Retain
+        whenScaled: Retain
+      podManagementPolicy: OrderedReady
+      replicas: 1
+      revisionHistoryLimit: 10
+      selector:
+        matchLabels:
+          app: vpc-nat-gw-gw1
+          ovn.kubernetes.io/vpc-nat-gw: "true"
+      serviceName: ""
+      template:
+        metadata:
+          annotations:
+            k8s.v1.cni.cncf.io/networks: default/vswitchinternal, kube-system/vswitchexternal
+            ovn.kubernetes.io/vpc_nat_gw: gw1
+            vswitchexternal.kube-system.ovn.kubernetes.io/routes: '[{"dst":"0.0.0.0/0","gw":"10.115.55.254"}]'
+            vswitchinternal.default.ovn.kubernetes.io/ip_address: 172.20.10.1
+            vswitchinternal.default.ovn.kubernetes.io/logical_switch: subnetinternal
+            vswitchinternal.default.ovn.kubernetes.io/routes: '[{"dst":"10.55.0.0/16","gw":"172.20.10.1"}]'
+          labels:
+            app: vpc-nat-gw-gw1
+            ovn.kubernetes.io/vpc-nat-gw: "true"
+        spec:
+          affinity: {}
+          containers:
+          - command:
+            - sleep
+            - infinity
+            env:
+            - name: GATEWAY_V4
+              value: 10.115.55.254
+            - name: GATEWAY_V6
+            image: docker.io/kubeovn/vpc-nat-gateway:v1.16.1
+            imagePullPolicy: IfNotPresent
+            lifecycle:
+              postStart:
+                exec:
+                  command:
+                  - sh
+                  - -c
+                  - sysctl -w net.ipv4.ip_forward=1
+            name: vpc-nat-gw
+            resources: {}
+            securityContext:
+              allowPrivilegeEscalation: true
+              privileged: true
+            terminationMessagePath: /dev/termination-log
+            terminationMessagePolicy: File
+          dnsPolicy: ClusterFirst
+          restartPolicy: Always
+          schedulerName: default-scheduler
+          securityContext: {}
+          terminationGracePeriodSeconds: 0
+      updateStrategy:
+        type: RollingUpdate
+    status:
+      availableReplicas: 1
+      collisionCount: 0
+      currentReplicas: 1
+      currentRevision: vpc-nat-gw-gw1-5659bc556b
+      observedGeneration: 1
+      readyReplicas: 1
+      replicas: 1
+      updateRevision: vpc-nat-gw-gw1-5659bc556b
+      updatedReplicas: 1
+----
 
 == Sample configuration
 
