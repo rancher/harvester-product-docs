@@ -1,5 +1,5 @@
 = Virtual Machine Isolation
-:revdate: 2025-09-15
+:revdate: 2026-08-18
 :page-revdate: {revdate}
 
 [NOTE]
@@ -14,9 +14,22 @@ Isolation between virtual machines is typically achieved using either VLANs (in 
 
 == Subnet ACLs
 
-For more information about the schema and usage guidelines, see https://kubeovn.github.io/docs/v1.13.x/en/guide/subnet/#subnet-acl[Subnet ACL] and https://kubeovn.github.io/docs/v1.13.x/en/reference/kube-ovn-api/#acl[ACL API Reference] in the Kube-OVN documentation.
+For information about the schema and usage guidelines, see https://kubeovn.github.io/docs/v1.13.x/en/guide/subnet/#subnet-acl[Subnet ACL] and https://kubeovn.github.io/docs/v1.13.x/en/reference/kube-ovn-api/#acl[ACL API Reference] in the Kube-OVN documentation.
 
-=== Examples
+=== Configuring subnet ACLs
+
+For information about basic subnet configuration, see xref:networking/kubeovn-vpc.adoc#_subnet_settings[Subnet Settings].
+
+On the *Access Control List* tab, define traffic rules with the following components:
+
+* *Action*: Action to take when traffic matches the rule.
+* *Direction*: Traffic flow to which the rule applies (ingress or egress).
+* *Priority*: Integer that determines when the rule is evaluated. Rules with larger values are evaluated first (for example, `1000` takes precedence over `100`).
+* *Match*: Packet filtering criteria, such as the source or destination IP address.
+
+image::networking/subnet-acl.png[Subnet access control list]
+
+=== Subnet ACL examples
 
 * Example 1: All virtual machines within the `172.20.10.0/24` subnet, except those with the addresses `172.20.10.2` and `172.20.10.3` in the subnet range `172.20.10.0/30`, are allowed to communicate with each other.
 +
@@ -142,7 +155,7 @@ Kube-OVN automatically adds the gateway address `172.20.10.1` to the `excludeIps
     vpc: vpc1
 ----
 
-== Network Policies
+== Network policies
 
 [CAUTION]
 ====
@@ -152,11 +165,44 @@ NetworkPolicy rules deny traffic by default. To avoid affecting other pods, ensu
 * Traffic is isolated using pod selectors and namespaces.
 ====
 
-The examples in this document focus on achieving isolation between virtual machines within the same subnet.
-
 For more information, see https://kubernetes.io/docs/concepts/services-networking/network-policies[Network Policies] in the Kubernetes documentation and https://kubeovn.github.io/docs/v1.13.x/en/guide/networkpolicy-log[NetworkPolicy Logging] in the Kube-OVN documentation.
 
-=== Examples
+=== Configuring network policies
+
+. On the Harvester UI, go to *Overlay Networks -> Policies*.
+
+. Click *Create*.
+
+. On the *Ingress Rules* tab, configure the following settings:
++
+** *Sources*: IP blocks, namespaces, or pods from which inbound traffic is permitted.
+** *Allowed ports*: Network ports and protocols open to inbound traffic.
++
+image::networking/np-ingress.png[Network policy ingress rules]
+
+. On the *Egress Rules* tab, configure the following settings:
++
+** *Targets*: IP blocks, namespaces, or pods to which outbound traffic is permitted.
+** *Allowed ports*: Network ports and protocols permitted for outbound traffic.
++
+image::networking/np-egress.png[Network policy egress rules]
+
+. On the *Selectors* tab, define rules that select the workload pods to which this network policy applies.
++
+image::networking/np-selectors.png[Network policy selectors]
+
+. On the *Labels and Annotations* tab, configure the following settings:
++
+** *Labels*: Key-value pairs used to categorize and filter the `NetworkPolicy` resource.
+** *Annotations*: Non-identifying metadata used by external tools or system controllers.
++
+image::networking/np-labels.png[Network policy labels and annotations]
+
+. Click *Create*.
+
+=== Network policy examples
+
+The examples in this document focus on achieving isolation between virtual machines within the same subnet.
 
 The following virtual machines are created in the `default` namespace and are attached to the overlay network created for the subnet range `172.20.10.0/24`.
 
@@ -263,3 +309,4 @@ The following virtual machines are created in the `default` namespace and are at
     - Ingress
     - Egress
 ----
+
