@@ -1,5 +1,5 @@
 = Host Network Configuration and Underlay Selection
-:revdate: 2026-07-16
+:revdate: 2026-08-18
 :page-revdate: {revdate}
 
 Although {harvester-product-name} can configure a management VLAN during installation if a VID is provided, production environments often demand more granular control over the network stack. Relying solely on the management interface can create performance bottlenecks and security risks.
@@ -35,122 +35,51 @@ Before creating a `HostNetworkConfig` resource, ensure the following requirement
 * For static mode: Valid CIDR addresses are prepared for each node.
 * For underlay selection: The `HostNetworkConfig` resource covers all nodes in the cluster.
 
-== Configuring a `HostNetworkConfig` resource
+== Host network configuration
 
-Create a `HostNetworkConfig` manifest and apply it by running the following command:
+=== Configuring host networks without node selectors
 
-[,shell]
-----
-kubectl apply -f <hostnetworkconfig>.yaml
-----
+. On the {harvester-product-name} UI, go to *Networks -> Host Networks*.
 
-== Examples
+. Click *Create*.
++
+image::networking/hnc-1.png[Configuring host networks without node selectors]
 
-=== DHCP mode (all nodes)
+. Specify a unique name for the host network.
 
-This `HostNetworkConfig` manifest automates the following actions:
+. On the *Mode* tab, configure the following settings:
++
+** *Mode*: Specify how IP addresses are assigned to the host network interface.
+*** *DHCP*: Automatically assigns IP addresses from a DHCP server.
+*** *Static*: Requires you to manually specify the IP address, subnet mask, and gateway.
+** *Cluster Network*: Select the cluster network to associate with this host network.
+** *VLAN ID*: Specify the VLAN ID for tagged traffic.
 
-* Creates a VLAN sub-interface on a cluster network named `cn-1` using VLAN ID `2012`.
-* Assigns an IP address via DHCP to every node covered by the cluster network's `VlanConfig` resource.
+. Click *Create*.
 
-[,yaml]
-----
-apiVersion: network.harvesterhci.io/v1beta1
-kind: HostNetworkConfig
-metadata:
-  name: cn1-vlan2012-dhcp
-spec:
-  clusterNetwork: cn-1
-  vlanID: 2012
-  mode: dhcp
-----
+=== Configuring host networks with node selectors
 
-Once you apply the manifest, {harvester-product-name} automatically configures the following components on each targeted node:
+. On the {harvester-product-name} UI, go to *Networks -> Host Networks*.
 
-* VLAN `2012` is added to the bridge (`cn-1-br`) and uplink (`cn-1-bo`) ports.
-* The sub-interface `cn-1-br.2012` is created and activated.
-* An IP address is requested via DHCP and applied directly to the sub-interface.
+. Click *Create*.
 
-=== Static mode (node-specific IPs)
+. Specify a unique name for the host network.
 
-This `HostNetworkConfig` manifest assigns specific IP addresses to each node's sub-interface.
+. On the *Mode* tab, configure the following settings:
++
+** *Mode*: Specify how IP addresses are assigned to the host network interface.
+*** *DHCP*: Automatically assigns IP addresses from a DHCP server.
+*** *Static*: Requires you to manually specify the IP address, subnet mask, and gateway.
+** *Cluster network*: Select the cluster network to associate with this host network.
+** *VLAN ID*: Specify the VLAN ID for tagged traffic.
 
-[,yaml]
-----
-apiVersion: network.harvesterhci.io/v1beta1
-kind: HostNetworkConfig
-metadata:
-  name: cn1-vlan2012-static
-spec:
-  clusterNetwork: cn-1
-  vlanID: 2012
-  mode: static
-  ips:
-    node1: 192.168.1.10/24
-    node2: 192.168.1.11/24
-    node3: 192.168.1.12/24
-----
+. On the *Node Selector* tab, define rules that match specific labels applied to nodes.
++
+{harvester-product-name} applies the host network configuration only to nodes targeted by the defined node selector rules.
++
+image::networking/hnc-2.png[Configuring host networks with node selectors]
 
-Replace `node1`, `node2`, and `node3` with the actual node names from your cluster.
-
-[NOTE]
-====
-You must provide an IP entry for every node covered by the `VlanConfig` resource's node selector. If a node joins the cluster later, update the `HostNetworkConfig` resource to include the new node's IP address before the configuration is applied to it.
-====
-
-=== Node selector (targeted nodes only)
-
-This `HostNetworkConfig` manifest applies the configuration exclusively to nodes matching the label `network-role=l3`.
-
-[,yaml]
-----
-apiVersion: network.harvesterhci.io/v1beta1
-kind: HostNetworkConfig
-metadata:
-  name: cn1-vlan2014-selected
-spec:
-  nodeSelector:
-    matchLabels:
-      network-role: l3
-  clusterNetwork: cn-1
-  vlanID: 2014
-  mode: dhcp
-----
-
-Apply the required label to your target nodes by running the following command:
-
-[,shell]
-----
-kubectl label node <node-name> network-role=l3
-----
-
-When you remove the `network-role` label from a node, {harvester-product-name} automatically removes the associated VLAN interface and bridge VLAN entry from that node.
-
-[,shell]
-----
-kubectl label node <node-name> network-role=-
-----
-
-=== Management network (`mgmt`)
-
-The built-in cluster network `mgmt` is also supported. This `HostNetworkConfig` manifest creates a VLAN sub-interface directly on the management bridge.
-
-[,yaml]
-----
-apiVersion: network.harvesterhci.io/v1beta1
-kind: HostNetworkConfig
-metadata:
-  name: mgmt-vlan2014-dhcp
-spec:
-  clusterNetwork: mgmt
-  vlanID: 2014
-  mode: dhcp
-----
-
-[NOTE]
-====
-Linux network interface names are strictly limited to 15 characters. Ensure that the generated bridge name, which uses the format `<ClusterNetworkName>-br.<vlanID>`, does not exceed this limit.
-====
+. Click *Create*.
 
 == Underlay for {harvester-product-name} overlay networking
 
@@ -164,26 +93,11 @@ Modifying this default configuration provides the following architectural advant
 
 === Configuring the underlay
 
-To designate a `HostNetworkConfig` resource to carry overlay traffic, set the `spec.underlay` field to `true`.
+Select the *Underlay* option to enable a custom underlay interface on the host network.
 
-[,yaml]
-----
-apiVersion: network.harvesterhci.io/v1beta1
-kind: HostNetworkConfig
-metadata:
-  name: cn1-vlan2012-underlay
-spec:
-  underlay: true
-  clusterNetwork: cn-1
-  vlanID: 2012
-  mode: static
-  ips:
-    node1: 10.115.8.15/21
-    node2: 10.115.8.16/21
-    node3: 10.115.8.17/21
-----
+image::networking/hnc-3.png[Enabling a custom underlay interface on the host network]
 
-When the `spec.underlay` field is set to `true`, {harvester-product-name} orchestrates the following system modifications:
+When the *Underlay* option option is enabled, {harvester-product-name} orchestrates the following system modifications:
 
 * The `hostnetworkconfig` agent updates the `ovn.kubernetes.io/tunnel_interface` annotation on each node to point to the newly created sub-interface (such as `cn-1-br.2012`).
 * Kube-OVN automatically reconfigures the remote VXLAN tunnel endpoints inside the OVS bridges on every node to route traffic through the new sub-interface IP addresses.
@@ -220,14 +134,14 @@ ovs-vsctl show
     ovs_version: "3.5.3"
 ----
 
-To revert to the default configuration, set the `spec.underlay` field to `false` in the `HostNetworkConfig` resource. The agent automatically restores the `ovn.kubernetes.io/tunnel_interface` annotation to the default management interface, and Kube-OVN reconfigures the tunnel endpoints accordingly.
+To disable the custom underlay interface, clear the *Underlay* option. The agent automatically restores the `ovn.kubernetes.io/tunnel_interface` annotation to the default management interface, and Kube-OVN reconfigures the tunnel endpoints accordingly.
 
 == Lifecycle behavior
 
 * *Cluster node scaling*
 +
 ** *DHCP mode*: When a new node joins the cluster, {harvester-product-name} automatically provisions the VLAN interface and requests a DHCP lease on that node.
-* *Static mode*: New nodes are not configured automatically. You must add a corresponding entry for the new node to the `spec.ips` map and reapply the `HostNetworkConfig` manifest.
+** *Static mode*: New nodes are not configured automatically. You must add a corresponding entry for the new node to the `spec.ips` map and reapply the `HostNetworkConfig` manifest.
 
 * *Node reboots*: All VLAN sub-interfaces and IP address assignments are persistent. Following a node reboot, {harvester-product-name} automatically restores the interfaces, resumes DHCP renewals, and reapplies static IP addresses as configured.
 
@@ -314,29 +228,10 @@ status:
       vlanID: 2012
 ----
 
-== Managing a `HostNetworkConfig` resource
-
-Use the following commands to modify or delete an existing resource.
-
-* Modify the resource inline.
-+
-[,shell]
-----
-kubectl edit hostnetworkconfig cn1-vlan2012-dhcp
-----
-+
-You must save the configuration after making any changes.
-
-* Delete the resource.
-+
-[,shell]
-----
-kubectl delete hostnetworkconfig cn1-vlan2012-dhcp
-----
-
 [CAUTION]
 ====
 If a node has multiple host interfaces, do not attach them to the same VLAN or subnet. This restriction applies to interfaces configured manually on the host and those configured through `HostNetwork` configurations.
+====
 
 *DHCP Response Misrouting*
 
