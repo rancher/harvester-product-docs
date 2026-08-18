@@ -1,5 +1,5 @@
 = Harvester Cloud Provider
-:revdate: 2026-07-06
+:revdate: 2026-08-18
 :page-revdate: {revdate}
 
 You can provision xref:integrations/rancher/node-driver/rke2-cluster.adoc[RKE2] clusters in Rancher using the built-in Harvester Node Driver. {harvester-product-name} provides <<#_load_balancer_support,load balancer>> and xref:integrations/rancher/csi-driver.adoc[storage passthrough] support to the guest Kubernetes cluster.
@@ -410,13 +410,34 @@ image::rancher/lb-svc.png[]
 
 {harvester-product-name}'s built-in load balancer offers both *DHCP* and *Pool* modes, and you can configure it by adding the annotation `cloudprovider.harvesterhci.io/ipam: $mode` to its corresponding service. Starting from Harvester Cloud Provider >= v0.2.0, it also introduces a unique *Share IP* mode. A service shares its load balancer IP with other services in this mode.
 
-* *DHCP:* A DHCP server is required. The {harvester-product-name} load balancer will request an IP address from the DHCP server.
+* *DHCP*: A DHCP server is required. The {harvester-product-name} load balancer will request an IP address from the DHCP server.
++
+Starting with *Rancher v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the virtual IP to the correct network interface. If you do not select a VM network, the load balancer uses the default interface.
++
+In earlier Rancher versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
++
+** `cloudprovider.harvesterhci.io/ipam: "dhcp"`
+** `cloudprovider.harvesterhci.io/network: "default/mgmt-vlan1"`
++
+image::rancher/guest-cluster-load-balancer-dhcp.png[Guest cluster load balancer (DHCP mode)]
 
-* *Pool:* You must first create an xref:networking/ip-pool.adoc[IP pool] using either the xref:networking/ip-pool.adoc#_creating_an_IP_pool[{harvester-product-name} UI] or the xref:networking/ip-pool.adoc#_creating_an_IP_pool_using_the_rancher_ui[{rancher-short-name} UI] (see xref:networking/ip-pool.adoc#_best_practices[Best practices] for information about the differences between the two methods). The {harvester-product-name} load balancer controller will allocate an IP for the load balancer service following xref:networking/ip-pool.adoc#_selection_policy[the IP pool selection policy].
+* *Pool*: A pre-configured xref:networking/ip-pool.adoc[IP pool] is required. The {harvester-product-name} load balancer controller allocates an IP for the load balancer service according to the xref:networking/ip-pool.adoc#_selection_policy[IP pool selection policy]. You can create IP pools using either the xref:networking/ip-pool.adoc#_creating_an_IP_pool[{harvester-product-name} UI] or the xref:networking/ip-pool.adoc#_creating_an_IP_pool_using_the_rancher_ui[{rancher-short-name} UI]. For more information, see xref:networking/ip-pool.adoc#_best_practices[Best practices].
++
+Starting with *Rancher v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the load balancer to the correct network interface. If you do not select a VM network (specifically, the `cloudprovider.harvesterhci.io/network` is empty), the load balancer controller automatically determines the network to be used.
++
+On earlier Rancher versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
++
+** `cloudprovider.harvesterhci.io/ipam: "ippool"`
+** `cloudprovider.harvesterhci.io/network: "default/mgmt-vlan1"`
++
+When a guest cluster uses multiple networks, or when multiple guest clusters with distinct networks share a single namespace, configuring the correct network parameters is critical.
++
+image::rancher/guest-cluster-load-balancer-pool.png[Guest cluster load balancer (Pool mode)]
 
-* *Share IP:* When creating a new load balancer service, you can re-utilize an existing load balancer service IP. The new service is referred to as a secondary service, while the currently chosen service is the primary one. To specify the primary service in the secondary service, you can add the annotation `cloudprovider.harvesterhci.io/primary-service: $primary-service-name`.  However, there are two known limitations:
- ** Services that share the same IP address can't use the same port.
- ** Secondary services cannot share their IP with additional services.
+* *Share IP*: When creating a new load balancer service, you can utilize an existing load balancer service IP. The new service is referred to as a secondary service, while the currently chosen service is the primary one. To specify the primary service in the secondary service, you can add the annotation `cloudprovider.harvesterhci.io/primary-service: $primary-service-name`. However, there are two known limitations:
++
+** Services that share the same IP address can't use the same port.
+** Secondary services cannot share their IP with additional services.
 
 [NOTE]
 ====
@@ -424,6 +445,60 @@ Modifying the `IPAM` mode isn't allowed. You must create a new service if you in
 
 See xref:troubleshooting/rancher.adoc#_guest_cluster_load_balancer_ip_is_not_reachable[Guest cluster load balancer IP is not reachable].
 ====
+
+[#_asymmetric_topology]
+=== Asymmetric network topology
+
+The network dropdown list on the UI displays only networks assigned to the _exact same interface position across all cluster nodes_.
+
+Example:
+
+|===
+| Network-Interface Mapping
+| UI Behavior
+| Node A
+| Node B
+| Displayed Networks
+
+| Identical mapping across all nodes
+| All networks are displayed
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-101`
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-101`
+| `mgmt` and `net-101`
+
+| Network in different interface positions across nodes
+| Network is hidden
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-101`
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-102`<br/>`enp3s0` → `net-101`
+| `mgmt`
+
+| Network absent on some nodes
+| Network is hidden
+| `enp1s0` → `mgmt`
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-101`
+| `mgmt`
+
+| Swapped interface mapping order
+| Only matching networks are displayed
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-101`<br/>`enp3s0` → `net-102`
+| `enp1s0` → `mgmt`<br/>`enp2s0` → `net-102`<br/>`enp3s0` → `net-101`
+| `mgmt`
+|===
+
+[TIP]
+====
+If VM network interfaces are attached in different orders across nodes, reconfigure the network interface order in the machine pool settings to allow Rancher and RKE2 to reprovision the guest cluster virtual machines.
+====
+
+=== Limitations
+
+* *Default load balancer provider*: `kube-vip` is selected by default on the UI. If you disable `kube-vip` and use an alternative provider, refer to that provider's documentation for configuration instructions.
+
+* *Pre-condition for secondary network load balancing*: The secondary network interface of each guest cluster node must have a valid IP address and route. Otherwise, the load balancer cannot route traffic. Verifying this interface configuration should be the first step when troubleshooting issues related to secondary network load balancers.
+
+* *Load balancer network changes*: Delete and recreate the load balancer service if you require changes to the load balancer network. Modifying the network annotation on an existing service may cause unexpected behavior and is not supported.
+
+* *Incorrect network annotation*: The load balancer may fail to obtain an IP address or become unreachable if you directly configure the `cloudprovider.harvesterhci.io/network` annotation and specify a network that is either invalid or exhibits an <<#_asymmetric_topology,asymmetric network topology>>. Because webhook validation is not performed on this annotation, select the target network on the UI instead.
 
 === Health checks
 
