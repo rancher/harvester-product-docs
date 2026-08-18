@@ -1,0 +1,98 @@
+= Integrating Veeam Kasten
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+https://www.veeam.com/products/cloud/kubernetes-data-protection.html[Veeam Kasten] is an enterprise data protection platform for Kubernetes that provides policy-driven backup, disaster recovery, application mobility, and ransomware protection for {harvester-product-name-tm} workloads. This page describes how to deploy Veeam Kasten, automate protection with policies, and test recovery.
+
+[NOTE]
+====
+Veeam Kasten is developed and supported by Veeam. The commands and values below are examples drawn from the SUSE Technical Reference Documentation https://documentation.suse.com/trd/veeam/html/gs_virtualization_veeam-kasten/index.html[Protect {harvester-product-name} Workloads with Veeam Kasten]; adjust them to your environment and consult the Veeam Kasten documentation for authoritative reference.
+====
+
+== Prerequisites
+
+* A {harvester-product-name} cluster, with its kubeconfig available.
+* https://helm.sh[Helm] v3 and `kubectl` installed on your workstation.
+* An external location (for example, an S3-compatible object store) to receive exported backup data.
+
+== Prepare the cluster
+
+{harvester-product-name} uses {longhorn-product-name-tm} as its default block storage. Annotate the storage class so that Veeam Kasten can export block-mode disks, and annotate the snapshot class so that it can take storage snapshots:
+
+[source,sh]
+----
+kubectl annotate storageclass harvester-longhorn \
+  k10.kasten.io/sc-supports-block-mode-exports=true
+
+kubectl annotate volumesnapshotclass longhorn-snapshot \
+  k10.kasten.io/is-snapshot-class=true
+----
+
+== Install Veeam Kasten
+
+Add the Kasten Helm repository and install the K10 platform into the `kasten-io` namespace, enabling ingress and basic authentication:
+
+[source,sh]
+----
+helm repo add kasten https://charts.kasten.io
+
+helm install k10 kasten/k10 \
+  --namespace 'kasten-io' \
+  --create-namespace \
+  --set "ingress.create=true" \
+  --set-string "ingress.class=nginx" \
+  --set "auth.basicAuth.enabled=true" \
+  --set-string "auth.basicAuth.htpasswd=<your-generated-htpasswd-string>"
+----
+
+[NOTE]
+====
+Generate your own `htpasswd` string to set the dashboard user name and password. Do not use example credentials in production.
+====
+
+Wait for all pods to reach the `Running` state:
+
+[source,sh]
+----
+watch 'kubectl get pods -n kasten-io'
+----
+
+Access the dashboard by entering the management host name or IP address of {harvester-product-name} in a browser and appending `/k10/` to the URL, then sign in with the credentials you configured.
+
+== Configure a backup location
+
+In the dashboard, go to *Profiles > Location Profiles*, choose *Add New*, select your storage provider, and configure authentication. You can define multiple location profiles to send backup data to different destinations according to cost or retention requirements.
+
+== Automate protection with policies
+
+Veeam Kasten protects workloads through declarative *policies* rather than manual backups:
+
+. Go to *Applications*, open the menu next to the namespace you want to protect, and select *Create Policy*.
+. Define the *schedule and frequency* to match the xref:backup-restore/recommendations.adoc[RPO] of the workloads.
+. Set the *retention schedule* to satisfy your retention policy. Veeam Kasten supports tiered retention (for example, keeping hourly, daily, and weekly restore points).
+. Choose the *location profile* to export backup data to.
+
+Because policies are Kubernetes resources, they can be managed and version-controlled alongside your other cluster configuration. For critical workloads, enable *immutable backups* on the location profile to protect against ransomware and accidental or malicious deletion.
+
+== Restore and recovery testing
+
+To restore, select a restore point for an application and choose the restore target. Veeam Kasten can restore to the original namespace, to a new namespace on the same cluster, or to a different cluster (application mobility), which is also the basis of its disaster recovery capability.
+
+For recovery testing, restore to a *new namespace* so that the running workload is not disrupted. After the restore completes, start the restored virtual machine, confirm the guest boots, and verify the application and its data. Record the elapsed time and compare it against the workload's xref:backup-restore/recommendations.adoc[RTO]. Schedule these tests regularly, as described in xref:backup-restore/best-practices.adoc[Best Practices].
+
+== Limitations and considerations
+
+Veeam Kasten is an enterprise platform that addresses many of the operational gaps of open-source tooling, but the following considerations apply.
+
+Commercial, third-party product::
+Veeam Kasten is developed, licensed, and supported by Veeam, not by SUSE. SUSE supports the {harvester-product-name} platform through your https://www.suse.com/support/[SUSE subscription], while licensing, support, and product issues for Veeam Kasten are handled by Veeam. Full enterprise capabilities require a commercial license beyond any free edition.
+
+In-cluster deployment and operational footprint::
+Veeam Kasten runs inside the cluster it protects, using the underlying RKE2 control plane and an ingress controller for its interface. It is deployed and upgraded with Helm, so you are responsible for operating and maintaining the platform (or its self-hosted components) within your environment.
+
+Cluster preparation required::
+Protecting {longhorn-product-name-tm} workloads requires annotating the storage class and volume snapshot class so that Veeam Kasten can export block-mode disks and take storage snapshots, as described in <<Prepare the cluster>>. Application-consistent backups still depend on correct guest configuration (QEMU guest agent, and filesystem freeze support in the guest).
+
+== Further reading
+
+* https://documentation.suse.com/trd/veeam/html/gs_virtualization_veeam-kasten/index.html[Protect {harvester-product-name} Workloads with Veeam Kasten] (SUSE Technical Reference Documentation)

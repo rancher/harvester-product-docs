@@ -1,0 +1,113 @@
+= Backup Tools
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+{harvester-product-name-tm} supports several approaches to backup and restore, from built-in capabilities to enterprise data protection platforms from SUSE partners. The right choice depends on your storage configuration, recovery objectives, and operational requirements. This page gives an overview of each supported tool and its areas of application. For step-by-step configuration, see the integration guide for each tool.
+
+== Areas of application
+
+Backup tools differ in what they are designed to protect. The following table summarizes where each tool applies.
+
+[cols="1,1,1,1", options="header"]
+|===
+| Tool | Kubernetes resources | Virtual machines | File systems / volumes
+
+| Built-in backup and restore
+| Virtual machine definitions only
+| Yes ({longhorn-product-name} volumes only)
+| {longhorn-product-name} volumes only
+
+| Velero
+| Yes
+| Yes (with the KubeVirt Velero plugin)
+| Yes (CSI snapshots and file-level via the Restic/Kopia node agent)
+
+| Veeam Kasten
+| Yes
+| Yes
+| Yes (CSI snapshots and file-level)
+
+| CloudCasa by Catalogic
+| Yes
+| Yes
+| Yes (with {longhorn-product-name} DR volumes for storage-based DR)
+
+| Restic
+| No (data mover only)
+| Indirectly, as the Velero node agent
+| Yes (file-level volume data)
+|===
+
+== Built-in virtual machine backup, snapshot, and restore
+
+{harvester-product-name} includes native backup, snapshot, and restore functionality for virtual machines. Backups are exported to a configured _backup target_ (an NFS or S3-compatible server), while snapshots provide fast, local point-in-time copies for quick rollbacks.
+
+The built-in capabilities are the simplest option and require no additional software. For step-by-step instructions, see xref:backup-restore/integration-built-in.adoc[Built-in Virtual Machine Backup, Snapshot & Restore].
+
+[NOTE]
+====
+Built-in backup support is currently limited to {longhorn-product-name} volumes. To back up virtual machines that use volumes provisioned by an external CSI driver, use one of the Kubernetes-native tools described below.
+====
+
+== Velero
+
+https://velero.io/[Velero] is an open-source, Kubernetes-native tool for backing up and restoring cluster resources and persistent volumes to object storage such as S3, Azure Blob, or Google Cloud Storage. When combined with the https://github.com/kubevirt/kubevirt-velero-plugin[KubeVirt Velero plugin], Velero can back up and restore virtual machines running on {harvester-product-name}, including those that use external CSI storage.
+
+Velero supports scheduled and on-demand backups, CSI volume snapshot data movement, and pre- and post-backup hooks that can trigger guest filesystem freeze and thaw for application consistency. Because Velero filters resources by group and label rather than by individual virtual machine, backing up a single virtual machine requires applying custom labels to the virtual machine and all of its dependency resources. As a best practice, back up an entire namespace and filter resources during the restore operation.
+
+*Area of application:* Kubernetes-native, scriptable backup and restore for teams comfortable managing the tooling themselves. For configuration, automation, and recovery testing, see xref:backup-restore/integration-velero.adoc[Integrating Velero].
+
+== Veeam Kasten for Kubernetes
+
+https://www.veeam.com/products/cloud/kubernetes-data-protection.html[Veeam Kasten] is an enterprise data protection platform for Kubernetes that extends backup and recovery to virtual machines running on {harvester-product-name}. It adds policy-driven automation, immutable backups for ransomware protection, application-aware and granular recovery, and cross-cluster disaster recovery. Backup and restore policies are defined declaratively as Kubernetes resources, and the Veeam Kasten interface can be accessed from {rancher-product-name-tm}.
+
+*Area of application:* Enterprise environments that require policy-driven automation, immutable backups, and application-consistent recovery. For configuration, automation, and recovery testing, see xref:backup-restore/integration-veeam-kasten.adoc[Integrating Veeam Kasten].
+
+== CloudCasa by Catalogic
+
+https://cloudcasa.io/partners/suse-rancher/[CloudCasa] is a Kubernetes-native backup and disaster recovery platform, available as a managed SaaS service or as a self-hosted deployment, that is certified for {harvester-product-name}. CloudCasa provides a centralized view across multiple clusters, guided restore workflows, and immutable backups.
+
+CloudCasa also offers a disaster recovery solution that pairs application-level backups managed by CloudCasa with persistent volume replication provided by {longhorn-product-name} Disaster Recovery volumes. During a failover, CloudCasa restores the application resources and automatically activates the corresponding {longhorn-product-name} volumes, enabling low-RTO recovery without duplicating replication.
+
+*Area of application:* Multi-cluster environments that require centralized management and low-RTO disaster recovery. For configuration, automation, and recovery testing, see xref:backup-restore/integration-cloudcasa.adoc[Integrating CloudCasa].
+
+== Restic
+
+https://restic.net/[Restic] is an open-source, file-level backup program that encrypts and deduplicates data before sending it to a repository on object storage or an NFS share. Restic is not used directly against {harvester-product-name}; instead, it is embedded in other tools as a _data mover_.
+
+Velero uses Restic (or its successor, https://kopia.io/[Kopia]) in its *node agent* to copy the contents of persistent volumes at the file level. This is the mechanism Velero uses to protect volumes when a native CSI snapshot is unavailable or when file-level portability is preferred. When you enable the Velero node agent, you are using this file-level data mover.
+
+*Area of application:* File-level volume data movement, used through Velero rather than on its own. For how to enable it, see the node agent options in xref:backup-restore/integration-velero.adoc[Integrating Velero].
+
+== Comparison of backup tools
+
+The following table summarizes the available tools to help you choose an approach.
+
+|===
+| Tool | Type | External CSI storage | Typical use case
+
+| Built-in backup and restore
+| Included with {harvester-product-name}
+| Not supported ({longhorn-product-name} volumes only)
+| Simple, self-contained backup and restore of individual virtual machines to an NFS or S3 target.
+
+| Velero
+| Open source (community-supported)
+| Supported (with the KubeVirt Velero plugin)
+| Kubernetes-native, scriptable backup and restore for teams comfortable managing the tooling themselves.
+
+| Veeam Kasten
+| Third-party (SUSE partner)
+| Supported
+| Enterprise environments that require policy-driven automation, immutable backups, and application-consistent recovery.
+
+| CloudCasa by Catalogic
+| Third-party (SUSE partner)
+| Supported
+| Multi-cluster environments that require centralized management and low-RTO disaster recovery.
+|===
+
+[NOTE]
+====
+Velero, Veeam Kasten, CloudCasa, and Restic are developed and supported by their respective vendors and communities. For installation, configuration, and support details, refer to each vendor's own documentation. SUSE supports the {harvester-product-name} platform through your https://www.suse.com/support/[SUSE subscription].
+====

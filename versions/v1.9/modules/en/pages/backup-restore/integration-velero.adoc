@@ -1,0 +1,185 @@
+= Integrating Velero
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+https://velero.io/[Velero] is an open-source, Kubernetes-native backup and restore tool. With the https://github.com/kubevirt/kubevirt-velero-plugin[KubeVirt Velero plugin], it can protect virtual machines running on {harvester-product-name-tm}, including those that use external CSI storage. This page describes how to configure Velero, automate backups, and test recovery.
+
+[NOTE]
+====
+Velero is developed and supported by its community. The commands and versions below are examples; adjust them to your environment and consult the https://velero.io/docs/[Velero documentation] for authoritative reference. The examples target Linux virtual machine workloads and are not suitable for backing up guest clusters provisioned through the {rancher-product-name-tm} integration.
+====
+
+== Prerequisites
+
+* A {harvester-product-name} cluster and its kubeconfig file.
+* An S3-compatible object store (for example, AWS S3, Azure Blob, or Google Cloud Storage) and its credentials.
+* The https://velero.io/docs/main/basic-install/[Velero CLI] installed on your workstation.
+* For virtual machines on external CSI storage, a CSI driver with volume snapshot support installed and configured, including a `VolumeSnapshotClass`.
+
+== Install and configure Velero
+
+Set the shell variables for your object store:
+
+[source,sh]
+----
+BUCKET_NAME=<your-s3-bucket-name>
+BUCKET_REGION=<your-s3-bucket-region>
+AWS_CREDENTIALS_FILE=<absolute-path-to-your-aws-credentials-file>
+----
+
+Install Velero on the {harvester-product-name} cluster with the AWS and KubeVirt plugins, CSI support, and the node agent enabled:
+
+[source,sh]
+----
+velero install \
+  --provider aws \
+  --features=EnableCSI \
+  --plugins "velero/velero-plugin-for-aws:v1.12.0,quay.io/kubevirt/kubevirt-velero-plugin:v0.7.1" \
+  --bucket "${BUCKET_NAME}" \
+  --secret-file "${AWS_CREDENTIALS_FILE}" \
+  --backup-location-config region="${BUCKET_REGION}" \
+  --snapshot-location-config region="${BUCKET_REGION}" \
+  --use-node-agent
+----
+
+This configuration runs Velero in the `velero` namespace, enables the CSI volume snapshot APIs, enables the node agent data-movement controllers (which use Kopia or Restic for file-level data movement), and uses the AWS plugin for the object store and the KubeVirt plugin for virtual machine resources.
+
+Confirm that Velero and the node agent are running, then enable CSI status reporting in the CLI:
+
+[source,sh]
+----
+kubectl -n velero get po
+velero client config set features=EnableCSI
+----
+
+== Create a backup
+
+Because Velero filters resources by group and label rather than by individual virtual machine, the recommended practice is to back up an entire namespace and filter during restore. Create a backup of a namespace using Velero's built-in data mover:
+
+[source,sh]
+----
+BACKUP_NAME=backup-demo-src-`date "+%s"`
+
+velero backup create "${BACKUP_NAME}" \
+  --include-namespaces demo-src \
+  --snapshot-move-data
+----
+
+Monitor progress through the `DataUpload` resources and confirm completion:
+
+[source,sh]
+----
+kubectl -n velero get datauploads -l velero.io/backup-name="${BACKUP_NAME}"
+velero backup get "${BACKUP_NAME}"
+----
+
+To back up only virtual machines, you must explicitly include all of their dependency resources:
+
+[source,sh]
+----
+velero backup create "${BACKUP_NAME}" \
+  --include-resources "virtualmachines.kubevirt.io,virtualmachineinstances.kubevirt.io,pods,persistentvolumeclaims,persistentvolumes,secrets,datavolumes.cdi.kubevirt.io" \
+  --include-namespaces demo-src \
+  --snapshot-move-data
+----
+
+Use `velero backup describe` and `velero backup logs` to review the resources included, skipped, and any warnings or errors.
+
+== Automate backups with schedules
+
+For routine protection, define a schedule instead of running on-demand backups. A schedule uses a cron expression and applies the same options as a manual backup. For example, to back up the `demo-src` namespace every hour and retain each backup for 30 days:
+
+[source,sh]
+----
+velero schedule create demo-src-hourly \
+  --schedule "0 * * * *" \
+  --include-namespaces demo-src \
+  --snapshot-move-data \
+  --ttl 720h0m0s
+----
+
+Choose the schedule frequency to match the xref:backup-restore/recommendations.adoc[RPO] of the workloads in the namespace, and set the `--ttl` retention to satisfy your retention policy.
+
+=== Application-consistent backups
+
+To quiesce guest filesystems during a backup, use Velero backup hooks that trigger the KubeVirt `virt-freezer`, which calls the QEMU guest agent to freeze and thaw the filesystem. This requires the QEMU guest agent to be enabled in the guest (the VMI reports `AgentConnected`) and the guest to permit freeze operations (Linux may need custom policies; Windows requires the Volume Shadow Copy Service). See xref:backup-restore/best-practices.adoc[Best Practices] for consistency guidance.
+
+== Restore and recovery testing
+
+Restoring to a *different* namespace lets you validate a backup without disrupting the running workload, which makes it ideal for recovery testing.
+
+When restoring {harvester-product-name} virtual machines, remove the `harvesterhci.io/volumeForVirtualMachine` annotation from data volumes so the restore does not conflict with the CDI volume import populator. Save this restore modifier as `modifier-data-volumes.yaml`:
+
+[source,yaml]
+----
+version: v1
+resourceModifierRules:
+- conditions:
+    groupResource: persistentvolumeclaims
+    matches:
+    - path: /metadata/annotations/harvesterhci.io~1volumeForVirtualMachine
+      value: "\"true\""
+  patches:
+  - operation: remove
+    path: /metadata/annotations/harvesterhci.io~1volumeForVirtualMachine
+----
+
+Create the modifier and start the restore into a new namespace:
+
+[source,sh]
+----
+kubectl -n velero create cm modifier-data-volumes --from-file=modifier-data-volumes.yaml
+BACKUP_NAME=<your-backup-name>
+
+velero restore create \
+  --from-backup "${BACKUP_NAME}" \
+  --namespace-mappings "demo-src:demo-dst" \
+  --exclude-resources "virtualmachineimages.harvesterhci.io" \
+  --resource-modifier-configmap "modifier-data-volumes" \
+  --labels "velero.kubevirt.io/clear-mac-address=true,velero.kubevirt.io/generate-new-firmware-uuid=true"
+----
+
+The restore clears the MAC address and generates a new firmware UUID to avoid conflicts with the source virtual machine, and excludes the virtual machine image manifest because the full state is restored from the backup.
+
+Monitor progress and confirm success:
+
+[source,sh]
+----
+kubectl -n velero get datadownload -l velero.io/restore-name="<your-restore-name>"
+velero restore get
+----
+
+To complete a recovery test, start the restored virtual machine in the target namespace and verify that the guest boots and that data on both the root and data volumes is present and intact. Record the time taken and compare it against the workload's xref:backup-restore/recommendations.adoc[RTO].
+
+== Limitations and considerations
+
+Velero is a capable, community-supported tool, but it has limitations that you should weigh before adopting it for production data protection. Where these limitations are significant for your environment, consider one of the enterprise tools described in xref:backup-restore/tools.adoc[Backup Tools].
+
+No per-virtual-machine selection::
+Velero filters resources only by group version and label, so out of the box there is no way to back up or restore an individual virtual machine by name or identifier. The workaround is to apply custom labels to the virtual machine and _all_ of its dependency resources, or to explicitly list every dependency resource on the command line (as shown in <<Create a backup>>). As a best practice, back up an entire namespace and filter during restore.
+
+Consistency versus durability trade-off::
+Velero cannot provide both crash consistency and off-site durability at the same time. It can take storage snapshots that are crash-consistent but remain local to your infrastructure (and cannot be exported), or it can export backups to remote object storage that are not crash-consistent. Achieving application consistency requires the manually configured backup hooks and guest filesystem freeze described above.
+
+Serial per-node volume backups::
+The Velero node agent runs as a DaemonSet that backs up volumes on each node serially. When several volumes are attached to the same node, they are backed up one after another, so the volumes of a single application can be captured at different times (potentially with substantial lag between them). This can produce inconsistencies that only surface at restore time.
+
+No immutable backups::
+Velero does not support immutable backups. An administrator (or an attacker with equivalent access) can delete backups. This removes a key protection against ransomware and accidental or malicious deletion.
+
+Single, reused encryption key::
+Velero reuses a single encryption key across all backups. This is weaker than per-backup (envelope) encryption, and is a particular concern when you rely on third-party storage providers or need to move backup targets.
+
+No centralized multi-cluster management::
+Velero is a single-cluster, self-managed tool. Each cluster requires its own installation, configuration, credentials, schedules, and storage locations, with no central view across clusters. This friction grows as the number of clusters increases.
+
+Manual monitoring::
+There is no built-in dashboard or proactive alerting. You check backup status through `kubectl` or by parsing logs, so a failed backup may go unnoticed until you need to restore.
+
+CLI-driven restores and cross-cloud complexity::
+Restores are driven from the CLI and require solid knowledge of how Velero works internally. Cross-cluster restores work reasonably well within the same cloud, but moving workloads across cloud providers or accounts requires significant manual intervention, such as remapping storage classes and network configuration, or editing resource definitions.
+
+== Further reading
+
+* https://www.suse.com/c/using-velero-to-back-up-and-restore-suse-virtualization-vms-with-external-csi-storage/[Using Velero to Back Up and Restore {harvester-product-name} VMs with External CSI Storage]
+* https://velero.io/docs/[Velero documentation]
