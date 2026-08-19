@@ -1,5 +1,5 @@
 = Storage Types and Integration: DAS, SAN, and NAS
-:revdate: 2026-07-15
+:revdate: 2026-08-19
 :page-revdate: {revdate}
 
 {harvester-product-name} provides a flexible storage architecture that supports both internal hyperconverged storage and external legacy storage arrays. Understanding how different storage types (DAS, SAN and NAS) integrate with the underlying technologies like *{longhorn-product-name}* (storage provisioner) and *KubeVirt* (virtualization management) is important for optimizing virtual machine (VM) performance and aligning with the datacenter infrastructure.
@@ -10,9 +10,9 @@ In {harvester-product-name}, Direct Attached Storage (DAS) represents the defaul
 
 === Integration with {longhorn-product-name} and KubeVirt
 
-* *The {longhorn-product-name} Role*: {harvester-product-name} does not expose local DAS drives directly to the VMs. Instead, {longhorn-product-name} aggregates the local DAS across all Harvester nodes into a highly available, distributed block storage pool. {longhorn-product-name} handles data replication, snapshots, and disaster recovery natively across the cluster.
+* *The {longhorn-product-name} Role*: {harvester-product-name} does not expose local DAS drives directly to the VMs. Instead, {longhorn-product-name} aggregates the local DAS across all cluster nodes into a highly available, distributed block storage pool. {longhorn-product-name} natively handles in-cluster data replication and volume snapshots. For disaster recovery, {longhorn-product-name} relies on external backup targets (such as an NFS or S3-compatible backupstore) and a separate recovery cluster.
 * *The KubeVirt Role*: When a user creates a VM, KubeVirt requests a volume. {longhorn-product-name} carves out a block-based Persistent Volume (PV) from the pooled DAS and attaches it to the KubeVirt VM pod.
-* *How the VM sees it*: KubeVirt exposes this {longhorn-product-name}-backed volume to the guest operating system as a standard block device (typically a `virtio-blk` device), ensuring high-performance I/O native to the hypervisor.
+* *How the VM sees it*: KubeVirt exposes this {longhorn-product-name}-backed volume to the guest operating system as a standard block device. The exact presentation depends on the configured disk bus, ensuring high-performance I/O native to the hypervisor.
 
 It is best suitable for the core HCI deployments, maximizing internal I/O performance, and eliminating the need for expensive external storage networks.
 
@@ -22,11 +22,11 @@ A Storage Area Network (SAN) is a dedicated high-speed network (such as Fibre Ch
 
 === Integration via CSI Drivers
 
-While {longhorn-product-name} manages internal DAS, {harvester-product-name} integrates with external SANs using *third-party Container Storage Interface (CSI) drivers*. {longhorn-product-name} is not used to manage external SAN data volumes. Instead, KubeVirt interacts with the SAN directly through the SAN vendor's CSI driver.
+While {longhorn-product-name} manages internal DAS, {harvester-product-name} integrates with external SANs using *third-party Container Storage Interface (CSI) drivers*. {longhorn-product-name} is not used to manage external SAN data volumes. Instead, Kubernetes handles the provisioning and attachment of the volume through the vendor's CSI driver.
 
-* *The CSI Driver Role*: The specific CSI driver provided by the SAN vendor (for example, NetApp Trident, Pure Storage CSI) must be installed into the cluster. This driver creates a new Kubernetes StorageClass.
-* *The KubeVirt Role*: When provisioning a VM, the SAN-backed StorageClass can be selected for the root and data volumes of the VM. KubeVirt coordinates with the CSI driver to attach the external block LUN directly to the VM pod via iSCSI or Fibre Channel.
-* *How the VM sees it*: Just like volumes of {longhorn-product-name}, KubeVirt exposes the SAN volume to the guest OS as a high-performance block device (`virtio-blk`).
+* *The CSI Driver Role*: The specific CSI driver provided by the SAN vendor (for example, NetApp Trident, Pure Storage CSI) must be installed into the cluster. This driver creates a new Kubernetes StorageClass and manages driver-specific details like the underlying protocol, volume mode, attachment behavior, and host prerequisites.
+* *The KubeVirt Role*: When provisioning a VM, the SAN-backed StorageClass can be selected for the root and data volumes. Kubernetes provisions the volume using the CSI driver, and KubeVirt simply consumes the resulting Persistent Volume Claim (PVC).
+* *How the VM sees it*: KubeVirt exposes the consumed PVC to the guest OS as a standard block device. The exact presentation depends on the configured disk bus, completely abstracting the external storage protocols from the guest.
 
 It is best suitable for the organizations with existing investments in enterprise SAN arrays who need specific hardware-accelerated features (like hardware deduplication or tiering) for specific VM workloads.
 
@@ -39,11 +39,16 @@ Network Attached Storage (NAS) provides file-level storage over standard Etherne
 Similar to SAN, NAS integration in {harvester-product-name} relies on external CSI drivers (such as the standard NFS CSI driver).
 
 * *The CSI Driver Role*: By installing an NFS CSI driver, {harvester-product-name} can communicate with the external NAS appliance. The driver provisions file-based Persistent Volumes.
-* *The KubeVirt Role*: Because KubeVirt VMs expect block devices to boot and run efficiently, KubeVirt uses a feature called *DataVolumes* (via the Containerized Data Importer - CDI). When a NAS StorageClass is selected, KubeVirt creates a virtual disk image file (for example, `.img` or `.qcow2`) *inside* the NFS file share.
-* *How the VM sees it*: KubeVirt mounts the file-based NAS share, reads the virtual disk image file, and translates it into a virtual block device for the guest OS.
+* *The KubeVirt Role (Filesystem PVCs)*: Because KubeVirt VMs expect block devices to boot and run efficiently, KubeVirt handles file-based PVCs by consuming a raw disk image specifically named `disk.img` located at the root of the filesystem. If this file does not exist, KubeVirt creates it automatically based on the requested PVC size. 
+* *Image Import via DataVolumes (CDI)*: Separately, when importing existing VM images to the cluster, {harvester-product-name} uses DataVolumes via the Containerized Data Importer (CDI) to automate the creation of the PVC and the population of the storage data.
+* *How the VM sees it*: KubeVirt mounts the file-based NAS share, reads the `disk.img` file, and translates it into a virtual block device for the guest OS. The exact presentation depends on the configured disk bus.
 
-It is best suited for storing VM backup targets, ISO images, cloud-init configs, or hosting secondary data volumes where file-level sharing and capacity are prioritized over raw block I/O performance.
+It is best suited for creating virtual machine images, root volumes, and data volumes where capacity and external file-level storage are prioritized over raw block I/O performance. 
 
+[NOTE]
+====
+{harvester-product-name} VM backup support is currently limited to {longhorn-product-name} volumes. External storage volumes cannot be backed up.
+====
 
 == Architecture Summary Comparison
 
@@ -53,9 +58,9 @@ Use the following table to understand how {harvester-product-name} routes data b
 |===
 | Storage Type | {harvester-product-name} Component | Storage Provisioner | Protocol / Path | Guest OS Presentation
 
-| DAS (Internal) | Included by Default | {longhorn-product-name} | Distributed Block | `virtio-blk` device
+| DAS (Internal) | Included by Default | {longhorn-product-name} | Distributed Block | VM disk; presentation depends on the configured disk bus
 
-| SAN (External) | Added via CSI | Vendor CSI Driver | iSCSI / Fibre Channel (Block) | `virtio-blk` device
+| SAN (External) | Added via CSI | Vendor CSI Driver | iSCSI / Fibre Channel (Block) | VM disk; presentation depends on the configured disk bus
 
-| NAS (External) | Added via CSI | Vendor CSI Driver | NFS / SMB (File with Virtual Disk Image) | `virtio-blk` device
+| NAS (External) | Added via CSI | Vendor CSI Driver | NFS / SMB (File with Virtual Disk Image) | VM disk; presentation depends on the configured disk bus
 |===
