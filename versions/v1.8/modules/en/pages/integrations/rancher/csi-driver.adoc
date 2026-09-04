@@ -1,5 +1,5 @@
 = Harvester CSI Driver
-:revdate: 2026-07-29
+:revdate: 2026-09-04
 :page-revdate: {revdate}
 
 The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the {harvester-product-name} cluster and hot-plugs volumes to the virtual machines to provide native storage performance.
@@ -47,10 +47,6 @@ The Harvester CSI Driver supports the following features:
 |===
 
 For **ReadWriteOnce (RWO)** volumes, the Harvester CSI Driver hotplugs underlying persistent volumes directly to virtual machines acting as guest nodes.
-
-KubeVirt enforces a hard limit of 256 volumes per virtual machine instance, including non-CSI disks such as the root disk and cloud-init disk. Consequently, a single guest node can realistically host a maximum of 256 CSI volumes.
-
-If too many PVC-dependent workloads are scheduled on the same guest node, volume attachment will fail with the error `VM Schema Invalid: Max Disk Limit (256) Exceeded on Guest Cluster`. To prevent this issue, distribute PVC-dependent workloads across multiple guest nodes or add guest worker nodes.
 
 [CAUTION]
 ====
@@ -778,3 +774,35 @@ You can upgrade K3s using the Rancher UI.
 Because newer versions of the Harvester CSI Driver have more capabilities, you may need to update your RBAC permissions. Some features and enhancements may not function correctly if you lack the necessary permissions.
 
 For more information, see the https://github.com/harvester/harvester/blob/v1.8/deploy/charts/harvester/templates/rbac.yaml[RBAC configuration] in the GitHub repository.
+
+== Scaling and Resource Limits
+
+When designing guest clusters and allocating storage, you must account for hardware and resource constraints enforced by both the virtualization layer ({harvester-product-name}) and the storage data engine ({longhorn-product-name}).
+
+=== Guest Node Volume Limits
+
+KubeVirt enforces a hard hardware limit of **256 volumes per virtual machine instance**. Because guest Kubernetes nodes are provisioned as virtual machines, a single guest node can realistically host a maximum of 256 disks. 
+
+* This limit **includes** non-CSI disks such as the root disk and cloud-init disk.
+* If too many PVC-dependent workloads are scheduled on a single guest node, volume attachment will fail with the error: `VM Schema Invalid: Max Disk Limit (256) Exceeded on Guest Cluster`. 
+* **Recommendation:** To prevent this issue, distribute PVC-dependent workloads across multiple guest worker nodes.
+
+=== {longhorn-product-name} V2 Data Engine Resource Constraints
+
+If you enable the {longhorn-product-name} V2 Data Engine, the underlying {harvester-product-name} nodes must meet strict resource reservations to guarantee stability and prevent I/O starvation. 
+
+Even if you optimize {longhorn-product-name} resource reservations in {harvester-product-name} v1.8, the V2 Data Engine strictly requires the following on each node:
+
+* **HugePages:** 2 GiB of 2 MiB-sized pages (1024 pages).
+* **CPU Cores:** 1 dedicated CPU core assigned to the V2 instance-manager pod. This is required to handle the busy-polling `spdk_tgt` process, which consumes 100% of a dedicated core to efficiently process I/O requests.
+
+=== Performance, Scalability, and Node Sizing
+
+Because cluster specifications vary widely across environments (e.g., bare-metal vs. cloud instances), strict storage scalability limits—such as maximum IOPS, maximum volumes per cluster, and replica scaling limits—are maintained dynamically based on node specifications.
+
+For detailed reference setups, node sizing guides, and performance benchmarks, refer to the official https://github.com/longhorn/longhorn/tree/v1.11.2/scalability/reference-setup-performance-scalability-and-sizing-guidelines[{longhorn-product-name} Setup, Performance, Scalability, and Sizing Guidelines].
+
+[NOTE]
+====
+The link above targets {longhorn-product-name} v1.11.2, which is the version embedded in {harvester-product-name} v1.8.1. If you are running a different version, select the corresponding branch in the {longhorn-product-name} GitHub repository.
+====
