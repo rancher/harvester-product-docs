@@ -1,0 +1,47 @@
+= Pre-deployment Checklist: Switch Requirements
+:revdate: 2026-08-03
+:page-revdate: {revdate}
+
+Physical switch configuration is a critical prerequisite for a stable {harvester-product-name} deployment. Because {harvester-product-name} relies heavily on external network infrastructure for cluster high availability (see xref:security-resilience/ha-principles.adoc[High Availability Principles]), distributed storage ({longhorn-product-name}), and virtual machine networking, misconfigured switches can result in cluster instability or total network failure.
+
+== Requirements
+
+Before deploying {harvester-product-name} to production, ensure your network infrastructure meets the following physical switch requirements.
+
+=== 1. Port Configuration and VLANs
+
+* *Trunk Ports (802.1Q)*: Physical switches connected to bonded interfaces must be configured as trunk ports. These ports must accept tagged traffic and send traffic tagged with the VLAN ID used by the VM network.
+* *Native/Untagged VLAN*: The management network (`mgmt`) is typically built on the untagged (native) VLAN on the trunk port. If a primary VLAN ID is provided during installation, it is automatically added to the `mgmt-br` bridge.
+* *VLAN Accessibility*: Physical NICs associated with custom xref:networking/cluster-network.adoc[cluster networks] and the xref:networking/storage-network.adoc[storage network] must be added to the same VLAN in the external switches. Failure to do so will result in {longhorn-product-name} pods failing to communicate, and new virtual machines becoming stuck in a `Not-Ready` state.
+
+=== 2. Link Aggregation (Bonding)
+
+To achieve high availability, {harvester-product-name} requires at least two NICs for the `mgmt` network and custom cluster networks. 
+
+* *Active-Backup (Default)*: By default, {harvester-product-name} configures bonded interfaces in `active-backup` mode.
+* *802.3ad Mode*: If you configure `mode: 802.3ad` in a `VlanConfig` to increase throughput, the corresponding physical switch ports must be properly configured to match this bonding mode.
+
+=== 3. MTU Consistency
+
+* *Matching MTU Values*: The MTU value on {harvester-product-name} and the external switch or router must match. If they do not match, the link state may show as `UNKNOWN` and cluster communications will fail.
+* *Non-Default MTU*: If you change the MTU of a network configuration (for example, to `9000` for the storage network), you must also explicitly xref:networking/cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[change the MTU on the peer external switch or router].
+
+=== 4. Layer 2 Adjacency and ARP
+
+* *Layer 2 Domain*: All {harvester-product-name} node management interfaces must be on the same layer-2 network segment.
+* *Gratuitous ARP (GARP)*: The xref:installation-setup/management-address.adoc[Management VIP] relies on the Address Resolution Protocol (ARP). When the VIP changes hosts, gratuitous ARPs are sent so that other hosts on the network know where to direct traffic. The network setup between {harvester-product-name} nodes must allow these gratuitous ARPs to ensure the cluster functions properly during a failover.
+
+=== 5. DHCP and MAC Address Handling
+
+[CAUTION]
+====
+{harvester-product-name} derives VLAN sub-interfaces from the same underlying bridge (see xref:networking/host-network-config.adoc[Host Network Configuration]), meaning they share the same MAC address. 
+====
+
+* *DHCP Misrouting*: Because multiple host interfaces from the same cluster network share a MAC address, DHCP responses may be incorrectly associated with an existing interface instead of a newly created one. Ensure your DHCP server and switch configurations can accommodate multiple interfaces using the same MAC address on the same cluster network to prevent lease acquisition failures.
+* *Static IP-MAC Bindings*: If you select DHCP during the ISO installation, you must configure static MAC-to-IP address mapping on your DHCP server to have a persistent Virtual IP and stable node IPs.
+
+=== 6. Bandwidth and Traffic Isolation
+
+* *10 Gbps Minimum*: For production environments, the network card speed and corresponding switch ports must support 10 Gbps Ethernet at minimum.
+* *Traffic Segregation*: Configure the storage network on a non-`mgmt` cluster network to ensure complete separation of the {longhorn-product-name} replication traffic from the Kubernetes control plane traffic.
