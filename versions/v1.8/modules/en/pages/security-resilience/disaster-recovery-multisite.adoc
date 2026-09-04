@@ -1,0 +1,81 @@
+= Disaster Recovery in Multi-Site Architectures
+:revdate: 2026-08-21
+:page-revdate: {revdate}
+
+When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, you must choose between two distinct disaster recovery (DR) strategies: a *Stretched Cluster (Active-Active)* or a *Multi-Cluster DR (Active-Passive)* setup. 
+
+Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
+
+== Scenario A: Stretched Clusters (Active-Active)
+
+A stretched cluster spans a single {harvester-product-name} deployment across multiple physical locations. This topology provides active-active high availability but is strictly limited to metropolitan areas with ultra-low latency, high-bandwidth connections. 
+
+Stretching a cluster across distant geographic regions is highly risky and generally not supported due to the following architectural constraints:
+
+=== 1. etcd Quorum and the Witness Node Requirement
+Kubernetes uses etcd to store cluster state, which requires a strict member quorum (a majority of nodes) to function. If you split management nodes evenly across two data centers (for example, 2 nodes in DC-A and 2 nodes in DC-B), a network partition between the sites will cause both sides to lose quorum, bringing the entire cluster down.
+
+To safely deploy a 2-site stretched cluster, you must place a **Witness Node** in a third, independent location to act as a tie-breaker. 
+
+[CAUTION]
+====
+*Longhorn Replica Degradation*: Witness nodes do not store data. If your stretched cluster consists of only two management nodes and one witness node, Longhorn can only provision a maximum of two replicas for each volume. You must manually modify your StorageClass to set the replica count to `2`, meaning the cluster will operate with degraded storage high availability.
+====
+
+=== 2. Synchronous Storage Replication Latency
+
+{longhorn-product-name} replicates data across nodes synchronously. The storage network is extremely sensitive to disk write latency. Stretching the storage network over a Wide Area Network (WAN) will directly bottleneck virtual machine performance based on the cross-site network latency.
+
+=== 3. Strict Clock Drift Limits
+
+Accurate time synchronization is mandatory. Clock drift exceeding *500 ms* between any nodes across your sites will cause leader election timeouts in etcd, leading to cluster flap, loss of quorum, and total cluster instability.
+
+== Scenario B: Multi-Cluster Disaster Recovery (Active-Passive)
+
+For true geographic disaster recovery across distinct physical locations, the recommended architecture is an Active-Passive topology. This involves two completely separate {harvester-product-name} clusters (Primary and Secondary) linked by a shared external backup target.
+
+=== 1. The Shared Backup Target (S3 Recommended)
+
+Both the Primary and Secondary clusters must be configured to point to the exact same external backup target. 
+
+[NOTE]
+====
+*S3 vs. NFS/SMB*: While NFS and CIFS are supported, using an S3-compatible object store (like AWS S3 or MinIO) is strongly recommended for multi-site DR. S3 does not require mounting and unmounting to the nodes, which significantly reduces the risk of failover complications or stale connections when a site goes offline.
+====
+
+=== 2. Longhorn DR Volumes (Asynchronous Standby)
+
+Failover relies on *Disaster Recovery (DR) Volumes*. A DR volume is a special standby volume created in the Secondary cluster from a backup of the Primary cluster's volume.
+
+* *Asynchronous Replication*: DR volumes continuously poll the shared backup target and incrementally restore new backups. Your Recovery Point Objective (RPO) is determined by how frequently you schedule recurring backups on the Primary cluster.
+* *Passive State*: The DR volume remains in a passive standby state (unmountable) to prevent data corruption.
+* *Activation*: In the event of a disaster, you must manually activate the DR volume in the Secondary cluster. Once activated, it converts into a standard, writable volume that can be attached to recovery workloads.
+
+=== 3. Virtual Machine Image Prerequisites
+
+For {harvester-product-name} to successfully restore a virtual machine on the Secondary cluster using the backed-up volumes, the Secondary cluster must have the exact same Virtual Machine Images configured.
+
+[IMPORTANT]
+====
+The controller identifies images by name. You must upload and configure the underlying VM images on the Secondary cluster, ensuring that the image names, display names, and configurations are identical to the Primary cluster *before* attempting a cross-cluster restore.
+====
+
+== Critical Constraints and Warnings
+
+When designing your storage and backup policies for DR, you must account for the following system behaviors:
+
+=== Topology vs. Strict-Local Conflict
+
+If you are attempting to pin workloads to specific failure domains using {longhorn-product-name}'s Topology-Aware Provisioning, *do not* use the `allowedTopologies` field in your StorageClass if you are also using `dataLocality: strict-local`. 
+
+The PV `nodeAffinity` is immutable once set and will directly conflict with Longhorn's strict-local volume pinning, breaking storage scheduling.
+
+=== Ubuntu/Netplan MAC Address Conflicts on Restore
+
+When restoring a VM backup that runs an Ubuntu release later than 16.04 (managed by `netplan`), the restored VM retains the machine ID of the original VM. Because `netplan` uses the machine ID as the DHCP client identifier by default, the restored VM in the DR site may request the same IP address from the DHCP server, causing network conflicts. 
+
+Ensure `dhcp-identifier: mac` is configured in the Ubuntu VM's `netplan` settings prior to taking backups.
+
+=== Longhorn V2 Data Engine Backup Deletion (v1.7.0+)
+
+If you are using the Longhorn V2 Data Engine, there is a known issue regarding backup retention. Deleting the latest backup of a virtual machine—or enabling the `Auto Cleanup Snapshot When Delete Backup` setting—blocks all subsequent operations (snapshots, backups and live migration) on related volumes. Ensure your DR retention policies do not aggressively delete the latest backups until this is resolved in a future patch.
