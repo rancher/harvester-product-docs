@@ -1,0 +1,72 @@
+= Firewall Rules
+:revdate: 2026-08-06
+:page-revdate: {revdate}
+
+This document provides a comprehensive matrix of the network ports and protocols required by {harvester-product-name} platform services. Opening and allowing traffic on these ports is critical for node-to-node cluster communication, high availability, and external service integrations.
+
+For more information on baseline host network requirements, see xref:installation-setup/requirements.adoc#_network_requirements[Network Requirements].
+
+== Internal Node-to-Node Traffic
+
+The following ports must be open for internal communication between nodes in the {harvester-product-name} cluster. Typically, all outbound traffic between cluster nodes is allowed.
+
+=== Core Kubernetes & Etcd Services
+
+|===
+| Protocol | Port | Source | Description
+
+| TCP | 2379 | Management nodes | Etcd client port
+| TCP | 2380 | Management nodes | Etcd peer port
+| TCP | 2381 | Management nodes | Etcd metrics collection
+| TCP | 2382 | Management nodes | Etcd client port (HTTP only)
+| TCP | 6443 | Management nodes | Kubernetes API
+| TCP | 9345 | Management nodes | Kubernetes API
+| TCP | 10250 | Management and compute nodes | Kubelet
+| TCP | 10251 | Management nodes | Kube-scheduler health checks
+| TCP | 10252 | Management nodes | Kube-controller-manager health checks
+| TCP | 10256 | Management and compute nodes | Kube-proxy health checks
+| TCP | 10257 | Management nodes | Kube-controller-manager secure port
+| TCP | 10258 | Management nodes | cloud-controller-manager
+| TCP | 10259 | Management nodes | Kube-scheduler secure port
+| TCP | 10260 | Management nodes | cloud-controller-manager
+| TCP | 6444 | Management and compute nodes | RKE2 agent
+| TCP | 10010 | Management and compute nodes | Containerd
+|===
+
+=== Networking, Ingress and Platform Services
+
+|===
+| Protocol | Port | Source | Description
+
+| UDP | 8472 | Management and compute nodes | Canal CNI with VxLAN (Overlay Network)
+| TCP | 9091 | Management and compute nodes | Canal calico-node felix
+| TCP | 9099 | Management and compute nodes | Canal CNI health checks
+| TCP | 2112 | Management nodes | Kube-vip
+| TCP | 80 | Management and compute nodes | Nginx
+| TCP | 8181 | Management and compute nodes | Nginx-ingress-controller
+| TCP | 8444 | Management and compute nodes | Nginx-ingress-controller
+| TCP | 10245 | Management and compute nodes | Nginx-ingress-controller
+| TCP | 10246-10249 | Management and compute nodes | Nginx worker process
+| TCP | 30000-32767 | Management and compute nodes | NodePort port range
+| TCP | 9796 | Management and compute nodes | Node-exporter
+| TCP | 22 | Management and compute nodes | sshd
+| UDP | 68 | Management and compute nodes | NetworkManager (DHCP)
+| TCP | 3260 | Management and compute nodes | iscsid
+|===
+
+== External & Integration Traffic
+
+These ports are required for external administrative access, UI access, and integrations with external infrastructure.
+
+|===
+| Protocol | Port | Source/Destination | Description
+
+| TCP | 443 | External Client -> Management VIP | Access to the {harvester-product-name} API and UI via HTTPS. For details, see xref:installation-setup/management-address.adoc[Management Address].
+| TCP | 443 | {harvester-product-name} nodes -> {rancher-product-name} | Required for {rancher-product-name} integration. All {harvester-product-name} nodes must connect to TCP 443 of the {rancher-product-name} load balancer. For details, see xref:integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integration].
+| UDP | 123 | {harvester-product-name} nodes -> External NTP Servers | Required for accurate time synchronization for etcd quorum. For details, see xref:security-resilience/ha-principles.adoc#_accurate_time_synchronization[High Availability Principles].
+|===
+
+[NOTE]
+====
+If you configure custom VLAN interfaces, custom cluster networks, or SDN features using the Kube-OVN Operator, ensure that external physical switches permit tagged VLAN traffic and necessary encapsulation traffic across host trunks. For details, see xref:networking/host-network-config.adoc[Host Network Configuration] and xref:add-ons/kubeovn-operator.adoc[Kube-OVN Operator].
+====
