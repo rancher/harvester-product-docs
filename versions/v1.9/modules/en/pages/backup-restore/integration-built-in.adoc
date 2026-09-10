@@ -1,6 +1,8 @@
-= Virtual Machine Backup, Snapshot & Restore
+= Built-in Virtual Machine Backup, Snapshot & Restore
 :revdate: 2026-01-08
 :page-revdate: {revdate}
+
+{harvester-product-name-tm} includes native backup, snapshot, and restore functionality for virtual machines that use {longhorn-product-name-tm} volumes, requiring no additional software. This page describes how to configure and use it. For an overview of how it compares to the other supported tools, see xref:backup-restore/tools.adoc[Backup Tools]; for the terms used here, such as backup, snapshot, and the recovery objectives that guide scheduling, see xref:backup-restore/definitions.adoc[Backup Definitions].
 
 [#_vm_backup_restore]
 == Virtual machine backup and restore
@@ -342,7 +344,7 @@ image::vm/edit-quota-vm-read.png[]
 
 When a guest virtual machine is connected with the *QEMU Guest Agent*, the {harvester-product-name} controller performs filesystem freeze operations through Kubevirt's https://github.com/kubevirt/kubevirt/blob/main/docs/freeze.md#virt-freezer[virt-freezer] application to ensure filesystem consistency during virtual machine backups and snapshots.
 
-This feature is particularly valuable for virtual machines with high I/O activity or critical data that requires point-in-time consistency guarantees.
+This feature is particularly valuable for virtual machines with high I/O activity or critical data that requires point-in-time consistency guarantees. It provides the application-consistent backups discussed in xref:backup-restore/best-practices.adoc[Best Practices], and uses the same KubeVirt `virt-freezer` mechanism described for xref:backup-restore/integration-velero.adoc[Velero].
 
 === Prerequisites
 
@@ -440,7 +442,7 @@ virt-freezer --unfreeze --namespace <VM namespace> --name <VM name>
 [#_scheduled_vm_backups_snapshots]
 == Scheduled virtual machine backups and snapshots
 
-{harvester-product-name} supports the creation of virtual machine backups and snapshots on a scheduled basis, with the option to retain a specific number of backups and snapshots. You can suspend, resume, and update the schedule at runtime.
+{harvester-product-name} supports the creation of virtual machine backups and snapshots on a scheduled basis, with the option to retain a specific number of backups and snapshots. You can suspend, resume, and update the schedule at runtime. Set the schedule frequency to meet the xref:backup-restore/recommendations.adoc[Recovery Point Objective (RPO)] of the workload.
 
 === Create the Virtual Machine Schedule
 
@@ -546,3 +548,31 @@ To avoid such issues, SUSE plans to implement automatic suspension of all virtua
 
 For best results, use the <<#_scheduled_vm_backups_snapshots>> feature in {harvester-product-name}, which has safeguard mechanisms that mitigate heavy I/O when possible. Again, {harvester-product-name} does not support recurring {longhorn-product-name} snapshots and backups.
 ====
+
+== Limitations and considerations
+
+Before relying on the built-in functionality, be aware of the following limitations. Where these are significant for your environment, consider one of the tools described in xref:backup-restore/tools.adoc[Backup Tools].
+
+{longhorn-product-name} volumes only::
+Built-in backup and snapshot support is limited to {longhorn-product-name} volumes. Virtual machines that use volumes provisioned by an external CSI driver cannot be protected with the built-in feature; use a Kubernetes-native tool such as xref:backup-restore/integration-velero.adoc[Velero] instead.
+
+Longhorn V2 Data Engine known issue::
+Although backups and snapshots for Longhorn V2 Data Engine volumes are supported from v1.7.0, deleting the latest backup of a virtual machine, or enabling the {longhorn-product-name} _Auto Cleanup Snapshot When Delete Backup_ setting, blocks all subsequent operations (snapshots, backups, and live migration) on the related volumes. This is a https://github.com/longhorn/longhorn/issues/9064[known issue] with no viable workaround; recovery requires deleting the affected volume. See the caution in <<#_vm_backup_restore>>.
+
+Minimum scheduling interval::
+Scheduled backups and snapshots must have an interval of *at least one hour*, and schedules of the same granularity must be offset by *at least 10 minutes*. This bounds the shortest xref:backup-restore/definitions.adoc[RPO] achievable with the built-in scheduler. Workloads that require a shorter RPO need a different approach.
+
+Consistency depends on guest configuration::
+Application-consistent backups rely on filesystem freeze and thaw, which depend on guest virtual machine configuration that is _not controlled by {harvester-product-name}_. RHEL and SLE Micro may require a custom SELinux policy, and Windows requires the Volume Shadow Copy Service. See <<Filesystem freeze for virtual machine backups and snapshots>>.
+
+Guest network preparation for restore::
+Restored virtual machines retain the machine ID of the original. Virtual machines running Ubuntu managed by `netplan` must be configured with `dhcp-identifier: mac` before backup to avoid duplicate IP addresses and network conflicts on restore. See the note in <<Create a Virtual Machine Backup>>.
+
+Interaction with cluster upgrades::
+Virtual machine backups, snapshots, and active schedules block {harvester-product-name} upgrades. You must ensure no backups or snapshots are in use and suspend all schedules before upgrading. See <<Virtual Machine Operations and {harvester-product-name} Upgrades>>.
+
+No integration with recurring {longhorn-product-name} jobs::
+The built-in feature does not support or integrate {longhorn-product-name} recurring snapshot and backup jobs, because they conflict with certain operations and can generate heavy I/O without {harvester-product-name}'s awareness. Use the built-in <<#_scheduled_vm_backups_snapshots>> feature instead.
+
+Single-cluster scope::
+The built-in feature protects one cluster and offers no centralized, multi-cluster management. Restoring to another cluster is possible but requires manual setup, such as configuring the same backup target and matching virtual machine images. See <<Restore a new virtual machine on another {harvester-product-name} cluster>>.
