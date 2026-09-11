@@ -1,0 +1,80 @@
+= Enterprise Storage Integration (CSI)
+:revdate: 2026-09-04
+:page-revdate: {revdate}
+
+{harvester-product-name} ships with {longhorn-product-name} as the built-in storage system. However, {harvester-product-name} also supports provisioning root volumes and data volumes using external Container Storage Interface (CSI) drivers. This allows integration with existing enterprise SAN or NAS storage solutions.
+
+== 1. Preventing Storage Conflicts
+
+When presenting external storage block devices to {harvester-product-name} nodes, ensure that the built-in {longhorn-product-name} engine does not attempt to claim them:
+
+* *File System-Type Disks*: {longhorn-product-name} creates a default file system-type disk at `/var/lib/longhorn`. Do not mount external storage to this path.
+* *Block-Type Disks*: The V2 Data Engine requires raw block devices. If your external storage presents raw block devices (for example, NVMe or VirtIO) to the host, do not add these paths to the {longhorn-product-name} UI or `spec.disks` configuration.
+* *Auto-Provisioning*: Be cautious when using the `node.longhorn.io/create-default-disk: 'config'` label alongside the `node.longhorn.io/default-disks-config` annotation to ensure auto-provisioning does not target external storage paths.
+
+== 2. Host OS Preparation
+
+Because {harvester-product-name} follows an immutable OS design, software packages or persistent paths required by enterprise CSI drivers must be configured explicitly in the cluster configuration file.
+
+* Configure custom paths with xref:installation-setup/config/configuration-file.adoc#_os_persistent_state_paths[`os.persistent_state_paths`].
+* Install required host packages with xref:installation-setup/config/configuration-file.adoc#_os_after_install_chroot_commands[`os.after_install_chroot_commands`].
+
+[NOTE]
+====
+Upgrading {harvester-product-name} causes OS changes made in the `after-install-chroot` stage to be lost. You must also configure `after-upgrade-chroot` to ensure package changes persist across cluster upgrades. Refer to https://rancher.github.io/elemental-toolkit/docs/customizing/runtime_persistent_changes/[Runtime persistent changes] before upgrading.
+====
+
+For CSI drivers requiring Multipath I/O (`multipathd`), see xref:storage/csidriver.adoc#_multipath_support[Multipath Support] for host execution and `CloudInit` CRD examples.
+
+== 3. Installing the CSI Driver
+
+Before installing an enterprise CSI driver, verify that it supports the required baseline capabilities detailed in xref:storage/csidriver.adoc#_prerequisites[Third-Party Storage Prerequisites] (including online volume expansion, snapshot creation, cloning, and RWX volumes for xref:virtual-machines/live-migration.adoc[Live Migration]).
+
+Obtain your cluster credentials as described in xref:troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[How can I access the kubeconfig file?] and install the vendor's CSI driver following their deployment instructions.
+
+== 4. StorageClass and CDI Configuration
+
+{harvester-product-name} integrates with the Containerized Data Importer (CDI) to handle VM image management. If your Enterprise StorageClass provisioner is not included in CDI's default capabilities list, you must annotate the `StorageClass` with `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`. Without this annotation, image deployments or Helm chart installations may fail.
+
+Apply CDI annotations directly to the `StorageClass`. For full attribute descriptions and configuration rules, see xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[Containerized Data Importer (CDI) Settings].
+
+The following example demonstrates a `StorageClass` annotated for CDI:
+
+[,yaml]
+----
+apiVersion: storage.k8s.io/v1
+kind: StorageClass
+metadata:
+  name: enterprise-csi
+  annotations:
+    cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
+    cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: enterprise-snapshot
+    cdi.harvesterhci.io/filesystemOverhead: '0.05'
+provisioner: csi.enterprise-vendor.com
+reclaimPolicy: Delete
+volumeBindingMode: WaitForFirstConsumer
+allowVolumeExpansion: true
+----
+
+== 5. Validating the Integration
+
+Before placing production workloads on external storage, validate your CSI driver's compatibility using the `storage-validator` utility.
+
+1. Download the executable from the https://github.com/harvester/storage-validator/releases[Releases] page.
+2. Create a `config.yml` file pointing to your enterprise `StorageClass` and matching `VolumeSnapshotClass`.
+3. Execute the validation test suite:
++
+[,shell]
+----
+storage-validator -config ./config.yml
+----
+
+For a detailed breakdown of configuration options, test cases, and expected output examples, see xref:storage/storage-validator.adoc[Storage Validator].
+
+== 6. Using the CSI Driver
+
+Once configured and validated, external storage can be selected during standard VM operations:
+
+* *Virtual Machine Creation*: Select your enterprise `StorageClass` on the *Volumes* tab during xref:virtual-machines/create-vm.adoc[Virtual Machine Creation]. Ensure you select the appropriate *Volume Mode* (for example, *Filesystem* for NFS or *Block* for SAN storage).
+* *Limitations*: Review xref:storage/csidriver.adoc#_limitations[Third-Party Storage Limitations] regarding VM backup restrictions (limited to {longhorn-product-name}) and detached PVC prerequisites when exporting images.
