@@ -1,0 +1,95 @@
+= Production vs. Backup Storage: Classification Criteria
+:revdate: 2026-09-04
+:page-revdate: {revdate}
+
+In a {harvester-product-name} and {longhorn-product-name} environment, storage is strictly categorized into *Production Storage* and *Backup Storage*. Misclassifying or misconfiguring these storage tiers can lead to degraded virtual machine (VM) performance, live migration failures, or data loss during disaster recovery scenarios.
+
+The following criteria define the architectural boundaries, hardware requirements, and operational characteristics of each storage type.
+
+== Production Storage (Primary / In-Cluster)
+
+Production storage refers to the storage that actively backs running VMs, boot volumes, and data volumes. In {harvester-product-name}, this is divided into two categories:
+
+* *Built-in Storage*: Distributed block storage managed by {longhorn-product-name} that resides within the cluster and is optimized for synchronous I/O, low latency, and high availability.
+* *Third-party Storage*: Validated external Container Storage Interface (CSI) drivers. Provisioning, data locality, and high-availability behavior depend entirely on the external storage vendor. 
+
+[NOTE]
+====
+The hardware, provisioning, and resiliency criteria detailed below apply *strictly to built-in {longhorn-product-name} storage*. Do not apply these Longhorn-specific configurations to third-party CSI drivers (such as LVM, Rook RBD, or external NFS).
+====
+
+=== Built-in Storage: Hardware and Engine Criteria
+
+* *V1 Data Engine*: The standard storage engine used for VM root volumes, images, and standard workloads.
+* *xref:storage/longhorn-v2-data-engine.adoc[V2 Data Engine (High Performance)]*: An *experimental* SPDK-based engine designed for high IOPS and throughput. Because it is experimental, it must be evaluated carefully and is not recommended for strict production workloads.
+** *Resource Requirements*: Requires strictly dedicated resources per node (1 CPU core for the `instance-manager` pod and 2 GiB RAM allocated as `1024 x 2` MiB huge pages).
+** *Media Requirements*: Local NVMe disks (using the SPDK NVMe bdev driver) are *recommended for full functionality*, such as file system trim/unmap support. While non-NVMe raw disks are supported via the SPDK AIO driver, they lack unmap support and can result in I/O errors or paused VMs if trimmed.
+* *Tiered / Cold Storage*: Hard Disk Drives (HDDs) can be added to the cluster for cold storage or archiving (see xref:storage/storageclass.adoc#_hdd_scenario[HDD Scenario]), but are explicitly *not recommended* for guest Kubernetes (RKE2) clusters or VMs requiring good disk performance.
+
+=== Built-in Storage: Provisioning and Isolation Criteria
+
+* *Kubernetes Integration*: Provisioned exclusively via Kubernetes xref:storage/storageclass.adoc[StorageClass] objects.
+* *Physical Isolation*: Production disks and nodes are segregated using *Storage Tags* (Disk/Node tags). For example, NVMe disks can be tagged `fast` while HDDs are tagged `ColdStorage`. The `StorageClass` uses `nodeSelector` and `diskSelector` parameters to enforce where VM volumes are scheduled.
+* *Data Locality*: Production storage can enforce `dataLocality` (for example, `best-effort`) to attempt scheduling at least one volume replica on the same node as the consuming pod to optimize read latency.
+
+=== Built-in Storage: Resiliency and Operations Criteria
+
+* *Synchronous Replication*: Relies on real-time, synchronous replication across cluster nodes (default `numberOfReplicas: "3"`).
+* *Live Migration*: Requires the `migratable` parameter in the StorageClass to be set to true (and requires a replica count greater than 1) for xref:virtual-machines/live-migration.adoc[Live Migration] to function.
+* *Snapshots*: VM Snapshots reside directly on Production Storage and consume cluster disk space. Snapshot space limits can be enforced via Namespace or VM-level quotas. For more information, see xref:virtual-machines/backup-restore.adoc#_virtual_machine_snapshot_space_management[Virtual Machine Snapshot Space Management].
+
+== Backup Storage (Secondary / Off-Cluster)
+
+Backup storage (or xref:virtual-machines/backup-restore.adoc#_configuring_backup_target[Backup Target]) is an external endpoint used strictly for disaster recovery, long-term retention of VM volumes, and {longhorn-product-name} system backups. It does not provide block devices to live workloads. Instead, it stores bundled system configuration files and point-in-time VM volume data.
+
+=== Protocol and Endpoint Criteria
+
+* *Supported Protocols*: {harvester-product-name} backup targets exclusively support *S3-compatible object stores* (AWS S3, GCP, MinIO) and *NFS*.
++
+[NOTE]
+====
+While the underlying {longhorn-product-name} engine natively supports Azure Blob Storage and SMB/CIFS, these are not supported by the {harvester-product-name} `backup-target` setting for VM backups.
+====
++
+* *Protocol Preference*: Object storage (S3) is explicitly recommended over file systems (NFS) because it offers better reliability and eliminates the need to mount/unmount the target, simplifying failovers and cluster upgrades.
+* *Storage Support Limitations*: Backup operations are currently limited to built-in {longhorn-product-name} volumes. {harvester-product-name} cannot natively create backups of volumes residing on external third-party CSI storage.
+
+=== Resiliency and Operations Criteria
+
+* *Network Tolerance*: Designed to handle network instability gracefully. For NFS backup targets, {longhorn-product-name} automatically enforces `soft` mounts with specific timeouts (`timeo=300,retry=2`). This ensures that if the NFS server is unreachable, operations fail safely rather than hanging the storage engine indefinitely.
+* *Point-in-Time Consistency*: Backups are crash-consistent by default. To enable *file system consistency* before data is moved to Backup Storage, the controller freezes the file system if the VM is connected to the QEMU Guest Agent (performing xref:virtual-machines/backup-restore.adoc#_filesystem_freeze_for_virtual_machine_backups_and_snapshots[filesystem freeze/thaw operations] via virt-freezer or Windows VSS).
+* *Lifecycle Management*: The lifecycle of backups within the backupstore is managed entirely by {longhorn-product-name}. *Applying retention policies directly on the external backupstore (for example, AWS S3 lifecycle rules) is strictly prohibited*.
+
+== Summary Matrix
+
+|===
+| Criteria | Production Storage | Backup Storage
+
+| *Primary Function*
+| Active block storage for live VMs and workloads.
+| Disaster recovery, VM retention, and system backups.
+
+| *Location*
+| In-cluster (Local NVMe, SSD, HDD).
+| Off-cluster (External server/cloud endpoint).
+
+| *Protocols / Interfaces*
+| Kubernetes CSI, SPDK NVMe/AIO bdev, Block devices.
+| S3, NFS (Harvester); Azure Blob, SMB/CIFS ({longhorn-product-name} native only).
+
+| *Resiliency Model*
+| Synchronous replica distribution across cluster nodes.
+| Point-in-time asynchronous copies; soft-mount network tolerance.
+
+| *Workload Consistency*
+| Always active.
+| Crash-consistent by default; QEMU Guest Agent enables filesystem consistency.
+
+| *Lifecycle Ownership*
+| Managed via `StorageClass` reclaim policies (`Delete`/`Retain`).
+| Exclusively managed by {longhorn-product-name}. External retention policies are prohibited.
+
+| *Configuration Interface*
+| `StorageClass`, Node/Disk Tags.
+| `Settings > backup-target`, `longhorn-default-resource` ConfigMap.
+|===
