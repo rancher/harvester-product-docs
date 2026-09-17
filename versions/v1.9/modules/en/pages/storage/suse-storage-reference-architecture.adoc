@@ -1,0 +1,58 @@
+= {longhorn-product-name} Reference Architecture
+:revdate: 2026-07-22
+:page-revdate: {revdate}
+
+{harvester-product-name} supports distributed block storage and tiering using {longhorn-product-name} as its built-in storage system. Each {longhorn-product-name} volume is managed by a dedicated storage controller and is synchronously replicated across nodes in the cluster.
+
+This reference architecture consolidates the technical specifications, networking constraints, and design principles required to deploy and maintain {longhorn-product-name} in a production {harvester-product-name} cluster.
+
+== Architectural Overview and Failure Domains
+
+{harvester-product-name} combines Kubernetes (RKE2), KubeVirt, and {longhorn-product-name} on cluster nodes, with each layer maintaining independent failure domains (see xref:security-resilience/failure-domains.adoc[Cluster Architecture and Failure Domains] for more details). 
+
+* *Replica Management*: The default replica count for volumes is 3. {longhorn-product-name} features automatic replica rebuilding and can tolerate the loss of up to 1/3 of the replicas.
+* *Data Locality*: Data locality parameters (`disabled` or `best-effort`) can be defined via a xref:storage/storageclass.adoc[StorageClass].
++
+[NOTE]
+====
+The `strict-local` data locality setting is not supported in {harvester-product-name} because it prevents virtual machine live migration.
+====
+
+== Hardware and Resource Requirements
+
+=== V1 Data Engine
+
+In its default configuration, {longhorn-product-name} utilizes the V1 Data Engine, which stores volume data on file system-type disks (defaulting to `/var/lib/harvester/defaultdisk`).
+
+=== V2 Data Engine
+
+The V2 Data Engine utilizes the Storage Performance Development Kit (SPDK) to reduce I/O latency while boosting IOPS and throughput (see xref:storage/longhorn-v2-data-engine.adoc[{longhorn-product-name} V2 Data Engine]). It requires raw block disks, and local NVMe disks are strongly recommended for optimal performance.
+
+Deploying the V2 engine requires strict adherence to the following dedicated resources and configurations per node:
+
+* *CPU Allocation*: The `spdk_tgt` process relies on intensive busy-polling. By default, the `data-engine-cpu-mask` is set to `0x3` (which allocates 2 dedicated CPU cores) to separate I/O polling from management RPCs, preventing latency spikes and operational instability.
+* *Memory (HugePages)*: Nodes require 2 GiB of RAM allocated specifically as 1024 × 2 MiB-sized huge pages.
+* *Kernel & Modules*: Requires Linux kernel 6.7 or later for NVMe/TCP support, alongside the `vfio_pci`, `uio_pci_generic`, and `nvme-tcp` kernel modules.
+* *Disk & IOMMU Isolation*: For SPDK to natively claim an NVMe disk, the device must be fully isolatable; VFIO must claim the entire IOMMU group.
+
+== Storage Networking
+
+To improve I/O performance and stability, isolating {longhorn-product-name} replication traffic from the `mgmt` cluster network onto a dedicated storage network is strongly recommended. For detailed configuration steps, see xref:networking/storage-network.adoc[Storage Network].
+
+=== Configuration Constraints
+
+* *Multus CNI*: The storage network utilizes a Multus `NetworkAttachmentDefinition` Custom Resource. Applying this setting restarts all `instance-manager` and `backing-image-manager` pods.
+* *IP Capacity Planning*: The storage network IPv4 CIDR range must be large enough to prevent IP exhaustion, which causes `instance-manager` pods to fail and stalls cluster operations. Capacity is calculated as follows:
+** *Without RWX network sharing*: `Required IPs = (Number of nodes × 2) + (Number of disks × 2) + Number of concurrent image uploads/downloads`.
+** *With RWX network sharing*: `Required IPs = (Number of nodes × 3) + (Number of disks × 2) + Number of concurrent image uploads/downloads + 32` (arbitrary buffer for RWX growth).
+
+== Operational Limitations and Upgrades
+
+Administrators must account for the following limitations during xref:/upgrades/upgrades.adoc[cluster lifecycle operations]:
+
+* *RWX Volumes*: ReadWriteMany support requires that an NFSv4.1 client is installed on each node.
+* *V2 Upgrades*: Live upgrades of V2 volumes are *not supported*. All virtual machines utilizing V2 volumes must be stopped, and volumes detached, before initiating a cluster upgrade; otherwise, the upgrade process will stall.
+* *V2 Backing Images*: The V2 Data Engine does not support backing image creation or usage.
+* *Encrypted Volumes*: Live migration of encrypted volumes requires the engine image to have a CLI API version of 12 or newer (v1.12+). The V2 Data Engine currently does not support volume encryption.
+* *UBLK Front-end Kernel Limitation*: The experimental UBLK front-end for V2 Data Engine volumes is incompatible with Linux kernels v6.17.0 and above.
+* *Upgrade IP Buffer*: During cluster upgrades, {harvester-product-name} requires additional storage network IPs (for example, the upgrade repository deployment consumes an IP for its RWX volume, and old/new pods co-exist).
