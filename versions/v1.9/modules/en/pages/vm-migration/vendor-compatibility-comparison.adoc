@@ -1,0 +1,149 @@
+= Vendor Compatibility and Comparison Guide
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+Migrating existing virtual machines onto {harvester-product-name-tm} is a common first step when moving away from a traditional hypervisor such as VMware vSphere. Several tools are available, ranging from built-in {harvester-product-name} add-ons to a SUSE partner platform. This guide compares them so that you can choose the right approach for your source environment, scale, and support requirements.
+
+[NOTE]
+====
+This guide covers tools that migrate virtual machines _into_ {harvester-product-name} from another platform. It does not cover intra-cluster xref:virtual-machines/live-migration.adoc[live migration], which moves a running virtual machine between hosts within the same {harvester-product-name} cluster.
+====
+
+== Migration approaches
+
+There are three supported ways to migrate virtual machines into {harvester-product-name}:
+
+* *{harvester-product-name} add-ons* that run inside the cluster and pull virtual machines from a source platform:
+** The xref:add-ons/vm-import-controller.adoc[VM Import Controller] add-on.
+** The SUSE VM Migration Toolkit add-on (a https://github.com/kubev2v/forklift[Forklift]-based tool, currently experimental).
+* A *SUSE partner platform*, https://cloudbase.it/coriolis/[Coriolis by Cloudbase], which runs as an external appliance and migrates agentlessly through platform APIs.
+
+The best choice depends on your source platform, the number of virtual machines, whether you can tolerate downtime, and the level of support you require.
+
+== Comparison at a glance
+
+[cols="2,1,2,2,1", options="header"]
+|===
+| Tool | Type | Source platforms | Migration method | Support
+
+| xref:add-ons/vm-import-controller.adoc[VM Import Controller]
+| Built-in add-on
+| VMware vSphere, OpenStack, OVA
+| In-cluster export and import via the `VirtualMachineImport` custom resource (cold migration)
+| SUSE (platform)
+
+| SUSE VM Migration Toolkit (Forklift)
+| Built-in add-on (experimental)
+| VMware vSphere
+| In-cluster conversion with `virt-v2v` and VDDK, driven by Forklift `Provider`, `Plan`, and `Migration` resources (cold migration)
+| SUSE (experimental)
+
+| https://cloudbase.it/coriolis/[Coriolis by Cloudbase]
+| SUSE partner platform
+| VMware vSphere, AWS, Azure, Google Cloud; SAP-on-VMware to SLES/KVM
+| Agentless, API-driven replication from an external appliance; supports warm migration with continuous sync and on-demand cutover
+| SUSE (platform) + Cloudbase (appliance)
+|===
+
+[NOTE]
+====
+The VM Import Controller and the SUSE VM Migration Toolkit perform *cold* migration: the source virtual machine is shut down (or powered off) as part of the process. Coriolis supports *warm* migration, replicating a running virtual machine in the background and requiring only a short cutover window.
+====
+
+== VM Import Controller
+
+The xref:add-ons/vm-import-controller.adoc[VM Import Controller] is a built-in add-on that imports virtual machines from VMware vSphere, OpenStack, and Open Virtual Appliance (OVA) packages. You define a source cluster and a `VirtualMachineImport` resource; the controller exports each disk, creates a xref:virtual-machines/vm-images/upload-image.adoc[virtual machine image] per disk, and recreates the virtual machine in {harvester-product-name}.
+
+When to use it::
+* Your source is VMware vSphere, OpenStack, or an OVA package.
+* You want a supported, in-cluster tool with no external appliance and no additional licensing.
+* Cold migration (shutting the source virtual machine down) is acceptable.
+
+Key considerations::
+* Enable *PVC-backed storage* for the add-on and size the PVC to *twice the size of the largest virtual machine*, because it is used as scratch space to download and convert disks.
+* For VMware sources, VMware Tools (or `open-vm-tools`) should be installed so the controller can gracefully shut the guest down; otherwise set `forcePowerOff: true` or shut the virtual machine down manually.
+* The source virtual machine name must be RFC 1123-compliant, or you must rename it.
+* `evictionStrategy` is not set automatically on imported virtual machines, which prevents live migration until you patch it.
+
+For configuration, the full `VirtualMachineImport` specification, and the current list of known issues, see xref:add-ons/vm-import-controller.adoc[VM Import Controller].
+
+== SUSE VM Migration Toolkit (Forklift)
+
+The SUSE VM Migration Toolkit is a https://github.com/kubev2v/forklift[Forklift]-based add-on introduced in {harvester-product-name} v1.8.0 that migrates virtual machine workloads from VMware. It uses `virt-v2v` together with the VMware Virtual Disk Development Kit (VDDK) and is driven by Forklift `Provider`, `NetworkMap`, `StorageMap`, `Plan`, and `Migration` custom resources.
+
+[IMPORTANT]
+====
+The SUSE VM Migration Toolkit is an *experimental* add-on and is incompatible with {harvester-product-name} versions earlier than v1.8.0. Evaluate it in a non-production environment before relying on it.
+====
+
+When to use it::
+* Your source is VMware vSphere and you want a Forklift-based workflow (familiar to users of {rancher-product-name-tm} and OpenShift Virtualization migration tooling).
+* You are comfortable working with an experimental add-on and its current limitations.
+
+Key considerations::
+* The add-on's images are *not* included in the {harvester-product-name} ISO. For air-gapped environments, pull the required images and push them to a private registry.
+* Installation requires https://cert-manager.io/[cert-manager] and a `ForkliftController` resource in the `forklift` namespace.
+* `virtio` is the only supported destination NIC and disk bus type, and `skipGuestConversion` cannot be set to `true`.
+* Post-migration boot order is not guaranteed and may need to be corrected manually.
+* Migration of virtual machines with NVMe controller-based disks is not supported (see Forklift issue https://github.com/kubev2v/forklift/issues/1188[#1188]).
+* Virtual machines using legacy BIOS emulation are powered off during migration and are not powered back on automatically.
+* Optionally build a custom VDDK image from the SUSE base image to accelerate migration.
+
+Because this add-on is experimental, its detailed installation and migration procedure is maintained in the SUSE Customer Center documentation. See the https://scc.suse.com/rancher-docs/rancherprime/latest/en/suse-virtualization/[{rancher-product-name} SUSE Virtualization documentation] for the current SUSE VM Migration Toolkit guide.
+
+== Coriolis by Cloudbase
+
+https://cloudbase.it/coriolis/[Coriolis] is an automated migration platform from Cloudbase Solutions, offered as a SUSE partner solution. It migrates virtual machines into {harvester-product-name} from VMware vSphere, Amazon Web Services, Microsoft Azure, and Google Cloud Platform. For SAP environments on VMware, Coriolis supports migration to SUSE Linux Enterprise Server (SLES) on KVM. Coriolis has been validated for Harvester environments from version 1.3 through 1.8.0.
+
+Coriolis runs as an external virtual appliance (delivered as an OVA) and connects to source and destination platforms through their APIs. It is *agentless*: nothing is installed inside the guest virtual machines, and no guest credentials are required. Because it replicates data in the background while the source virtual machine keeps running, it supports near-zero-downtime migration with a staged cutover.
+
+When to use it::
+* Your source is a public cloud (AWS, Azure, or Google Cloud) or VMware, or you need to repatriate cloud workloads to on-premises infrastructure.
+* You must migrate at scale (hundreds of mixed Windows and Linux virtual machines) with parallel migrations and continuous sync.
+* You need warm migration with minimal downtime and an agentless approach.
+
+Licensing and support::
+* Each *new* {harvester-product-name} subscription includes *ten* courtesy Coriolis migration licenses; *existing* subscriptions include *five*. These are full production migrations that co-term with your subscription. Additional licensing and professional services are available directly from Cloudbase.
+* SUSE supports the {harvester-product-name} platform through your https://www.suse.com/support/[SUSE subscription]; Cloudbase supports the Coriolis appliance.
+* Included Coriolis licenses are valid only for migrations that land on SUSE-supported platforms ({harvester-product-name} or SLES-based KVM); they are not valid for migrations to non-SUSE hypervisors.
+
+Connecting Coriolis to {harvester-product-name}::
+Coriolis connects to the {harvester-product-name} (KubeVirt) destination using a kubeconfig, which you can download from the *Support* page of the {harvester-product-name} UI. The migration user needs read access to cluster-scoped resources (virtual machine images, storage classes, volume snapshot classes, namespaces, network attachment definitions) and read/write access to namespace-scoped resources (persistent volume claims, pods, virtual machines, and virtual machine instances).
+
+Because Coriolis is a partner product, refer to the https://cloudbase.it/coriolis/[Cloudbase Coriolis documentation] and the https://cloudbase.it/kubevirt-harvester-coriolis-plugin/[KubeVirt and Harvester Coriolis plugin] page for the authoritative, step-by-step migration procedure. SUSE also publishes a https://www.suse.com/products/rancher/virtualization/migration-checklist/[SUSE Virtualization migration checklist] and offers a Migration Readiness Assessment through SUSE Services.
+
+== Choosing a tool
+
+Use the following guidance to narrow your choice:
+
+* *Source is a public cloud (AWS, Azure, Google Cloud), or you need warm/near-zero-downtime migration at scale* → choose *Coriolis*.
+* *Source is OpenStack or an OVA package* → choose the *VM Import Controller*.
+* *Source is VMware vSphere* → any of the three can apply:
+** Choose the *VM Import Controller* for a supported, in-cluster, no-extra-cost path when cold migration is acceptable.
+** Choose the *SUSE VM Migration Toolkit* if you prefer a Forklift-based workflow and can accept an experimental add-on.
+** Choose *Coriolis* for large estates, warm migration, or when you want the guided, automated appliance experience.
+
+== General migration workflow
+
+Regardless of the tool, a successful migration follows a similar path. The following checklist summarizes the key stages:
+
+. *Pre-migration assessment*: Inventory the source virtual machines (CPU, RAM, disk), verify guest operating system support, and map source networks (VLANs, switches) to {harvester-product-name} xref:networking/vm-network.adoc[VM Networks].
+. *Infrastructure readiness*: Confirm nodes meet the hardware requirements and support hardware virtualization (Intel VT-x/AMD-V), ensure {longhorn-product-name-tm} has sufficient capacity (aim for at least twice the size of your largest virtual machine), and enable the required migration add-on.
+. *Execution*: Connect to the source endpoint with credentials, verify the source is reachable, map networks and storage, and run the migration. Use cold migration (shut the virtual machine down) for consistency, or a warm/staged cutover where the tool supports it.
+. *Post-migration and optimization*:
+** Replace VMware Tools with VirtIO drivers (or `open-vm-tools`) for optimal disk and network performance.
+** Configure protection for the migrated virtual machines using the xref:virtual-machines/backup-restore.adoc[backup and restore] tools.
+** Optionally import the {harvester-product-name} cluster into {rancher-product-name-tm} to manage virtual machines and container workloads together.
+
+== Support and licensing summary
+
+* The *VM Import Controller* and *SUSE VM Migration Toolkit* are {harvester-product-name} add-ons supported by SUSE through your subscription. The SUSE VM Migration Toolkit is currently experimental.
+* *Coriolis* is a SUSE partner product: SUSE supports the {harvester-product-name} platform, and Cloudbase supports the Coriolis appliance. Courtesy migration licenses are included with {harvester-product-name} subscriptions and are valid only for migrations onto SUSE-supported platforms.
+
+== References
+
+* xref:add-ons/vm-import-controller.adoc[VM Import Controller] (SUSE Virtualization documentation)
+* https://scc.suse.com/rancher-docs/rancherprime/latest/en/suse-virtualization/[{rancher-product-name} SUSE Virtualization documentation] (SUSE VM Migration Toolkit)
+* https://cloudbase.it/coriolis/[Coriolis by Cloudbase] and the https://cloudbase.it/kubevirt-harvester-coriolis-plugin/[KubeVirt and Harvester Coriolis plugin]
+* https://www.suse.com/products/rancher/virtualization/migration-checklist/[SUSE Virtualization migration checklist]
+* https://www.suse.com/c/suse-teams-up-with-coriolis-by-cloudbase/[SUSE Teams Up with Coriolis by Cloudbase]
