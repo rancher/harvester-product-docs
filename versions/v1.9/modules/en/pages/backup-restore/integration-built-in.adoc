@@ -122,15 +122,6 @@ network:
 The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
 ====
 
-[CAUTION]
-====
-Starting with v1.7.0, {harvester-product-name} supports backups and snapshots for Longhorn V2 Data Engine volumes.
-
-However, deleting the latest backup of a virtual machine or enabling the {longhorn-product-name} setting https://documentation.suse.com/cloudnative/storage/latest/en/longhorn-system/settings.html#_auto_cleanup_snapshot_when_delete_backup[Auto Cleanup Snapshot When Delete Backup] blocks all subsequent operations on related volumes. This is a https://github.com/longhorn/longhorn/issues/9064[known issue] that affects operations such as volume snapshots, backups, and live migration.
-
-No viable workaround is currently available. Resolving the blocked state requires deleting the affected volume to restore Longhorn Manager functionality.
-====
-
 === Restore a new virtual machine using a backup
 
 . Go to the `VM Backups` page.
@@ -268,15 +259,6 @@ network:
 ----
 
 The restored virtual machine retains the machine ID of the original virtual machine. If `dhcp-identifier: mac` is not specified, the restored virtual machine receives the same IP address from the DHCP server because `netplan` uses the machine ID as the DHCP client identifier by default. This is why you must configure the `network` settings before creating backups of virtual machines running Ubuntu. Failure to do so may result in unexpected behavior and potential network conflicts.
-====
-
-[CAUTION]
-====
-Starting with v1.7.0, {harvester-product-name} supports backups and snapshots for Longhorn V2 Data Engine volumes.
-
-However, deleting the latest backup of a virtual machine blocks all subsequent operations on related volumes. This is a https://github.com/longhorn/longhorn/issues/9064[known issue] that affects operations such as volume snapshots, backups, and live migration.
-
-No viable workaround is currently available. Resolving the blocked state requires deleting the affected volume to restore Longhorn Manager functionality.
 ====
 
 === Restore a new virtual machine using a snapshot
@@ -464,7 +446,7 @@ image::vm/configure-schedule.png[]
 ====
 The backup or snapshot creation interval must be *at least one hour*. Frequent backup or snapshot deletion results in heavy I/O load.
 
-If two schedules have the same granularity level, each iteration's timing offset must be *at least 10 minutes*.
+Stagger backup and snapshot schedules to minimize overlaps and avoid overloading the control plane and storage layer. Allow enough time between jobs for the previous operation to finish and for associated resources to be garbage-collected. If a scheduled backup starts while a previous backup is still running, {harvester-product-name} skips the new execution instead of queuing it and waits for the next scheduled run.
 ====
 +
 ** *Retain*: Specify the number of up-to-date backups or snapshots to be retained.
@@ -556,14 +538,17 @@ Before relying on the built-in functionality, be aware of the following limitati
 {longhorn-product-name} volumes only::
 Built-in backup and snapshot support is limited to {longhorn-product-name} volumes. Virtual machines that use volumes provisioned by an external CSI driver cannot be protected with the built-in feature; use a Kubernetes-native tool such as xref:backup-restore/integration-velero.adoc[Velero] instead.
 
-Longhorn V2 Data Engine known issue::
-Although backups and snapshots for Longhorn V2 Data Engine volumes are supported from v1.7.0, deleting the latest backup of a virtual machine, or enabling the {longhorn-product-name} _Auto Cleanup Snapshot When Delete Backup_ setting, blocks all subsequent operations (snapshots, backups, and live migration) on the related volumes. This is a https://github.com/longhorn/longhorn/issues/9064[known issue] with no viable workaround; recovery requires deleting the affected volume. See the caution in <<#_vm_backup_restore>>.
+Longhorn V2 Data Engine backups disabled::
+In v1.9.0, virtual machine backups for Longhorn V2 Data Engine volumes are disabled while the backup workflow transitions to CDI. For more information, see https://github.com/harvester/harvester/issues/11151[harvester/harvester#11151].
 
-Minimum scheduling interval::
-Scheduled backups and snapshots must have an interval of *at least one hour*, and schedules of the same granularity must be offset by *at least 10 minutes*. This bounds the shortest xref:backup-restore/definitions.adoc[RPO] achievable with the built-in scheduler. Workloads that require a shorter RPO need a different approach.
+Scheduling interval and overlap::
+Scheduled backups and snapshots must have an interval of *at least one hour*. Stagger schedules to minimize overlaps and allow enough time for each operation and its resource garbage collection to finish. This bounds the shortest xref:backup-restore/definitions.adoc[RPO] achievable with the built-in scheduler. Workloads that require a shorter RPO need a different approach.
 
 Consistency depends on guest configuration::
 Application-consistent backups rely on filesystem freeze and thaw, which depend on guest virtual machine configuration that is _not controlled by {harvester-product-name}_. RHEL and SLE Micro may require a custom SELinux policy, and Windows requires the Volume Shadow Copy Service. See <<Filesystem freeze for virtual machine backups and snapshots>>.
+
+Downstream guest clusters not protected::
+Backing up and restoring the virtual machines that host a downstream guest cluster does not ensure that the guest cluster is restored correctly. Follow the backup and restore procedures for the Kubernetes distribution running in the virtual machines. For example, see https://docs.rke2.io/datastore/backup_restore[Backing up and restoring an RKE2 cluster].
 
 Guest network preparation for restore::
 Restored virtual machines retain the machine ID of the original. Virtual machines running Ubuntu managed by `netplan` must be configured with `dhcp-identifier: mac` before backup to avoid duplicate IP addresses and network conflicts on restore. See the note in <<Create a Virtual Machine Backup>>.
