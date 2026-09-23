@@ -1,0 +1,96 @@
+= Backup Types
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+{harvester-product-name-tm} and the backup tools it supports use several types of recovery point. Each type makes a different trade-off between the time and storage needed to create it, the speed and reliability of recovery, and the level of protection it provides. Understanding these trade-offs helps you combine the types into a strategy that meets your xref:backup-restore/definitions.adoc[recovery objectives].
+
+== Full backup
+
+A full backup is a complete, self-contained copy of all data in a volume, exported to a backup target such as an NFS share or an S3-compatible object store.
+
+Advantages::
+* Simplest to restore, because everything needed is contained in a single backup with no dependency on other recovery points.
+* Predictable, fast recovery, which supports a short RTO.
+* No chain to maintain, so there is no risk of a broken dependency invalidating the restore.
+
+Disadvantages::
+* Consumes the most storage, because all data is copied every time.
+* Takes the longest to create and places the greatest load on the source storage and network.
+* Impractical to run frequently for large volumes, which makes a short RPO expensive to achieve with full backups alone.
+
+Typical uses::
+* A periodic baseline (for example, weekly) that anchors a chain of incremental backups.
+* Archive copies and long-term retention, where restore simplicity matters more than backup frequency.
+
+== Incremental backup
+
+An incremental backup copies only the data that has changed since the previous backup. Incremental backups depend on an earlier full backup and, usually, on the incremental backups taken between that full backup and the current one. This sequence is called a _backup chain_.
+
+Advantages::
+* Fast to create and consumes far less storage than a full backup, because only changed data is transferred.
+* Well suited to meeting a short RPO, because backups can be taken frequently at low cost.
+* Reduces load on the source storage and network during routine operation.
+
+Disadvantages::
+* Recovery can be slower, because a restore may require the last full backup and every subsequent incremental backup in the chain.
+* Reliability depends on the integrity of the whole chain: if one increment is missing or corrupt, later recovery points can become unusable.
+* Retention and lifecycle management are more complex, because increments cannot be expired independently of the chain they belong to.
+
+Typical uses::
+* Routine, frequent protection of active workloads between full backups.
+* Environments where backup windows, storage capacity, or bandwidth are constrained.
+
+[NOTE]
+====
+The built-in {harvester-product-name} virtual machine backup feature creates incremental backups after the first full backup, transferring only changed blocks to the backup target on subsequent runs.
+====
+
+== Snapshot
+
+A snapshot is a point-in-time copy of a volume, typically stored on the same storage system as the source rather than exported to a separate location.
+
+Advantages::
+* Very fast to create and restore, which supports both a short RPO and a short RTO for local recovery.
+* Low overhead, because most implementations store only the differences from the source volume.
+* Ideal for quick rollbacks, for example immediately before a risky upgrade or configuration change.
+
+Disadvantages::
+* Usually resides on the same storage as the source, so it does not protect against failure or loss of that underlying storage.
+* Not a substitute for an off-site backup and should not be relied upon for disaster recovery on its own.
+* Retaining many snapshots can consume significant space and affect the performance of the source volume.
+
+Typical uses::
+* Short-lived, local restore points taken before maintenance or updates.
+* A fast first tier of protection, complemented by backups exported to a separate target for durability and disaster recovery.
+
+== Comparison
+
+The following table summarizes how the backup types compare.
+
+[cols="1,1,1,1,2", options="header"]
+|===
+| Type | Creation cost | Storage used | Restore speed | Protects against storage loss
+
+| Full backup
+| High
+| High
+| Fast
+| Yes (stored on a separate target)
+
+| Incremental backup
+| Low
+| Low
+| Slower (depends on the chain)
+| Yes (stored on a separate target)
+
+| Snapshot
+| Very low
+| Low
+| Very fast
+| No (usually stored with the source)
+|===
+
+[TIP]
+====
+Most effective strategies combine the types: frequent snapshots for fast local rollback, periodic full backups to anchor a chain, and incremental backups between them to meet the RPO without excessive storage cost. For scenario-based guidance, see xref:backup-restore/recommendations.adoc[RPO and RTO Recommendations] and xref:backup-restore/best-practices.adoc[Best Practices].
+====

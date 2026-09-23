@@ -1,0 +1,67 @@
+= Integrating CloudCasa
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+https://cloudcasa.io/partners/suse-rancher/[CloudCasa by Catalogic] is a Kubernetes-native backup and disaster recovery platform, certified for {harvester-product-name-tm}, that is available as a managed SaaS service or as a self-hosted deployment. This page describes how to connect a cluster to CloudCasa, automate backups, configure its storage-based disaster recovery with {longhorn-product-name-tm}, and test recovery.
+
+[NOTE]
+====
+CloudCasa is developed and supported by Catalogic. This page summarizes the integration at a conceptual level; for authoritative, step-by-step instructions, consult the https://cloudcasa.io/partners/suse-rancher/[CloudCasa documentation].
+====
+
+== Prerequisites
+
+* A {harvester-product-name} cluster, optionally managed through {rancher-product-name-tm}.
+* A CloudCasa account (SaaS) or a self-hosted CloudCasa deployment.
+* An object store or other supported destination for backup data.
+* For storage-based disaster recovery, a source and destination cluster, both using {longhorn-product-name}.
+
+== Connect the cluster
+
+Register the {harvester-product-name} cluster with CloudCasa by deploying the CloudCasa agent into the cluster, following the guided setup in the CloudCasa console. Once connected, the cluster and its namespaces appear in the centralized CloudCasa dashboard, which can present many clusters in a single view.
+
+== Automate backups with policies
+
+Define backup *policies* in the CloudCasa console to protect namespaces or workloads on a schedule:
+
+* Set the *schedule* to match the xref:backup-restore/recommendations.adoc[RPO] of the protected workloads.
+* Set *retention* to satisfy your retention and compliance requirements.
+* Enable *immutable backups* for critical data to protect against ransomware and accidental deletion.
+
+CloudCasa provides proactive monitoring and alerting on backup success and failure, so you do not have to inspect logs manually.
+
+== Storage-based disaster recovery with {longhorn-product-name}
+
+For low-RTO disaster recovery, CloudCasa offers a *DR for Storage* solution that separates the backup and restore of Kubernetes resources (managed by CloudCasa) from the replication of persistent volumes (managed by {longhorn-product-name}). This avoids duplicating replication and keeps the volume of data restored during a failover very small.
+
+How it works::
+. Configure {longhorn-product-name} Disaster Recovery volumes to replicate data from the source cluster to the destination cluster. Set the replication frequency according to your RPO.
+. Configure CloudCasa to run periodic application-level backups that capture Kubernetes resources and metadata, again at a frequency based on your RPO. Persistent volume data can be excluded from these backups, or backed up on a less frequent schedule to protect against logical failures.
+. During a failover, CloudCasa restores the application resources and automatically maps and activates the corresponding {longhorn-product-name} DR volumes on the destination cluster.
+
+Because only a small amount of application state is restored while {longhorn-product-name} supplies the volume data, recovery can complete within minutes. This combination is capable of delivering an RPO and RTO in the 10-minute to 1-hour range, which is sufficient for most business-critical workloads, at a fraction of the cost of traditional low-RPO solutions.
+
+== Restore and recovery testing
+
+CloudCasa provides guided restore workflows with namespace-level and file-level options. For recovery testing, restore to a *new namespace* or to a test cluster so that production workloads are undisturbed. After the restore, start the restored virtual machine, confirm the guest boots, and verify the application and its data. For the storage-based DR solution, perform periodic full failover tests to the destination cluster and record the achieved RPO and RTO against the workload's xref:backup-restore/recommendations.adoc[objectives]. See xref:backup-restore/best-practices.adoc[Best Practices] for how often to test.
+
+== Limitations and considerations
+
+CloudCasa removes much of the operational burden of open-source tooling, but the following considerations apply.
+
+Commercial, third-party product::
+CloudCasa is developed and supported by Catalogic Software, not by SUSE. SUSE supports the {harvester-product-name} platform through your https://www.suse.com/support/[SUSE subscription], while licensing, support, and product issues for CloudCasa are handled by Catalogic.
+
+Subscription cost and node limits::
+CloudCasa is offered with a free tier (up to five nodes) and paid tiers (for example, a per-node monthly subscription for the Pro tier, and custom pricing for Enterprise). Protecting larger environments or using advanced features requires a paid subscription. Confirm current tiers and pricing with Catalogic.
+
+Managed SaaS versus self-hosted::
+The managed SaaS deployment sends Kubernetes resource and metadata to the CloudCasa service. Organizations with data residency or isolation requirements that cannot use the SaaS model should evaluate the self-hosted deployment, which they must operate themselves.
+
+Low-RTO DR depends on {longhorn-product-name}::
+The storage-based *DR for Storage* solution relies on {longhorn-product-name-tm} Disaster Recovery volumes for persistent volume replication. Both the source and destination clusters must therefore use {longhorn-product-name}. Workloads on external CSI storage can still be backed up, but they do not benefit from this low-RTO, storage-based failover mechanism.
+
+== Further reading
+
+* https://cloudcasa.io/partners/suse-rancher/[CloudCasa for {rancher-product-name}]
+* https://www.suse.com/c/cloudcasa-and-suse-deliver-a-cost-effective-disaster-recovery-solution-for-cloud-native-applications-and-virtualization/[CloudCasa and SUSE Deliver a Cost-Effective Disaster Recovery Solution]
