@@ -1,6 +1,6 @@
 = Live Migration
 :page-languages: [en, de, es, fr, ja, pt, zh]
-:revdate: 2025-12-30
+:revdate: 2026-09-15
 :page-revdate: {revdate}
 
 Live migration means moving a virtual machine to a different host without downtime. A couple of comprehensive processes and tasks are done under the hood to fulfill the live migration.
@@ -150,17 +150,24 @@ xref:upgrades/upgrades.adoc#_live_migratable_virtual_machines[Upgrades] and xref
 
 . The controller monitors the processing and waits until all are completed or have timed out.
 
-== Migration Timeouts
+== Migration timeouts
 
-=== Completion Timeout
+The following timeouts apply to all live migrations across the cluster. You can configure these timeouts alongside other live migration parameters using the xref:installation-setup/config/settings.adoc#_kubevirt_migration[`kubevirt-migration`] setting.
+
+=== Completion timeout
 
 The live migration process copies virtual machine memory pages and disk blocks to the destination. In certain cases, the virtual machine can write to different memory pages or disk blocks at a higher rate than these can be copied. As a result, the migration process is prevented from being completed in a reasonable amount of time.
 
-Live migration is be aborted if it exceeds the completion timeout of 800s per GiB of data. For example, a virtual machine with 8 GiB of memory times out after 6400 seconds.
+{harvester-product-name} aborts a live migration if it exceeds the completion timeout, which is 150s per GiB of data by default. For example, a virtual machine with 8 GiB of memory times out after 1,200 seconds (20 minutes). To adjust this threshold, update the `completionTimeoutPerGiB` field in the xref:installation-setup/config/settings.adoc#_kubevirt_migration[`kubevirt-migration`] setting.
 
-=== Progress Timeout
+[TIP]
+====
+Instead of increasing the completion timeout value, consider enabling `allowAutoConverge` in the `kubevirt-migration` setting. This option allows KubeVirt to throttle the guest CPU when a busy virtual machine writes memory faster than it can be copied over the network, which increases the chance that the migration completes successfully.
+====
 
-Live migration is also aborted when copying memory does not make any progress in 150s.
+=== Progress timeout
+
+{harvester-product-name} also aborts a live migration if memory copy progress stalls for 150 seconds. To adjust this threshold, update the `progressTimeout` field in the xref:installation-setup/config/settings.adoc#_kubevirt_migration[`kubevirt-migration`] setting.
 
 [#_limitations]
 == Limitations

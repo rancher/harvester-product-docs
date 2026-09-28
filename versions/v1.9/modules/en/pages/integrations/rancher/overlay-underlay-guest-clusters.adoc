@@ -1,0 +1,71 @@
+= Underlay and Overlay Networking for Guest Clusters
+:revdate: 2026-08-17
+:page-revdate: {revdate}
+
+{rancher-product-name-tm} provides centralized management for Kubernetes clusters across multiple environments. When integrated with {harvester-product-name}, {rancher-short-name} can provision guest Kubernetes clusters directly on virtual machine infrastructure managed by {harvester-product-name}.
+
+Using the Harvester Node Driver, {rancher-short-name} automatically creates virtual machines that serve as control plane and worker nodes. This simplifies cluster deployment and lifecycle management by providing a single interface for infrastructure and Kubernetes operations.
+
+While guest clusters can use traditional virtual machine networking, they can also leverage Kube-OVN overlay or underlay networking to provide a flexible and Kubernetes-native networking model for workloads.
+
+== Guest cluster deployment on underlay networks
+
+Deploying guest clusters on pure underlay networks is functionally similar to using traditional virtual machine VLAN networks, but with the added advantages of Kube-OVN features such as network policies and tenant-isolated VPCs.
+
+For information about setting up the overlay infrastructure, see xref:networking/pure-underlay.adoc#_underlay_configuration[Underlay configuration].
+
+== Guest cluster deployment on overlay networks
+
+Deploying guest clusters on overlay networks requires configuring a VPC NAT gateway to provide inbound and outbound connectivity to the virtual machines through DNAT and SNAT.
+
+The key architectural features are as follows:
+
+* {harvester-product-name} provides the virtual machine infrastructure where the guest cluster control plane and worker nodes run.
+* {rancher-short-name} is responsible for provisioning and managing the lifecycle of the guest Kubernetes cluster.
+* Kube-OVN provides the network connectivity for the virtual machines hosting the guest nodes through its overlay network between {harvester-product-name} hosts.
+* The guest cluster CNI (for example, Calico) manages pod networking, while pod traffic is transported over the underlying Kube-OVN-provided VM network.
+
+Kube-OVN overlay networking enables guest clusters to manage pod networking independently of the underlying {harvester-product-name} infrastructure network. This provides the following operational benefits:
+
+* Simplified cluster deployment
+* Reduced dependence on physical network configuration
+* Dynamic cluster scaling without additional VLAN planning
+* Consistent networking model across environments
+
+For information about setting up the overlay infrastructure, see xref:networking/vpc-nat-gateway.adoc#_creating-a-vpc-nat-gateway[Creating a VPC NAT gateway].
+
+== Guest cluster provisioning
+
+=== Importing {harvester-product-name} clusters into {rancher-short-name}
+
+{harvester-product-name} clusters are imported through {rancher-short-name}'s *Virtualization Management* interface.
+
+The following occur after a cluster is imported:
+
+* {rancher-short-name} recognizes the cluster as a {harvester-product-name} provider.
+* Virtual machine resources become available through {rancher-short-name}.
+* {harvester-product-name} can be selected as an infrastructure provider when creating downstream clusters.
+
+For detailed instructions, see xref:integrations/rancher/virtualization-management.adoc[Virtualization Management].
+
+=== Provisioning a guest cluster
+
+{rancher-short-name} uses the Harvester Node Driver to automatically provision the required virtual machines and bootstrap Kubernetes on them.
+
+For detailed instructions, see xref:integrations/rancher/node-driver/rke2-cluster.adoc[Creating an RKE2 Kubernetes Cluster].
+
+[IMPORTANT]
+====
+In the *Networks* section of the cluster creation screen, you must specify the correct underlay or overlay network.
+
+For virtual machines provisioned as downstream cluster nodes, ensure external connectivity by enabling DHCP, specifying a valid `dns_server` IP address (for example, `8.8.8.8`), and setting `natOutgoing=true` on the subnet. This configuration ensures that nodes obtain a default route, perform DNS resolution, and access external networks.
+====
+
+image::rancher/gc-overlayvmnetwork.png[Guest cluster deployment on overlay network]
+
+image::rancher/gc-overlayvm.png[Virtual machine provisioned as a downstream cluster node]
+
+[TIP]
+====
+Because guest cluster nodes on Kube-OVN overlay networks use private IP addresses, you must configure a route to the virtual machine node subnet on the {rancher-short-name} virtual machine, specifying the Kube-OVN EIP (configured during VPC NAT gateway EIP setup) as the next hop. This ensures network reachability between the {rancher-short-name} virtual machine and guest cluster nodes, enabling SSH access through the {rancher-short-name} UI for debugging.
+====

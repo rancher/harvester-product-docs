@@ -1,5 +1,5 @@
 = Upgrade from v1.6.x to v1.7.x
-:revdate: 2026-06-10
+:revdate: 2026-09-15
 :page-revdate: {revdate}
 
 == General information
@@ -350,7 +350,7 @@ Related issue: https://github.com/harvester/harvester/issues/9751[#9751]
 
 === Unnecessary live migrations during the upgrade
 
-{harvester-product-name} v1.6.x enables xref:virtual-machines/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+{harvester-product-name} v1.6.x enables xref:virtual-machines/vm-resources/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
 
 To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
 
@@ -452,3 +452,20 @@ Expected output:
 ----
 
 Related issue: https://github.com/harvester/harvester/issues/10349[#10349]
+
+=== Live migration configuration applied directly to the `kubevirt` object
+
+{harvester-product-name} v1.7.0 introduced the xref:installation-setup/config/settings.adoc#_kubevirt_migration[`kubevirt-migration`] setting, which allows you to manage cluster-wide live migration settings directly rather than editing the underlying `kubevirt` object.
+
+If you modified the `spec.configuration.migrations` field of the `kubevirt` object before upgrading (for example, to enable `allowAutoConverge`), the upgrade process creates the `kubevirt-migration` setting without a populated value. While the object retains your existing configuration during the upgrade, the setting displays default values, creating a mismatch. Because {harvester-product-name} applies the entire JSON payload to the object, saving the setting for the first time overwrites all migration fields on the object with the setting's default values. Your previous custom configuration is replaced even if you only intended to change an unrelated field.
+
+To check if your cluster is affected, run the following command before upgrading:
+
+[,shell]
+----
+kubectl get kubevirt kubevirt -n harvester-system -o jsonpath='{.spec.configuration.migrations}' | jq
+----
+
+If the command returns `null` or an empty string, your cluster uses the standard KubeVirt defaults and no action is required. If custom fields are returned, create the setting from the existing `kubevirt` object before upgrading using the script in the knowledge base article https://harvesterhci.io/kb/preserve_kubevirt_migration_configuration_before_upgrade[Preserving a manually configured KubeVirt live migration configuration].
+
+Related issue: https://github.com/harvester/harvester/issues/11517[#11517]

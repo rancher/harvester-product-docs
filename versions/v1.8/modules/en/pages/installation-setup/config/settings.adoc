@@ -1,5 +1,5 @@
 = Settings
-:revdate: 2026-06-10
+:revdate: 2026-09-15
 :page-revdate: {revdate}
 
 The following is a list of advanced settings that you can use. You can modify the `settings.harvesterhci.io` custom resource using both the UI and the `kubectl` command.
@@ -27,7 +27,7 @@ SOME-CA-CERTIFICATES
 
 === `auto-disk-provision-paths` [Experimental]
 
-*Definition*: Setting that allows {harvester-product-name} to automatically add disks that match the specified glob pattern as VM storage.
+*Definition*: Setting that allows {harvester-product-name} to automatically add disks that match the specified glob pattern as virtual machine storage.
 
 This setting only adds formatted disks that are mounted to the system. When specifying multiple patterns, separate values using commas.
 
@@ -73,7 +73,7 @@ If your certificates have expired, you can xref:hosts/hosts.adoc#_rotating_expir
 
 === `backup-target`
 
-*Definition*: Custom backup target used to store VM backups.
+*Definition*: Custom backup target used to store virtual machine backups.
 
 For more information, see the https://documentation.suse.com/cloudnative/storage/1.11/en/snapshots-backups/volume-snapshots-backups/configure-backup-target.html#_set_up_aws_s3_backupstore[{longhorn-product-name} documentation].
 
@@ -194,8 +194,8 @@ image::advanced/containerd-registry.png[containerd-registry]
 You must configure the following information before using features related to backups and snapshots:
 
 * Provisioner for the installed third-party CSI driver
-* `volumeSnapshotClassName`: Name of the `VolumeSnapshotClass` used to create volume snapshots or VM snapshots.
-* `backupVolumeSnapshotClassName`: Name of the `VolumeSnapshotClass` used to create VM backups.
+* `volumeSnapshotClassName`: Name of the `VolumeSnapshotClass` used to create volume snapshots or virtual machine snapshots.
+* `backupVolumeSnapshotClassName`: Name of the `VolumeSnapshotClass` used to create virtual machine backups.
 
 *Default value*:
 
@@ -222,9 +222,9 @@ Depending on the underlying storage provider, you may need to take extra steps t
 
 === `default-vm-termination-grace-period-seconds`
 
-*Definition*: Number of seconds {harvester-product-name} waits before forcibly shutting down a VM that was stopped using the UI.
+*Definition*: Number of seconds {harvester-product-name} waits before forcibly shutting down a virtual machine that was stopped using the UI.
 
-{harvester-product-name} sends a graceful shutdown signal to any VM that is stopped using the UI. If the graceful shutdown process is not completed within the specified number of seconds, {harvester-product-name} forcibly shuts down the VM.
+{harvester-product-name} sends a graceful shutdown signal to any virtual machine that is stopped using the UI. If the graceful shutdown process is not completed within the specified number of seconds, {harvester-product-name} forcibly shuts down the virtual machine.
 
 *Default value*: `120`
 
@@ -317,6 +317,122 @@ The value must be an integer from `0` to `40`.
   }
 }
 ----
+
+=== `kubevirt-migration`
+
+*Definition*: Cluster-wide configuration for virtual machine xref:virtual-machines/live-migration.adoc[live migration].
+
+{harvester-product-name} manages live migration configuration using this setting. Always configure live migration through this setting rather than editing the `kubevirt` object directly.
+
+The entire value (in JSON format) is applied to the `spec.configuration.migrations` field of the underlying `kubevirt` object. When you save this setting, every field included in the JSON value is written, including fields you did not modify. Any changes previously applied directly to the object are overwritten.
+
+If you configured live migration by editing the `kubevirt` object directly on a cluster running a version earlier than v1.7.0, the upgrade process creates the `kubevirt-migration` setting without a populated value. While the `kubevirt` object retains your existing configuration during the upgrade, the setting displays default values, creating a mismatch. Because {harvester-product-name} applies the entire JSON payload to the object, saving the setting for the first time overwrites all migration fields on the object with the setting's default values.
+
+To preserve your existing configuration, create the setting from the `kubevirt` object *before* upgrading. For detailed steps, see https://harvesterhci.io/kb/preserve_kubevirt_migration_configuration_before_upgrade[Preserving a manually configured KubeVirt live migration configuration].
+
+[CAUTION]
+====
+Do not modify this setting while virtual machine migrations are in progress. Wait for all active migrations to complete before saving changes.
+====
+
+*Default value*: `{"parallelOutboundMigrationsPerNode":2,"parallelMigrationsPerCluster":5,"allowAutoConverge":false,"bandwidthPerMigration":0,"completionTimeoutPerGiB":150,"progressTimeout":150,"unsafeMigrationOverride":false,"allowPostCopy":false,"allowWorkloadDisruption":false,"disableTLS":false,"matchSELinuxLevelOnMigration":false}`
+
+{harvester-product-name} applies the default values if you leave the JSON payload empty. These match KubeVirt's default settings, resulting in standard KubeVirt behavior across the cluster.
+
+*Supported fields*:
+
+|===
+| Field | Type | Default Value | Description
+
+| `parallelOutboundMigrationsPerNode`
+| integer
+| `2`
+| Maximum number of concurrent outbound migrations allowed per node.
+
+| `parallelMigrationsPerCluster`
+| integer
+| `5`
+| Maximum number of concurrent migrations allowed cluster-wide.
+
+| `allowAutoConverge`
+| boolean
+| `false`
+| Allows KubeVirt to throttle the guest CPU if memory changes faster than it can be transferred to the target node. Enabling this option increases migration success rates at the cost of temporary guest performance degradation.
+
+| `bandwidthPerMigration`
+| quantity
+| `0`
+| Maximum network bandwidth allocated to a single migration (for example, `40Gi`). Set this field to `0` for unlimited bandwidth.
+
+| `completionTimeoutPerGiB`
+| integer
+| `150`
+| Number of seconds per GiB of guest memory that a migration is allowed to run before it is canceled.
+
+| `progressTimeout`
+| integer
+| `150`
+| Number of seconds without progress that a migration is allowed to run before it is canceled.
+
+| `unsafeMigrationOverride`
+| boolean
+| `false`
+| Allows migrations to proceed even when the compatibility check fails.
+
+| `allowPostCopy`
+| boolean
+| `false`
+| Allows switching from pre-copy to post-copy if a migration fails to converge.
+
+| `allowWorkloadDisruption`
+| boolean
+| `false`
+| Allows a migration that cannot complete otherwise to disrupt the workload.
+
+| `disableTLS`
+| boolean
+| `false`
+| Disables encryption of migration traffic.
+
+| `matchSELinuxLevelOnMigration`
+| boolean
+| `false`
+| Applies the SELinux level of the source `virt-launcher` pod to the target pod.
+|===
+
+[CAUTION]
+====
+Enabling `unsafeMigrationOverride`, `allowPostCopy`, `allowWorkloadDisruption`, or `disableTLS` can compromise workload integrity, availability, or confidentiality. In particular, a network failure during the post-copy phase of a migration causes the virtual machine to crash. Modify these fields only if you fully understand the operational risks.
+====
+
+*Example*:
+
+Copy the following JSON payload, modify the fields as necessary, and save the setting. Omitted fields automatically use the KubeVirt defaults listed in the table.
+
+[,json]
+----
+{
+  "parallelOutboundMigrationsPerNode": 2,
+  "parallelMigrationsPerCluster": 5,
+  "allowAutoConverge": true,
+  "bandwidthPerMigration": 0,
+  "completionTimeoutPerGiB": 150,
+  "progressTimeout": 150,
+  "unsafeMigrationOverride": false,
+  "allowPostCopy": false,
+  "allowWorkloadDisruption": false,
+  "disableTLS": false,
+  "matchSELinuxLevelOnMigration": false
+}
+----
+
+[NOTE]
+====
+The `nodeDrainTaintKey` and `network` fields cannot be configured using this setting and are rejected if included.
+
+* `nodeDrainTaintKey`: Must remain set to `kubevirt.io/drain`, which is required for {harvester-product-name} upgrade operations.
+* `network`: Configured separately using the <<#_vm_migration_network>> setting.
+====
 
 === `log-level`
 
@@ -419,19 +535,19 @@ Changes to the server address list are applied to all nodes.
 
 === `overcommit-config`
 
-*Definition*: Percentage of physical compute, memory, and storage resources that can be allocated for VM use.
+*Definition*: Percentage of physical compute, memory, and storage resources that can be allocated for virtual machine use.
 
-Overcommitting is used to optimize physical resource allocation, particularly when VMs are not expected to fully consume the allocated resources most of the time. Setting values greater than 100% allows scheduling of multiple VMs even when physical resources are notionally fully allocated.
+Overcommitting is used to optimize physical resource allocation, particularly when virtual machines are not expected to fully consume the allocated resources most of the time. Setting values greater than 100% allows scheduling of multiple virtual machines even when physical resources are notionally fully allocated.
 
-*Default values*: `{ "cpu":1600, "memory":150, "storage":200 }`
+*Default values*: `{ "cpu":1000, "memory":150, "storage":100 }`
 
 With the default values, it would be possible to schedule the following:
 
-* 16x the number of physical CPUs on a host
+* 10x the number of physical CPUs on a host
 * 1.5x the amount of physical RAM on a host
-* 2x the amount of physical storage in {longhorn-product-name}
+* 1x the amount of physical storage in {longhorn-product-name}
 
-A VM that is configured to use 2 CPUs (equivalent to 2,000 milliCPU) can consume the full allocation as long as the resources are available. However, if the host is running heavy workloads and an overcommit value is set (for example, 1600%), {harvester-product-name} only requests 125 milliCPU from the Kubernetes scheduler (2000/16 = 125 milliCPU).
+A virtual machine that is configured to use 2 CPUs (equivalent to 2,000 milliCPU) can consume the full allocation as long as the resources are available. However, if the host is running heavy workloads and an overcommit value is set (for example, 1000%), {harvester-product-name} only requests 200 milliCPU from the Kubernetes scheduler (2000/10 = 200 milliCPU).
 
 *Example*:
 
@@ -584,7 +700,7 @@ By default, {longhorn-product-name} uses the management network, which is limite
 [IMPORTANT]
 .important
 ====
-Shut down all VMs before configuring this setting.
+Shut down all virtual machines before configuring this setting.
 
 Specify an IP range in the IPv4 CIDR format. The number of IPs must be four times the number of your cluster nodes.
 ====
@@ -990,6 +1106,7 @@ When the node becomes unavailable or is powered off, the virtual machine only re
 }
 ----
 
+[#_vm_migration_network]
 === `vm-migration-network`
 
 *Definition*: Segregated network for virtual machine migration traffic.
@@ -1016,7 +1133,7 @@ Specify an IP range in the IPv4 CIDR format. The number of IP addresses must be 
 
 === `volume-snapshot-class`
 
-*Definition*: VolumeSnapshotClassName for the VolumeSnapshot and VolumeSnapshotContent when restoring a VM to a namespace that does not contain the source VM.
+*Definition*: VolumeSnapshotClassName for the VolumeSnapshot and VolumeSnapshotContent when restoring a virtual machine to a namespace that does not contain the source virtual machine.
 
 *Default value*: `longhorn`
 

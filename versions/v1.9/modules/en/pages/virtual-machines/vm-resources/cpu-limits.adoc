@@ -1,0 +1,95 @@
+= CPU Limits
+:revdate: 2026-08-14
+:page-revdate: {revdate}
+
+Every virtual machine in {harvester-product-name} runs inside a pod, which requests a specific CPU allocation from its assigned node. You can configure CPU limits to enforce execution ceilings for workloads during peak usage periods. Without CPU limits, virtual machines with unpredictable resource spikes can cause CPU contention, resulting in high context-switching latency and performance degradation for adjacent workloads on the same host.
+
+Additionally, if a virtual machine experiences a process spike or runaway loop, a CPU limit prevents the `virt-launcher` container from consuming all physical CPU cores on the host. This safeguard protects critical services running on the host, such as control plane components and storage replicas.
+
+== CPU limit enforcement
+
+In {harvester-product-name}, CPU settings map to two main fields in the virtual machine specification:
+
+* `spec.template.spec.domain.cpu.cores`: Defines the CPU topology (sockets, cores, and threads) exposed to the guest operating system
++
+Example (CPU topology):
++
+[,yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+spec:
+  domain:
+    cpu:
+      sockets: 2
+      cores: 1
+      threads: 1
+      dedicatedCpuPlacement: true
+    resources:
+      limits:
+        memory: 2Gi
+[...]
+----
+
+* `spec.template.spec.domain.resources[requests/limits].cpu`: Defines the CPU limits and requests enforced on the node level
++
+Example (CPU limits):
++
+[yaml]
+----
+apiVersion: kubevirt.io/v1
+kind: VirtualMachineInstance
+spec:
+  domain:
+    cpu:
+      dedicatedCpuPlacement: true
+    resources:
+      limits:
+        cpu: 2
+        memory: 2Gi
+[...]
+----
+
+If no explicit topology is defined in `spec.domain.cpu`, {harvester-product-name} calculates the vCPU count based on the value of `spec.domain.resources.requests.cpu` or `spec.domain.resources.limits.cpu`.
+
+[CAUTION]
+====
+To avoid performance degradation, avoid manually specifying values for both `spec.domain.cpu` and `spec.domain.resources.limits.cpu`.
+
+For example, if you allocate 4 vCPUs to a virtual machine in `spec.domain.cpu` but manually set a CPU limit of `2` (`2000m`) in `spec.domain.resources.limits.cpu`:
+
+* The guest operating system detects 4 vCPUs and schedules multi-threaded tasks across all 4 virtual cores.
+* The host Linux kernel throttles the underlying QEMU process whenever its total execution time reaches the 2-core limit within a cgroup quota period.
+
+Although the guest operating system will not crash, workloads can experience severe latency spikes during peak usage periods due to host-level CPU throttling.
+====
+
+== Configuring CPU limits
+
+{harvester-product-name} dynamically calculates and manages resource requests and limits for virtual machine pods based on the defined CPU topology and the cluster's xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] setting. Allow {harvester-product-name} to calculate these values automatically unless your workload specifically requires explicit manual allocation.
+
+If necessary, you can explicitly set resource requests and limits when xref:virtual-machines/create-vm.adoc[creating a virtual machine] using the {harvester-product-name} UI (on the *Basics* tab of the *Create Virtual Machine* screen) or via a YAML manifest.
+
+[TIP]
+====
+As a best practice, the number of vCPUs allocated to a virtual machine should not exceed the total number of physical CPU threads available on the underlying host.
+====
+
+== Pinning CPU resources
+
+CPU limits also interact with dedicated CPU resources. When xref:virtual-machines/vm-resources/cpu-pinning.adoc[CPU pinning] is enabled, {harvester-product-name} adds `dedicatedCpuPlacement: true` to `spec.template.spec.domain.cpu` to allocate dedicated CPU resources to the virtual machine. As a result, CPU resource requests are automatically configured to match CPU limits to satisfy Kubernetes `Guaranteed` Quality of Service (QoS) requirements.
+
+To support CPU pinning, CPU resource limits and requests must adhere to the following rules:
+
+* CPU requests and limits must be specified as whole numbers (for example, `2` or `4`). Fractional CPU allocations (for example, `250m` or `1.5`) are not supported for pinned CPUs.
+* If CPU resources are manually declared under `spec.template.spec.domain.resources`, the requested CPU count must match the CPU limit.
+
+For more information, see https://kubevirt.io/user-guide/compute/dedicated_cpu_resources/#requesting-dedicated-cpu-resources[Requesting dedicated CPU resources] in the KubeVirt documentation.
+
+== Overcommitting CPU resources
+
+{harvester-product-name} allows you to xref:virtual-machines/vm-resources/resource-overcommit.adoc[overcommit resources] on compute nodes. If you do not expect virtual machines to continuously consume their full CPU allocations, you can use the xref:installation-setup/config/settings.adoc#_overcommit_config[`overcommit-config`] setting to optimize physical resource utilization.
+
+Specifying values greater than 100% allows {harvester-product-name} to schedule additional virtual machines on a node, even when physical resources are nominally fully allocated. With the default setting `"cpu":1600` (a 1600% allocation ratio), you can schedule up to 16 times the number of physical CPU cores available on the host.
+
+For more information, see https://kubevirt.io/user-guide/compute/node_overcommit/#node-cpu-allocation-ratio[Node CPU allocation ratio] in the KubeVirt documentation.
