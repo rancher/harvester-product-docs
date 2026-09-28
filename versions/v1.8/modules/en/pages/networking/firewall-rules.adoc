@@ -1,10 +1,12 @@
 = Firewall Rules
-:revdate: 2026-08-06
+:revdate: 2026-09-28
 :page-revdate: {revdate}
 
 This document provides a comprehensive matrix of the network ports and protocols required by {harvester-product-name} platform services. Opening and allowing traffic on these ports is critical for node-to-node cluster communication, high availability, and external service integrations.
 
-For more information on baseline host network requirements, see xref:installation-setup/requirements.adoc#_network_requirements[Network Requirements].
+For more information on baseline host network requirements, see xref:../installation-setup/requirements.adoc#_network_requirements[Network Requirements].
+
+To reduce the attack surface by applying strict `iptables` rules for these ports, refer to https://docs.harvesterhci.io/latest/networking/host-network-security/[Host Network Security].
 
 == Internal Node-to-Node Traffic
 
@@ -20,8 +22,8 @@ The following ports must be open for internal communication between nodes in the
 | TCP | 2381 | Management nodes | Etcd metrics collection
 | TCP | 2382 | Management nodes | Etcd client port (HTTP only)
 | TCP | 6443 | Management nodes | Kubernetes API
-| TCP | 9345 | Management nodes | Kubernetes API
-| TCP | 10250 | Management and compute nodes | Kubelet
+| TCP | 9345 | Management nodes | Kubernetes API (RKE2 supervisor API)
+| TCP | 10250 | Management and compute nodes | Kubelet API
 | TCP | 10251 | Management nodes | Kube-scheduler health checks
 | TCP | 10252 | Management nodes | Kube-controller-manager health checks
 | TCP | 10256 | Management and compute nodes | Kube-proxy health checks
@@ -38,20 +40,38 @@ The following ports must be open for internal communication between nodes in the
 |===
 | Protocol | Port | Source | Description
 
+| ICMP | All | All nodes | ICMP (ping, MTU discovery, etc.)
+| UDP | 67-68 | All nodes | DHCP server replies and client requests
 | UDP | 8472 | Management and compute nodes | Canal CNI with VxLAN (Overlay Network)
-| TCP | 9091 | Management and compute nodes | Canal calico-node felix
+| TCP | 9091 | Management and compute nodes | Canal calico-node metrics (Prometheus)
 | TCP | 9099 | Management and compute nodes | Canal CNI health checks
-| TCP | 2112 | Management nodes | Kube-vip
-| TCP | 80 | Management and compute nodes | Nginx
+| TCP | 2112 | Management nodes | Kube-vip Prometheus metrics
+| TCP | 80 | Management and compute nodes | Nginx (Harvester UI HTTP)
 | TCP | 8181 | Management and compute nodes | Nginx-ingress-controller
 | TCP | 8444 | Management and compute nodes | Nginx-ingress-controller
 | TCP | 10245 | Management and compute nodes | Nginx-ingress-controller
 | TCP | 10246-10249 | Management and compute nodes | Nginx worker process
-| TCP | 30000-32767 | Management and compute nodes | NodePort port range
-| TCP | 9796 | Management and compute nodes | Node-exporter
-| TCP | 22 | Management and compute nodes | sshd
-| UDP | 68 | Management and compute nodes | NetworkManager (DHCP)
+| TCP | 30000-32767 | Management and compute nodes | NodePort TCP range
+| UDP | 30000-32767 | Management and compute nodes | NodePort UDP range
+| TCP | 9796 | Management and compute nodes | Prometheus node-exporter metrics (rancher-monitoring)
+| TCP | 22 | Management, compute, and witness nodes | sshd
 | TCP | 3260 | Management and compute nodes | iscsid
+|===
+
+=== Kube-OVN Operator (Experimental Add-on)
+
+If you enable the `kubeovn-operator` add-on, the following ports must be permitted based on the node role:
+
+|===
+| Protocol | Port | Source | Description
+
+| TCP | 8080 | Management and compute nodes | kube-ovn-webhook HTTP
+| TCP | 8443 | Management and compute nodes | kube-ovn-webhook HTTPS
+| TCP | 6641-6644 | Management nodes | OVN NB/SB DB, Northd, and Raft 
+| TCP | 10660 | Compute (Worker) nodes | kube-ovn-controller
+| TCP | 10661 | Management nodes | kube-ovn-monitor metrics
+| TCP | 10665 | All nodes | kube-ovn-daemon
+| UDP | 4789 | All nodes | VXLAN (Kube-OVN)
 |===
 
 == External & Integration Traffic
@@ -61,12 +81,7 @@ These ports are required for external administrative access, UI access, and inte
 |===
 | Protocol | Port | Source/Destination | Description
 
-| TCP | 443 | External Client -> Management VIP | Access to the {harvester-product-name} API and UI via HTTPS. For details, see xref:installation-setup/management-address.adoc[Management Address].
-| TCP | 443 | {harvester-product-name} nodes -> {rancher-product-name} | Required for {rancher-product-name} integration. All {harvester-product-name} nodes must connect to TCP 443 of the {rancher-product-name} load balancer. For details, see xref:integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integration].
-| UDP | 123 | {harvester-product-name} nodes -> External NTP Servers | Required for accurate time synchronization for etcd quorum. For details, see xref:security-resilience/ha-principles.adoc#_accurate_time_synchronization[High Availability Principles].
+| TCP | 443 | External Client -> Management VIP | Access to the {harvester-product-name} API and UI via HTTPS. For details, see xref:../installation-setup/management-address.adoc[Management Address].
+| TCP | 443 | {harvester-product-name} nodes -> {rancher-product-name} | Required for {rancher-product-name} integration. All {harvester-product-name} nodes must connect to TCP 443 of the {rancher-product-name} load balancer. For details, see xref:../integrations/rancher/rancher-integration.adoc[{rancher-product-name} Integration].
+| UDP | 123 | {harvester-product-name} nodes -> External NTP Servers | Required for accurate time synchronization for etcd quorum. For details, see xref:../security-resilience/ha-principles.adoc#_accurate_time_synchronization[High Availability Principles].
 |===
-
-[NOTE]
-====
-If you configure custom VLAN interfaces, custom cluster networks, or SDN features using the Kube-OVN Operator, ensure that external physical switches permit tagged VLAN traffic and necessary encapsulation traffic across host trunks. For details, see xref:networking/host-network-config.adoc[Host Network Configuration] and xref:add-ons/kubeovn-operator.adoc[Kube-OVN Operator].
-====
