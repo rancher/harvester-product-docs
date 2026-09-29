@@ -1,12 +1,12 @@
-== Configuration and Authentication File Security
+= Configuration and Authentication File Security
 :revdate: 2026-09-29
 :page-revdate: {revdate}
 
 To harden your {harvester-product-name} cluster, you must verify and enforce strict file ownership and permission controls across all nodes. System configuration files govern storage, networking, and security secrets, while authentication files (such as keys, certificates, and tokens) establish cluster identity. Restricting access to these critical files prevents non-privileged users or compromised processes from altering system settings, exposing sensitive data, or causing cluster instability.
 
-== Auditing file system permissions
+== Auditing file permissions
 
-Verify that the permissions of the files and directories in the table below are correct using the following commands:
+Verify the permissions of the files and directories listed in the table using the following commands:
 
 [,shell]
 ----
@@ -14,18 +14,51 @@ cd <PATH>
 ls -l
 ----
 
+For example, to verify the permissions of the primary RKE2 (server and agent) configuration files and cluster kubeconfig files, run the following commands:
+
+[,shell]
+----
+cd var/lib/rancher/rke2
+ls -l
+----
+
 |===
-| Path | Object | Owner and Group | Permission
+| Path | Object | Recommended Ownership | Recommended Mode
+
+| `etc/passwd`
+| Files
+| `root:root`
+| `0644`
 
 | `/etc/rancher/rke2`
 | Files
 | `root:root` (`0:0`)
 | `0600`
 
+| `etc/shadow`
+| Files
+| `root:root` or `root:shadow`
+| `0000` or `0400`
+
+| `etc/sysctl.d`
+| File
+| `root:root`
+| `0600` or `0400`
+
+| `/root/`
+| Home directory
+| `root:root`
+| `0700
+
+| Varies
+| User home directories
+| `owner:group`
+| `0700`
+
 | `/var/lib/rancher/rke2/agent`
 | Subdirectories and files
 | `root:root` (`0:0`)
-| See <<#_rke2_server_agent_permissions>>.
+| See <<#_rke2_agent_permissions>>.
 
 | `/var/lib/rancher/rke2/bin`
 | Files
@@ -40,59 +73,61 @@ ls -l
 | `/var/lib/rancher/rke2/server`
 | Subdirectories and files
 | `root:root` (`0:0`)
-| See <<#_rke2_server_agent_permissions>>.
+| See <<#_rke2_server_permissions>>.
 |===
 
-For example, to verify the permissions of the primary RKE2 (server and agent) configuration files and cluster kubeconfig files, run the following commands:
+You must also verify that the RKE2 server configuration file on each node contains the following text:
 
-[,shell]
+[,text]
 ----
-cd var/lib/rancher/rke2
-ls -l
+(cat /etc/rancher/rke2/config.yaml)
+write-kubeconfig-mode: "0600"
 ----
 
-[#_rke2_server_agent_permissions]
-=== RKE2 server and agent permissions
+[#_rke2_agent_permissions]
+=== RKE2 agent permissions
 
-The following table lists the secure permissions for objects in `/var/lib/rancher/rke2/agent` and `/var/lib/rancher/rke2/server`.
+The following table lists the secure permissions for objects in `/var/lib/rancher/rke2/agent`.
 
 |===
-| Component | Object | Name | Permission
+| Object | Name | Recommended Mode
 
-| RKE2 server
-| Subdirectories
-| `cred`, `db`, `tls`
-| `0700`
-
-| RKE2 server
-| Subdirectories
-| `logs`, `manifests`
-| `0750`
-
-| RKE2 server
-| Token file
-| `token`
-| `0600`
-
-| RKE2 agent
 | Subdirectories
 | `pod-manifests`, `etc`
 | `0700`
 
-| RKE2 agent
 | Certificate files
 | `client-ca.crt`, `client-kubelet.crt`, `client-kube-proxy.crt`, `client-rke2-controller.crt`, `server-ca.crt`, `serving-kubelet.crt`
 | `0600`
 
-| RKE2 agent
 | Key file
 | `client-kubelet.key`, `client-kube-proxy.key`, `client-rke2-controller.key`, `serving-kubelet.key`
 | `0600`
 
-| RKE2 agent
 | Kubeconfig files
 | `rke2controller.kubeconfig`, `kubelet.kubeconfig`, `kubeproxy.kubeconfig`
 | At least `0640`
+|===
+
+[#_rke2_server_permissions]
+=== RKE2 server permissions
+
+The following table lists the secure permissions for objects in `/var/lib/rancher/rke2/server`.
+
+|===
+| Object | Name | Recommended Mode
+
+| Subdirectories
+| `cred`, `db`, `tls`
+| `0700`
+
+| Subdirectories
+| `logs`, `manifests`
+| `0750`
+
+| Token file
+| `token`
+| `0600`
 |===
 
 === Management node configuration files
@@ -100,7 +135,7 @@ The following table lists the secure permissions for objects in `/var/lib/ranche
 You can find the configuration files for management (control plane) nodes in the following locations:
 
 |===
-| Path | File Description | Owner
+| Path | File Description | Recommended Ownership
 
 | `/var/lib/rancher/rke2/agent/pod-manifests/kube-apiserver.yaml`
 | API server pod specification file
@@ -151,23 +186,12 @@ You can find the configuration files for management (control plane) nodes in the
 | `root:root`
 |===
 
-[IMPORTANT]
-====
-You must also verify that the RKE2 server configuration file on each node contains the following text:
-
-[,text]
-----
-(cat /etc/rancher/rke2/config.yaml)
-write-kubeconfig-mode: "0600"
-----
-====
-
 === Worker node configuration files
 
 You can find the configuration files for worker nodes in the following locations:
 
 |===
-| Path | File Description | Owner
+| Path | File Description | Recommended Ownership
 
 | `/var/lib/rancher/rke2/agent/kubeproxy.kubeconfig`
 | Proxy kubeconfig file
