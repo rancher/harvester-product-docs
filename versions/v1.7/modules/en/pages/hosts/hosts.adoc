@@ -1,6 +1,6 @@
 = Host Management
 :page-languages: [en, de, es, fr, ja, pt, zh]
-:revdate: 2026-01-08
+:revdate: 2026-09-17
 :page-revdate: {revdate}
 
 Users can view and manage {harvester-product-name} nodes from the host page. The first node always defaults to be a management node of the cluster. When there are three or more nodes, the two other nodes that first joined are automatically promoted to management nodes to form a HA cluster.
@@ -129,6 +129,15 @@ Again, removing a control plane node in this situation is *not recommended* beca
 
 === 6. Delete RKE2 services and shut down the node.
 
+[WARNING]
+====
+*Critical Warnings Before Running the Uninstall Script `/opt/rke2/bin/rke2-uninstall.sh`*
+
+* You must run the script *only on the target node*. Always verify your current hostname (using `hostname`) before running the command.
+
+* The script runs immediately *without asking for confirmation* (`y/n`). Once invoked, it stops services and permanently destroys node configurations and local data.
+====
+
 . Log in to the node using the root account.
 +
 . Run the script `/opt/rke2/bin/rke2-uninstall.sh` to delete RKE2 services running on the node.
@@ -137,11 +146,32 @@ Again, removing a control plane node in this situation is *not recommended* beca
 
 === 7. Remove the node.
 
-. On the UI, go to the **Hosts** screen.
-+
-. Locate the node that you want to remove, and then click **⋮ -> Delete**.
+. On the {harvester-product-name} UI, go to the *Hosts* screen.
+
+. Locate the node that you want to remove, and then click *⋮ -> Delete*.
 +
 image::host/delete-node.png[]
+
+This deletion process typically completes within one minute. If the UI status does not update automatically, refresh your browser to reload the cluster state.
+
+[IMPORTANT]
+====
+The process deletes cluster components and configurations without wiping local disks and bootloader partitions.
+
+Transfer the decommissioned host to your IT infrastructure or system administration team for drive sanitization procedures compliant with your organization's data retention and hardware lifecycle policies.
+====
+
+==== Known issue: Node stuck in "Draining" state during removal
+
+===== Symptom
+
+During node deletion, the host status displayed on the UI typically is `Kubelet stopped posting node status`.
+
+![uninstalled-node.png](/img/v1.9/host/node-removal-normally-uninstalled.png)
+
+If the UI displays `Node is draining due to kubelet/node not ready`, or toggles between `Kubelet stopped posting node status` and `Node is draining due to kubelet/node not ready` for more than 5 minutes without removing the host, you have encountered this issue. In the backend, `fleet-agent` pods are repeatedly scheduled onto the target node, creating a continuous `Terminating` loop that prevents node deletion.
+
+![re-drain-node.png](/img/v1.9/host/node-removal-node-draining.png)
 
 [NOTE]
 ====
