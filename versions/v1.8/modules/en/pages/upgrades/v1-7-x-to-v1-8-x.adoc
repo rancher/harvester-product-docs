@@ -1,6 +1,6 @@
 = Upgrade from v1.7.x to v1.8.x
 :description: Upgrade from SUSE Virtualization v1.7.x to v1.8.x using the Dashboard upgrade button and a compatible Harvester UI Extension
-:revdate: 2026-07-07
+:revdate: 2026-09-30
 :page-revdate: {revdate}
 
 == General information
@@ -271,3 +271,35 @@ kubectl rollout restart deployment/system-upgrade-controller -n cattle-system
 After the restart, SUC reschedules the plan job for the affected node. The upgrade automatically resumes within a few minutes.
 
 Related issue: https://github.com/harvester/harvester/issues/9880[#9880]
+
+=== Grafana dashboard fails to display migration memory transfer rate
+
+After upgrading to v1.8.x, the *Migration Memory Transfer Rate* panel on the Grafana dashboard for virtual machine migration does not display any data because of an outdated metric expression in the dashboard's `ConfigMap`.
+
+image::monitoring/before-patch-memory-transfer-rate-metric.png[Migration Memory Transfer Rate dashboard panel (no data)]
+
+==== Workaround
+
+Run the following commands to patch the dashboard's `ConfigMap`:
+
+[,bash]
+----
+inner_json=$(
+  kubectl get -n cattle-dashboards configmap harvester-vm-migration-details-dashboard -o json |
+    jq -r '.data."harvester_vm_migration_details.json" | fromjson |
+      .panels |= map(
+        if .title == "Migration Memory Transfer Rate" then
+          .targets[0].expr = "kubevirt_vmi_migration_memory_transfer_rate_bytes{namespace=\"$namespace\", name=\"$vm\"}"
+        else . end
+      ) | tojson'
+)
+
+kubectl patch -n cattle-dashboards configmap harvester-vm-migration-details-dashboard \
+  --type merge -p "{\"data\":{\"harvester_vm_migration_details.json\": $(jq -n --arg v "$inner_json" '$v')}}"
+----
+
+After patching, the *Migration Memory Transfer Rate* panel displays data during the next live migration.
+
+image::monitoring/after-patch-memory-transfer-rate-metric.png[Migration Memory Transfer Rate dashboard panel (with data)]
+
+Related issue: https://github.com/harvester/harvester/issues/11390[#11390]
