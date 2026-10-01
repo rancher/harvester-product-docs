@@ -320,45 +320,47 @@ We only support using the embedded Rancher and Longhorn dashboards for debugging
 For Rancher's multi-cluster and multi-tenant integration, please refer to the docs xref:/integrations/rancher/rancher-integration.adoc[here].
 ====
 
+== I can't access the cluster after I changed SSL/TLS enabled protocols and ciphers
 
-== I can't access SUSE® Virtualization after I changed SSL/TLS enabled protocols and ciphers
+If you changed xref:installation-setup/config/settings.adoc#_traefik_default_tls_options[SSL/TLS enabled protocols and ciphers settings] and you no longer have access to the UI and API, it's highly possible that Traefik Ingress Controller has stopped working due to the misconfigured SSL/TLS protocols and ciphers.
 
-If you changed
-xref:/installation-setup/config/settings.adoc#_ssl_parameters[SSL/TLS enabled protocols and ciphers settings]
-and you no longer have access to the UI and API,
-it's highly possible that NGINX Ingress Controller has stopped working due to the misconfigured SSL/TLS protocols and ciphers.
 Follow these steps to reset the setting:
 
-. Following xref:./faq.adoc[FAQ] to SSH into the node and switch to `root` user.
-
- $ sudo -s
-
-. Editing setting `ssl-parameters` manually using `kubectl`:
+. Follow xref:troubleshooting/faq.adoc[FAQ] to SSH into the node and switch to `root` user.
 +
+[,shell]
 ----
-# kubectl edit settings ssl-parameters
+sudo -s
 ----
 
-. Deleting the line `+value: ...+` so that NGINX Ingress Controller
-will use the default protocols and ciphers.
+. Edit setting `ssl-parameters` manually using `kubectl`:
 +
+[,shell]
+----
+kubectl edit settings traefik-default-tls-options
+----
+
+. Delete the line `+value: ...+` so that the Traefik Ingress Controller will use the default protocols and ciphers.
++
+[,yaml]
 ----
 apiVersion: harvesterhci.io/v1beta1
-default: '{}'
+default: '{"minVersion":"VersionTLS12", "maxVersion":"VersionTLS13", "sniStrict":false,"cipherSuites":[],"clientAuth":{"secretNames":[],"clientAuthType":""}}'
 kind: Setting
 metadata:
   name: ssl-parameters
 ...
-value: '{"protocols":"TLS99","ciphers":"WRONG_CIPHER"}' # <- Delete this line
+value: '{"minVersion":"VersionTLS12", "maxVersion":"VersionTLS13", "sniStrict":true,"cipherSuites":["TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"],"clientAuth":{"secretNames":[],"clientAuthType":""}}' # <- Delete this line
 ----
 
 . Save the change and you should see the following response after exit from the editor:
 +
+[,shell]
 ----
-setting.harvesterhci.io/ssl-parameters edited
+setting.harvesterhci.io/traefik-default-tls-options edited
 ----
 
-You can further check the logs of Pod `rke2-ingress-nginx-controller` to see if NGINX Ingress Controller is working correctly.
+You can further check the logs of the `rke2-traefik` pod to see if the Traefik Ingress Controller is working correctly.
 
 == Network interfaces are not showing up
 
