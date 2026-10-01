@@ -1,16 +1,19 @@
 = Enterprise Storage Integration (CSI)
-:revdate: 2026-09-22
+:description: Integration of enterprise storage solutions with Harvester using CSI drivers.
+:revdate: 2026-10-31
 :page-revdate: {revdate}
 
 {harvester-product-name} ships with {longhorn-product-name} as the built-in storage system. However, {harvester-product-name} also supports provisioning root volumes and data volumes using external Container Storage Interface (CSI) drivers. This allows integration with existing enterprise SAN or NAS storage solutions.
 
 == 1. Preventing Storage Conflicts
 
-When presenting external storage block devices to {harvester-product-name} nodes, ensure that the built-in {longhorn-product-name} engine does not attempt to claim them:
+When presenting external storage block devices to {harvester-product-name} nodes, ensure that {harvester-product-name} and the built-in {longhorn-product-name} engine do not attempt to claim or wipe them.
 
+* *Harvester Disk Filtering (v1.8+)*: {harvester-product-name} v1.8 manages disk discovery and auto-provisioning via the `harvester-node-disk-manager` ConfigMap in the `harvester-system` namespace. You must explicitly exclude your enterprise storage devices, vendors, or mount paths in the `filters.yaml` section to prevent {harvester-product-name} from managing them.
+* *Harvester Auto-Provisioning*: Ensure your external storage device paths are **never** listed in the `autoprovision.yaml` section of the `harvester-node-disk-manager` ConfigMap. Any device selected for automatic provisioning will be completely erased. For configuration details, see xref:storage/disk-filter-auto-provision.adoc[Filter out and auto provision disks].
 * *File System-Type Disks*: {harvester-product-name} overrides the upstream {longhorn-product-name} configuration and creates a default file system-type disk at `/var/lib/harvester/defaultdisk`. Do not mount external storage to this path.
 * *Block-Type Disks*: The V2 Data Engine requires raw block devices. If your external storage presents raw block devices (for example, NVMe or VirtIO) to the host, do not add these paths to the {longhorn-product-name} UI or `spec.disks` configuration.
-* *Auto-Provisioning*: Be cautious when using the `node.longhorn.io/create-default-disk: 'config'` label alongside the `node.longhorn.io/default-disks-config` annotation to ensure auto-provisioning does not target external storage paths.
+* *Longhorn Custom Provisioning*: If you are manually configuring Longhorn defaults using the `node.longhorn.io/create-default-disk: 'config'` label alongside the `node.longhorn.io/default-disks-config` annotation, ensure this configuration does not target your external storage paths.
 
 == 2. Host OS Preparation
 
@@ -32,7 +35,18 @@ Before installing an enterprise CSI driver, verify that it supports the required
 
 Obtain your cluster credentials as described in xref:troubleshooting/faq.adoc#_how_can_i_access_the_kubeconfig_file_of_the_harvester_cluster[How can I access the kubeconfig file?] and install the vendor's CSI driver following their deployment instructions.
 
-== 4. StorageClass and CDI Configuration
+== 4. Harvester CSI Configuration
+
+After installing the CSI driver and creating its corresponding `VolumeSnapshotClass`, you must map the provisioner to this snapshot class using {harvester-product-name}'s `csi-driver-config` setting. Without this mapping, VM and volume snapshots will fail.
+
+Navigate to *Advanced -> Settings* in the UI to update the `csi-driver-config`. For step-by-step instructions, see xref:storage/csidriver.adoc#_configure_the_harvester_product_name_cluster[Configure the {harvester-product-name} cluster].
+
+[NOTE]
+====
+You only need to configure the *Volume Snapshot Class Name*. Leave the *Backup VolumeSnapshot Class Name* empty, as {harvester-product-name}'s native backup feature is strictly limited to {longhorn-product-name} volumes. 
+====
+
+== 5. StorageClass and CDI Configuration
 
 {harvester-product-name} integrates with the Containerized Data Importer (CDI) to handle VM image management. If your Enterprise StorageClass provisioner is not included in CDI's default capabilities list, you must annotate the `StorageClass` with `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`. Without this annotation, image deployments or Helm chart installations may fail.
 
@@ -57,7 +71,7 @@ volumeBindingMode: WaitForFirstConsumer
 allowVolumeExpansion: true
 ----
 
-== 5. Validating the Integration
+== 6. Validating the Integration
 
 Before placing production workloads on external storage, validate your CSI driver's compatibility using the `storage-validator` utility.
 
@@ -72,7 +86,7 @@ storage-validator -config ./config.yml
 
 For a detailed breakdown of configuration options, test cases, and expected output examples, see xref:storage/storage-validator.adoc[Storage Validator].
 
-== 6. Using the CSI Driver
+== 7. Using the CSI Driver
 
 Once configured and validated, external storage can be selected during standard VM operations:
 
