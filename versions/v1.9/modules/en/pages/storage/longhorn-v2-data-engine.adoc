@@ -1,4 +1,5 @@
 = Longhorn V2 Data Engine
+:description: Enable the Longhorn V2 Data Engine to create new storage volumes and images with reduced I/O latency and increased performance
 :revdate: 2026-10-01
 :page-revdate: {revdate}
 
@@ -67,6 +68,44 @@ Set the `Provisioner` to `Longhorn V2 (CSI)`.
 * Images (on the *Images* screen)
 +
 Volumes and images created using the new StorageClass are backed by the Longhorn V2 Data Engine.
+
+== Known issues
+
+=== Stalled I/O operations on ARM platforms
+
+On ARM64 platforms, Longhorn V2 disks that use the SPDK NVMe bdev driver can experience stalled I/O operations. For more information, see issue https://github.com/harvester/harvester/issues/10710[#10710].
+
+To work around the issue, perform the following steps:
+
+. xref:hosts/hosts.adoc#_remove_disks[Remove the affected Longhorn V2 disk].
+
+. xref:hosts/hosts.adoc#_add_disks[Add the Longhorn V2 disk again].
+
+. Verify that the workaround was successful.
++
+[,shell]
+----
+kubectl -n longhorn-system get blockdevices.harvesterhci.io -o yaml
+----
++
+The matching `BlockDevice` custom resource should have the following values:
++
+[,yaml]
+----
+    spec:
+      provisioner:
+        longhorn:
+          diskDriver: aio
+          engineVersion: LonghornV2
+    status:
+      provisionPhase: Provisioned
+      state: Active
+----
+
+[NOTE]
+====
+Starting with {harvester-product-name} v1.9.0, the default disk driver for Longhorn V2 volumes is changed to `AIO`. Removing and then re-adding the affected disk forces {harvester-product-name} to use this new default driver and resolves the stalled I/O operations on ARM64 platforms.
+====
 
 == Upgrading from {harvester-product-name} v1.4.x
 

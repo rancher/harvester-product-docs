@@ -1,0 +1,103 @@
+= Pure Underlay Networking
+:description: Configure pure underlay networks to connect virtual machines directly to physical Layer 2 networks using provider networks and VLANs
+:revdate: 2026-08-14
+:page-revdate: {revdate}
+
+[NOTE]
+====
+All features that use Kube-OVN are considered experimental. For more information about experimental features, see xref:introduction/document-conventions.adoc#_feature_labels[Feature Labels].
+====
+
+A pure underlay network allows virtual machines to connect directly to a physical Layer 2 network without overlay networking and the encapsulation overhead of technologies such as VXLAN or Geneve. Each virtual machine becomes a first-class member of the external network, communicating natively using standard Ethernet frames.
+
+In {harvester-product-name}, this direct connectivity is achieved by attaching virtual machines to a provider network, which maps a physical NIC or bonded interface on each host to the cluster. Traffic leaves the virtual machine through the host's physical interface and reaches the external network immediately, bypassing overlay tunnels completely.
+
+image::networking/pureunderlay.png[Pure underlay networking]
+
+== Kube-OVN underlay mode
+
+While traditional VLAN networking already enables virtual machines to communicate directly with the physical infrastructure, Kube-OVN's _Underlay_ mode extends this capability by embedding native Layer 2 connectivity directly into the OVN networking control plane. This deep integration allows workloads to leverage your existing physical underlay infrastructure while coexisting seamlessly with standard overlay networks inside the same Kubernetes cluster.
+
+Furthermore, integrating Kube-OVN’s underlay capabilities into {harvester-product-name} ensures that virtual machines connected to the physical network do not lose their cloud-native security features. Workloads can still benefit from advanced micro-segmentation capabilities, including xref:networking/vm-isolation.adoc[subnet ACLs and granular network policies], allowing you to maintain strict traffic control across both virtual and physical network boundaries.
+
+== Underlay configuration
+
+=== Creating a provider network
+
+. On the {harvester-product-name} UI, go to *Underlay Networks -> Provider Networks*.
+
+. Click *Create*.
++
+image::networking/pn.png[Creating a provider network]
+
+. Specify a unique name for the network.
+
+. On the *Interfaces* tab, configure the following settings:
++
+* *Default Interface*: Select a physical or bonded interface that is present on every host in your cluster. This interface acts as the main uplink connecting all nodes to the provider network.
++
+* *Custom Interfaces*: (Optional) Configure a custom interface if your hosts do not have identical network interface names. You can manually map specific interface names to their corresponding nodes to ensure consistent network connectivity.
+
+. (Optional) On the *Excluded Nodes* tab, select nodes that should not participate in this provider network (for example, nodes that are isolated for dedicated tasks).
+
+. Click *Create*.
+
+For more information, see https://kubeovn.github.io/docs/v1.16.x/en/start/underlay/#create-providernetwork[Create Provider Network] in the Kube-OVN documentation.
+
+=== Creating a VLAN
+
+. On the {harvester-product-name} UI, go to *Underlay Networks -> VLANs*.
++
+image::networking/vlan2017.png[Creating a VLAN]
+
+. Click *Create*.
+
+. Specify a unique name for the network.
+
+. On the *Basic* tab, configure the following settings:
++
+* *VLAN ID*: Specify the VLAN tag number for this network. Traffic passing through this network will automatically be tagged with this ID. If you do not want traffic to be tagged, set the value to `0`.
++
+* *Provider Network*: Select the underlying provider network. You can map multiple VLANs to the same provider network to segregate traffic over the same physical infrastructure.
+
+. Click *Create*.
+
+For more information, see https://kubeovn.github.io/docs/v1.16.x/en/start/underlay/#create-vlan[Create VLAN] in the Kube-OVN documentation.
+
+=== Creating an overlay network
+
+Follow the instructions in xref:networking/vm-network.adoc#_creating_an_overlay_network[Creating an overlay network].
+
+image::networking/vswitchexternal.png[Creating an overlay network]
+
+[IMPORTANT]
+====
+When setting up a pure underlay, the overlay network must use the following configuration:
+
+* *Namespace*: Select *kube-system*.
+* *Network Interface Card*: Select the identical physical or bonded network interfaces that you assigned when configuring the provider network.
+====
+
+=== Creating a subnet in a VPC
+
+For descriptions of settings that you must configure, see xref:networking/kubeovn-vpc.adoc#_subnet_settings[Subnet Settings].
+
+image::networking/subnetexternal.png[Creating a subnet in a VPC]
+
+[IMPORTANT]
+====
+When setting up a pure underlay network, specify the name of the VLAN network mapped to the provider network.
+
+If you are using this network as an external network for a VPC NAT gateway, ensure that DHCP is enabled, `dns_server` is set to a valid DNS server IP address (for example, `8.8.8.8`) and `natOutgoing` is set to `true`. This configuration ensures that virtual machines using these subnets can resolve DNS and route traffic through the default gateway.
+====
+
+== Connecting virtual machines to the underlay
+
+You can create virtual machines and attach them directly to a VLAN Network mapped to the configured provider network. These virtual machines can communicate with other virtual machines on the same subnet and route traffic directly to external networks via the physical infrastructure.
+
+For more information, see xref:virtual-machines/create-vm.adoc[Create a Virtual Machine].
+
+[NOTE]
+====
+The VLAN ID referenced in this guide is an example and can be replaced with any VLAN that fits your network design. When using a VPC NAT Gateway, the external network and external IP address must belong to the underlay network's designated VLAN to ensure proper connectivity.
+====
