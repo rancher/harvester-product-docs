@@ -1,27 +1,23 @@
 = Disaster Recovery in Multi-Site Architectures
-:revdate: 2026-09-25
+:description: Disaster recovery strategies for multi-site architectures using SUSE Virtualization and SUSE Storage.
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
 When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, you must choose between two distinct disaster recovery (DR) strategies: a *Stretched Cluster (Active-Active)* or a *Multi-Cluster DR (Active-Passive)* setup. 
 
 Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
 
-== Scenario A: Stretched Clusters (Active-Active)
+== Unsupported Topology: Stretched Clusters (Active-Active)
 
-A stretched cluster spans a single {harvester-product-name} deployment across multiple physical locations. This topology provides active-active high availability but is strictly limited to metropolitan areas with ultra-low latency, high-bandwidth connections. 
+A stretched cluster attempts to span a single {harvester-product-name} deployment across multiple physical data centers. **{harvester-product-name} does not officially support stretched clusters.** 
 
-Stretching a cluster across distant geographic regions is highly risky and generally not supported due to the following architectural constraints:
+For multi-site disaster recovery, you must use two independent clusters as described in the Multi-Cluster DR section below. Attempting to stretch a single cluster across physical locations is highly risky due to the following strict architectural constraints:
 
-=== 1. etcd Quorum and the Witness Node Requirement
+=== 1. etcd Quorum and Split-Brain Risks
 
 Kubernetes uses etcd to store cluster state, which requires a strict member quorum (a majority of nodes) to function. If you split management nodes evenly across two data centers (for example, 2 nodes in DC-A and 2 nodes in DC-B), a network partition between the sites will cause both sides to lose quorum, bringing the entire cluster down.
 
-To safely deploy a 2-site stretched cluster, you must place a **Witness Node** in a third, independent location to act as a tie-breaker. 
-
-[CAUTION]
-====
-*Longhorn Replica Degradation*: Witness nodes do not store data. If your stretched cluster consists of only two management nodes and one witness node, Longhorn can only provision a maximum of two replicas for each volume. You must manually modify your StorageClass to set the replica count to `2`, meaning the cluster will operate with degraded storage high availability.
-====
+While {harvester-product-name} supports a *Witness Node* to act as a tie-breaker in specific three-node clusters, using this role to construct a multi-site stretched cluster is unsupported. Furthermore, witness nodes do not store data. If a cluster uses a witness node, {longhorn-product-name} can only provision a maximum of two replicas for each volume, forcing the cluster to operate with degraded storage high availability.
 
 === 2. Synchronous Storage Replication Latency
 
@@ -31,7 +27,7 @@ To safely deploy a 2-site stretched cluster, you must place a **Witness Node** i
 
 Accurate time synchronization is mandatory. Clock drift exceeding *500 ms* between any nodes across your sites will cause leader election timeouts in etcd, leading to cluster flap, loss of quorum, and total cluster instability.
 
-== Scenario B: Multi-Cluster Disaster Recovery (Active-Passive)
+== Multi-Cluster Disaster Recovery (Active-Passive)
 
 For true geographic disaster recovery across distinct physical locations, the recommended architecture is an Active-Passive topology. This involves two completely separate {harvester-product-name} clusters (Primary and Secondary) linked by a shared external backup target.
 
@@ -60,14 +56,11 @@ For {harvester-product-name} v1.4.0 and later, the backup controller automatical
 Automatic image synchronization is skipped if a virtual machine image with the same name or display name already exists on the Secondary cluster. If you manually pre-stage images on the Secondary cluster, you must ensure that their names, display names, and configurations are absolutely identical to those on the Primary cluster; otherwise, the cross-cluster restore will fail.
 ====
 
-=== 4. Advanced Storage-Level Workflow: Longhorn DR Volumes 
+=== Unsupported Workflow: Longhorn DR Volumes 
 
-As an alternative to the {harvester-product-name} VM restore workflow, {longhorn-product-name} natively supports *Disaster Recovery (DR) Volumes*. A DR volume is a special standby volume that continuously polls the backup target and incrementally restores data in a passive, unmountable state.
+While upstream {longhorn-product-name} documentation describes a feature called *Disaster Recovery (DR) Volumes*, **this workflow is not supported for {harvester-product-name} disaster recovery**. 
 
-[CAUTION]
-====
-If you choose to use Longhorn DR volumes for failover, {harvester-product-name} does not automatically reconstruct the virtual machine. When you manually activate a Longhorn DR volume, it converts into a standard, detached volume. You must then manually create the PersistentVolumeClaim (PVC) and reconstruct the Kubernetes VirtualMachine custom resource to attach the volume to a new workload.
-====
+{harvester-product-name} does not manage Longhorn DR volume activation, nor does it reconstruct the Kubernetes `VirtualMachine` custom resources and PersistentVolumeClaims (PVCs) required to use an activated volume. Do not attempt to use Longhorn DR volumes for virtual machine failover. Instead, you must use the supported *Cross-Cluster Virtual Machine Restore (Harvester Workflow)* described above.
 
 == Critical Constraints and Warnings
 
