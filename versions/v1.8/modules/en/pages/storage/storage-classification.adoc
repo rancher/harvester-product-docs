@@ -1,12 +1,13 @@
 = Production vs. Backup Storage: Classification Criteria
-:revdate: 2026-09-22
+:description: Classification criteria for production and backup storage in a SUSE Virtualization and SUSE Storage environment.
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
-In a {harvester-product-name} and {longhorn-product-name} environment, storage is strictly categorized into *Production Storage* and *Backup Storage*. Misclassifying or misconfiguring these storage tiers can lead to degraded virtual machine (VM) performance, live migration failures, or data loss during disaster recovery scenarios.
+In a {harvester-product-name} and {longhorn-product-name} environment, fully supported operational storage is strictly categorized into *Production Storage* and *Backup Storage*. A third category, *Experimental Storage*, exists for previewing high-performance features but sits outside standard production support. Misclassifying or misconfiguring these storage tiers can lead to degraded virtual machine (VM) performance, live migration failures, or data loss during disaster recovery scenarios.
 
 The following criteria define the architectural boundaries, hardware requirements, and operational characteristics of each storage type.
 
-== Production Storage (Primary / In-Cluster)
+== Production Storage (Primary)
 
 Production storage refers to the storage that actively backs running VMs, boot volumes, and data volumes. In {harvester-product-name}, this is divided into two categories:
 
@@ -66,33 +67,40 @@ While the underlying {longhorn-product-name} engine natively supports Azure Blob
 == Summary Matrix
 
 |===
-| Criteria | Built-in Production Storage | Backup Storage
+| Criteria | Built-in Production Storage | Experimental V2 Storage | Backup Storage
 
 | *Primary Function*
 | Active block storage for live VMs and workloads.
+| High-performance block storage (not for production use).
 | Disaster recovery, VM retention, and system backups.
 
 | *Location*
 | In-cluster (Local NVMe, SSD, HDD).
+| In-cluster (Local NVMe recommended).
 | Off-cluster (External server/cloud endpoint).
 
 | *Protocols / Interfaces*
+| Kubernetes CSI, Block devices.
 | Kubernetes CSI, SPDK NVMe/AIO bdev, Block devices.
 | S3, NFS (Harvester); Azure Blob, SMB/CIFS ({longhorn-product-name} native only).
 
 | *Resiliency Model*
 | Synchronous replica distribution across cluster nodes.
+| Synchronous replica distribution across cluster nodes.
 | Point-in-time asynchronous copies; soft-mount network tolerance.
 
 | *Workload Consistency*
+| Always active.
 | Always active.
 | Crash-consistent by default; QEMU Guest Agent enables filesystem consistency.
 
 | *Lifecycle Ownership*
 | Managed via `StorageClass` reclaim policies (`Delete`/`Retain`).
+| Managed via `StorageClass` reclaim policies (`Delete`/`Retain`).
 | Exclusively managed by {longhorn-product-name}. External retention policies are prohibited.
 
 | *Configuration Interface*
+| `StorageClass`, Node/Disk Tags.
 | `StorageClass`, Node/Disk Tags.
 | `Settings > backup-target`, `longhorn-default-resource` ConfigMap.
 |===
