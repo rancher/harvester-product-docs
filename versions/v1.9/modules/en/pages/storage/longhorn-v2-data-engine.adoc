@@ -1,6 +1,6 @@
 = Longhorn V2 Data Engine
 :description: Enable the Longhorn V2 Data Engine to create new storage volumes and images with reduced I/O latency and increased performance
-:revdate: 2026-07-16
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
 The Longhorn V2 Data Engine harnesses the power of the Storage Performance Development Kit (SPDK) to significantly reduce I/O latency while boosting IOPS and throughput. The result is a high-performance storage solution that is capable of meeting diverse workload demands.
@@ -55,12 +55,10 @@ Set the `Provisioner` of each extra disk to `Longhorn V2 (CSI)`.
 +
 [NOTE]
 ====
-{harvester-product-name} sets the https://documentation.suse.com/cloudnative/storage/1.11/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn Disk Driver] to `auto` so that NVMe disks use the SPDK NVMe bdev driver, which provides the best performance and also supports advanced operations such as trim (also known as discard).
-
-SSDs and other non-NVMe disks are managed using the SPDK AIO bdev driver, which requires a disk size that is an _even multiple of 4096 bytes_. Non-NVMe disks that do not meet this size requirement cannot be added. Additionally, the SPDK AIO bdev driver does not support the unmap operation. If you are using non-NVMe disks, avoid trimming the filesystem because this results in I/O errors and paused virtual machines.
+The default disk driver for newly added Longhorn V2 disks in {harvester-product-name} is `aio`. This driver uses a Linux block device path and avoids the SPDK NVMe VFIO path.
 ====
 
-. Go to *Advanced -> Storage Classes*, and then add a new StorageClass as described in xref:./storageclass.adoc#_creating_a_storageclass[Creating a StorageClass]. 
+. Go to *Advanced -> Storage Classes*, and then xref:./storageclass.adoc#_creating_a_storageclass[add a new StorageClass]. 
 +
 Set the `Provisioner` to `Longhorn V2 (CSI)`.
 
@@ -71,23 +69,25 @@ Set the `Provisioner` to `Longhorn V2 (CSI)`.
 +
 Volumes and images created using the new StorageClass are backed by the Longhorn V2 Data Engine.
 
-== Known issues
+[#_migrating_v2_disks_aio]
+== Migrating Longhorn V2 Disks from NVMe to AIO
 
-=== Stalled I/O operations on ARM platforms
+Before migrating a disk, verify that all affected volumes are healthy and that the remaining Longhorn V2 disks have sufficient free space to accommodate rebuilt replicas during disk removal.
 
-On ARM64 platforms, Longhorn V2 disks that use the SPDK NVMe bdev driver can experience stalled I/O operations. For more information, see issue https://github.com/harvester/harvester/issues/10710[#10710].
-
-To work around the issue, perform the following steps:
+[NOTE]
+====
+In {harvester-product-name} v1.9.0 and later, newly created Longhorn V2 disks use the `aio` disk driver by default. Existing Longhorn V2 disks retain their current driver configuration until you manually remove and add them again.
+====
 
 . xref:hosts/hosts.adoc#_remove_disks[Remove the affected Longhorn V2 disk].
 
 . xref:hosts/hosts.adoc#_add_disks[Add the Longhorn V2 disk again].
 
-. Verify that the workaround was successful.
+. Verify that the migrated disk uses `aio`.
 +
 [,shell]
 ----
-kubectl -n longhorn-system get blockdevices.harvesterhci.io -o yaml
+kubectl -n longhorn-system get blockdevices.harvesterhci.io BLOCKDEVICE_NAME -o yaml
 ----
 +
 The matching `BlockDevice` custom resource should have the following values:
@@ -97,17 +97,16 @@ The matching `BlockDevice` custom resource should have the following values:
     spec:
       provisioner:
         longhorn:
-          diskDriver: aio
-          engineVersion: LonghornV2
-    status:
-      provisionPhase: Provisioned
       state: Active
 ----
 
-[NOTE]
-====
-Starting with {harvester-product-name} v1.9.0, the default disk driver for Longhorn V2 volumes is changed to `AIO`. Removing and then re-adding the affected disk forces {harvester-product-name} to use this new default driver and resolves the stalled I/O operations on ARM64 platforms.
-====
+== Known issues
+
+=== Stalled I/O operations on ARM platforms
+
+On ARM64 platforms, Longhorn V2 disks that use the SPDK NVMe bdev driver can experience stalled I/O operations. For more information, see issue https://github.com/harvester/harvester/issues/10710[#10710].
+
+For information about the workaround, see <<#_migrating_v2_disks_aio>>.
 
 == Upgrading from {harvester-product-name} v1.4.x
 
