@@ -1,5 +1,5 @@
 = Storage Types and Integration: DAS, SAN, and NAS
-:revdate: 2026-09-25
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
 {harvester-product-name} provides a flexible storage architecture that supports both internal hyperconverged storage and external legacy storage arrays. Understanding how different storage types (DAS, SAN and NAS) integrate with the underlying technologies like *{longhorn-product-name}* (storage provisioner) and *KubeVirt* (virtualization management) is important for optimizing virtual machine (VM) performance and aligning with the datacenter infrastructure.
@@ -28,31 +28,40 @@ While {longhorn-product-name} manages internal DAS, {harvester-product-name} int
 * *The KubeVirt Role*: When provisioning a VM, the SAN-backed StorageClass can be selected for the root and data volumes. Kubernetes provisions the volume using the CSI driver, and KubeVirt simply consumes the resulting Persistent Volume Claim (PVC).
 * *How the VM sees it*: KubeVirt exposes the consumed PVC to the guest OS as a standard block device. The exact presentation depends on the configured disk bus, completely abstracting the external storage protocols from the guest.
 
-It is best suitable for the organizations with existing investments in enterprise SAN arrays who need specific hardware-accelerated features (like hardware deduplication or tiering) for specific VM workloads.
+It is best suitable for organizations with existing investments in enterprise SAN arrays who need specific hardware-accelerated features (like hardware deduplication or tiering) for specific VM workloads.
 
 == 3. Network Attached Storage (NAS)
 
-Network Attached Storage (NAS) provides file-level storage over standard Ethernet networks, typically using protocols like NFS or SMB.
+Network Attached Storage (NAS) provides file-level storage over standard Ethernet networks, typically using protocols like NFS or SMB. In {harvester-product-name}, NAS can be integrated as either primary VM storage (via CSI) or as a backup target.
 
-=== Integration via CSI Drivers
+=== Integration via CSI Drivers (Primary Storage)
 
-Similar to SAN, NAS integration in {harvester-product-name} relies on external CSI drivers (such as the standard NFS CSI driver).
+NAS integration for active VM disks relies on external CSI drivers (such as the standard NFS CSI driver).
 
-* *The CSI Driver Role*: By installing an NFS CSI driver, {harvester-product-name} can communicate with the external NAS appliance. The driver provisions file-based Persistent Volumes.
+* *The CSI Driver Role*: By installing a NAS CSI driver, {harvester-product-name} can communicate with the external NAS appliance. The driver provisions file-based Persistent Volumes.
 * *The KubeVirt Role (Filesystem PVCs)*: Because KubeVirt VMs expect block devices to boot and run efficiently, KubeVirt handles file-based PVCs by consuming a raw disk image specifically named `disk.img` located at the root of the filesystem. If this file does not exist, KubeVirt creates it automatically based on the requested PVC size. 
 +
 [IMPORTANT]
 ====
-To avoid permission failures during automatic `disk.img` creation and synchronization, the image file must be owned by the `qemu` user (UID `107`). When using NFS, you must disable squashing of remote root users (by setting `no_root_squash` or `no_all_squash` on the NFS server export). For detailed instructions, refer to the xref:storage/csidriver.adoc[Third-Party Storage Support] documentation.
+To avoid permission failures during automatic `disk.img` creation and synchronization, the image file must be owned by the `qemu` user (UID `107`). Protocol-specific configurations are often required on your storage backend to allow this ownership. For detailed driver-specific instructions, refer to the xref:storage/csidriver.adoc[Third-Party Storage Support] documentation.
 ====
 * *Image Import via DataVolumes (CDI)*: Separately, when importing existing VM images to the cluster, {harvester-product-name} uses DataVolumes via the Containerized Data Importer (CDI) to automate the creation of the PVC and the population of the storage data.
 * *How the VM sees it*: KubeVirt mounts the file-based NAS share, reads the `disk.img` file, and translates it into a virtual block device for the guest OS. The exact presentation depends on the configured disk bus.
 
-While NAS can be used for virtual machine images, root volumes, and data volumes, the required `disk.img` layer introduces filesystem overhead not present in block-mode storage (like DAS or SAN). Therefore, NAS is typically chosen when an organization wants to leverage existing enterprise file-storage infrastructure rather than maximizing raw block I/O performance.
+While NAS can be used for virtual machine images, root volumes, and data volumes, the required `disk.img` layer introduces filesystem overhead not present in block-mode storage (like DAS or SAN). Therefore, NAS CSI storage is typically chosen when an organization wants to leverage existing enterprise file-storage infrastructure rather than maximizing raw block I/O performance.
+
+=== Integration as a Backup Target
+
+Separate from CSI drivers, {harvester-product-name} heavily relies on NAS appliances (specifically NFS servers) to act as external backup targets for internal HCI workloads. 
+
+* *The {longhorn-product-name} Role*: {longhorn-product-name} can connect directly to an external NFS server to store backups of internal DAS volumes. This integration skips Kubernetes StorageClasses entirely.
+* *The {harvester-product-name} Role*: Administrators configure the NFS endpoint in the {harvester-product-name} backup target settings. When a VM backup is triggered, the underlying {longhorn-product-name} volume data is exported directly to the NFS share.
+
+For detailed instructions on configuring an NFS backup target, refer to xref:virtual-machines/backup-restore.adoc[Virtual Machine Backup and Restore].
 
 [NOTE]
 ====
-{harvester-product-name} VM backup support is currently limited to {longhorn-product-name} volumes. External storage volumes cannot be backed up.
+{harvester-product-name} VM backup support is currently limited to {longhorn-product-name} volumes. External storage volumes (SAN or NAS CSI volumes) cannot be backed up.
 ====
 
 == Architecture Summary Comparison
@@ -65,7 +74,9 @@ Use the following table to understand how {harvester-product-name} routes data b
 
 | DAS (Internal) | Included by Default | {longhorn-product-name} | Distributed Block | VM disk; presentation depends on the configured disk bus
 
-| SAN (External) | Added via CSI | Vendor CSI Driver | Vendor-specific; determined by the CSI driver and StorageClass (for example, iSCSI or Fibre Channel) | VM disk; presentation depends on the configured disk bus
+| SAN (External Primary) | Added via CSI | Vendor CSI Driver | Vendor-specific; determined by the CSI driver and StorageClass (for example, iSCSI or Fibre Channel) | VM disk; presentation depends on the configured disk bus
 
-| NAS (External) | Added via CSI | Vendor CSI Driver | Vendor-specific; determined by the CSI driver and StorageClass | VM disk; presentation depends on the configured disk bus
+| NAS (External Primary) | Added via CSI | Vendor CSI Driver | Vendor-specific; determined by the CSI driver and StorageClass | VM disk; presentation depends on the configured disk bus
+
+| NAS (Backup Target) | Backup Target Settings | {longhorn-product-name} | NFS (File) | N/A (Stored externally; not presented to guest)
 |===
