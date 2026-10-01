@@ -1,21 +1,21 @@
 = Longhorn V2 Data Engine
-:revdate: 2026-09-22
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
 The Longhorn V2 Data Engine harnesses the power of the Storage Performance Development Kit (SPDK) to significantly reduce I/O latency while boosting IOPS and throughput. The result is a high-performance storage solution that is capable of meeting diverse workload demands.
 
 [IMPORTANT]
 ====
-The Longhorn V2 Data Engine is an *Experimental* feature and should not be utilized in a production environment.
+The Longhorn V2 Data Engine is a *Technical Preview* feature. Explore the feature extensively before using in production environments.
 ====
 
 == Prerequisites
 
-Every node with an active Longhorn V2 Data Engine requires the following dedicated resources:
+Every node with an active Longhorn V2 Data Engine requires the following resource configurations:
 
-* 2 CPU cores for use by the Longhorn instance-manager pod
-* 2 GiB RAM (allocated as 1024 × 2 MiB huge pages)
-* At least one local NVMe disk for data storage
+* *CPU Allocation*: By default, the `spdk_tgt` process binds to 2 CPUs (IDs 0 and 1) using a CPU mask. On nodes with CPU-pinned virtual machines (CPU Manager enabled), you must configure `data-engine-number-of-cpu-cores` (recommended: at least 2) for exclusive CPU allocation to avoid conflicts.
+* *Memory*: By default, 2 GiB of RAM is allocated as 1024 × 2 MiB huge pages. Huge pages are required for the `nvme` and `virtio` drivers, but can be disabled when using the default `aio` driver.
+* *Disk*: At least one local disk for data storage. NVMe disks are strongly recommended for optimal performance.
 
 == Limitations
 
@@ -23,8 +23,6 @@ The Longhorn V2 Data Engine currently does not support the following operations:
 
 * Backing image creation and usage
 * Volume encryption
-
-SSDs and other non-NVMe disks are managed using the SPDK AIO bdev driver, which does not support the unmap operation. If you are using non-NVMe disks, avoid trimming the filesystem because this results in I/O errors and paused virtual machines. For example, when creating an ext4 filesystem on a Linux virtual machine, use `mkfs.ext4 -E nodiscard /dev/vdb` (assuming `/dev/vdb` is your device path). On Windows virtual machines, you can disable trimming for NTFS by running the command `fsutil behavior set disabledeletenotify NTFS 1`.
 
 == Usage
 
@@ -54,9 +52,9 @@ Set the `Provisioner` of each extra disk to `Longhorn V2 (CSI)`.
 +
 [NOTE]
 ====
-{harvester-product-name} sets the https://documentation.suse.com/cloudnative/storage/1.11/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn Disk Driver] to `auto` so that NVMe disks use the SPDK NVMe bdev driver, which provides the best performance and also supports advanced operations such as trim (also known as discard).
+In {harvester-product-name} v1.9, newly added Longhorn V2 disks default to the `aio` disk driver. This driver uses standard Linux block device paths and avoids SPDK NVMe VFIO binding. 
 
-SSDs and other non-NVMe disks are managed using the SPDK AIO bdev driver, which requires a disk size that is an _even multiple of 4096 bytes_. Non-NVMe disks that do not meet this size requirement cannot be added. Additionally, the SPDK AIO bdev driver does not support the unmap operation. If you are using non-NVMe disks, avoid trimming the filesystem because this results in I/O errors and paused virtual machines.
+If you explicitly set the https://documentation.suse.com/cloudnative/storage/1.11/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn Disk Driver] to `auto`, NVMe disks will attempt to use the native SPDK NVMe bdev driver for optimal performance, provided they meet the strict VFIO/IOMMU isolation requirements.
 ====
 
 . Go to *Advanced -> Storage Classes*, and then add a new StorageClass as described in xref:./storageclass.adoc#_creating_a_storageclass[Creating a StorageClass]. 
