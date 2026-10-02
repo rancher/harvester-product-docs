@@ -114,6 +114,42 @@ The version you upgraded to already includes the memory-limit fix, so the overri
 
 Related issues: https://github.com/harvester/harvester/issues/11143[#11143] and https://github.com/harvester/harvester/issues/10056[#10056]
 
+=== Automatic live migration may fail for virtual machines with certain CPU topologies
+
+Live-migratable virtual machines are automatically migrated during the node upgrade phase. When upgrading from v1.8.x to v1.9.0, automatic live migration can fail for virtual machines configured with a CPU topology where `cores * threads > 1`.
+
+This failure is caused by an underlying libvirt issue affecting incoming migrations to QEMU 10.0.0 and later. QEMU reports the `ht` CPU feature based on the virtual CPU topology, but libvirt versions earlier than 11.10.0 may treat this as an unexpected extra CPU feature during live migration. For example, CPU topologies such as `cores: 1` with `threads: 2`, or `cores: 1` with `threads: 2`, satisfy this condition because `cores * threads = 2`.
+
+[,yaml]
+----
+domain:
+  cpu:
+    cores: 1
+    maxSockets: 1
+    model: host-model
+    sockets: 1
+    threads: 2
+----
+
+==== Symptoms
+
+The virtual machine migration fails with an error message similar to the following:
+
+[,text]
+----
+operation failed: guest CPU doesn't match specification: extra features: ht
+----
+
+==== Mitigation
+
+Before starting the upgrade, gracefully shut down virtual machines with CPU topologies where `cores * threads > 1`. After the upgrade completes, manually start these virtual machines. For more information, see xref:upgrades/upgrades.adoc#_planned_vm_shutdown_vs_live_migration[Planned VM Shutdown vs. Live Migration].
+
+==== References
+
+* https://github.com/harvester/harvester/issues/11615[Github issue #11615]
+* https://lists.libvirt.org/archives/list/announce@lists.libvirt.org/message/O7LXXQGTY63Q7P5WEHKRB7TBTP34OXMG/[libvirt 11.10.0 release notes]
+* https://redhat.atlassian.net/browse/RHEL-104216[RHEL-104216]
+
 === Upgrade is stuck in "Images preloaded"
 
 In rare cases, an upgrade from v1.8.x to v1.9.0 may remain in the *Images preloaded* state after a node reboots into the new operating system. This occurs when the upgrade controller changes the node's upgrade state to `Succeeded` before removing the `harvesterhci.io/pendingOSImage` annotation.
