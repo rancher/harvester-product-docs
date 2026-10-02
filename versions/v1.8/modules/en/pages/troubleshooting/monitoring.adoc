@@ -1,6 +1,6 @@
 = Monitoring Issues
 :description: Learn how to resolve monitoring issues caused by pod termination, volume size limits, and add-on configuration errors
-:revdate: 2026-02-02
+:revdate: 2026-10-02
 :page-revdate: {revdate}
 
 == Monitoring is unusable
@@ -633,7 +633,7 @@ The `prometheus` CRD object includes the `storage-network.settings.harvesterhci.
     creationTimestamp: "2025-05-20T06:40:25Z"
 ----
 
-The Harvester pod logs ('harvester-system/harvester' deployment) indicate that the attempt to change the `storage-network` setting was blocked.
+The {harvester-product-name} pod logs ('harvester-system/harvester' deployment) indicate that the attempt to change the `storage-network` setting was blocked.
 
 [,console]
 ----
@@ -652,9 +652,9 @@ When you make changes to the xref:networking/storage-network.adoc#_storage_netwo
 
 This process usually takes a short time to complete, but can be disrupted when the following occur:
 
-* Attached volumes prevent the Harvester controller from applying the changes to the setting.
+* Attached volumes prevent the {harvester-product-name} controller from applying the changes to the setting.
 * A user or the `monitoring-operator` attempts to enable the `rancher-monitoring` add-on.
-* The Harvester controller terminates the pods.
+* The {harvester-product-name} controller terminates the pods.
 
 === Workaround
 
@@ -662,7 +662,7 @@ This process usually takes a short time to complete, but can be disrupted when t
 
 . Check if the xref:networking/storage-network.adoc#_storage_network_setting[storage-network] setting is enabled or disabled.
 
-. Check for error indicators in the Harvester pod logs. If volumes are still attached, stop the related virtual machines until no errors appear after the `storage network change` message.
+. Check for error indicators in the {harvester-product-name} pod logs. If volumes are still attached, stop the related virtual machines until no errors appear after the `storage network change` message.
 
 . Enable the `rancher-monitoring` add-on.
 
@@ -793,3 +793,71 @@ cattle-monitoring-system   prometheus-kubevirt-rules            24s  // newly cr
 === Related issue
 
 https://github.com/harvester/harvester/issues/9674[#9674]
+
+== {harvester-product-name} UI shows inaccurate virtual machine CPU metrics
+
+=== Issue description
+
+In {harvester-product-name} v1.7.0 through v1.9.0, the UI displays unusually low or incorrect values for virtual machine CPU utilization metrics. This issue is resolved in v1.9.1.
+
+=== Root cause
+
+Starting in {harvester-product-name} v1.7.0, the underlying data source `kubevirt_vmi_vcpu_seconds_total` changed its unit calculation. Existing Grafana dashboard queries were not updated to reflect this change, resulting in inaccurate calculations.
+
+=== Workaround
+
+Update the following Grafana dashboard ConfigMap resources to restore accurate CPU utilization metrics on affected clusters.
+
+. Update the `harvester-vm-dashboard` ConfigMap.
++
+.. Edit the ConfigMap:
++
+[,shell]
+----
+kubectl edit configmap -n cattle-dashboards harvester-vm-dashboard
+----
++
+.. Locate the following query string:
++
+[,json]
+----
+"expr": "topk(${count}, (avg(rate(kubevirt_vmi_vcpu_seconds_total[5m])) by (domain, name)) / 1000)",
+----
++
+.. Replace it with the following string:
++
+[,json]
+----
+"expr": "topk(${count}, avg(rate(kubevirt_vmi_vcpu_seconds_total[5m])) by (domain, name))",
+----
+
+. Update the `harvester-vm-detail-dashboard` ConfigMap.
++
+.. Edit the ConfigMap:
++
+[,shell]
+----
+kubectl edit configmap -n cattle-dashboards harvester-vm-detail-dashboard
+----
++
+.. Locate the following query string:
++
+[,json]
+----
+"expr": "sum(avg(rate(kubevirt_vmi_vcpu_seconds_total{namespace=\"$namespace\", name=\"$vm\"}[5m])) by (domain, name)) / 1000",
+----
++
+.. Replace it with the following string:
++
+[,json]
+----
+"expr": "sum(avg(rate(kubevirt_vmi_vcpu_seconds_total{namespace=\"$namespace\", name=\"$vm\"}[5m])) by (domain, name))",
+----
+
+. Refresh the Grafana dashboard.
++
+If the metrics do not update immediately, delete the Grafana pod in the `cattle-monitoring-system` namespace to force a clean reload of the updated ConfigMaps.
+
+=== Related issue
+
+https://github.com/harvester/harvester/issues/11637[#11637]
