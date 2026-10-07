@@ -1,0 +1,319 @@
+= Configuration and Authentication File Security
+:revdate: 2026-09-29
+:page-revdate: {revdate}
+
+To harden your {harvester-product-name} cluster, you must verify and enforce strict file ownership and permission controls across all nodes. System configuration files govern storage, networking, and security secrets, while authentication files (such as keys, certificates, and tokens) establish cluster identity. Restricting access to these critical files prevents non-privileged users or compromised processes from altering system settings, exposing sensitive data, or causing cluster instability.
+
+[CAUTION]
+====
+Test all recommended ownership and mode settings in a non-production environment before production deployment. Enforcing incorrect permissions can disrupt critical cluster services.
+====
+
+== Auditing file permissions
+
+Verify the permissions of the files and directories listed in the table using the following commands:
+
+[,shell]
+----
+cd <PATH>
+ls -l
+----
+
+For example, to verify the permissions of the primary RKE2 (server and agent) configuration files and cluster kubeconfig files, run the following commands:
+
+[,shell]
+----
+cd var/lib/rancher/rke2
+ls -l
+----
+
+|===
+| Path | Object | Recommended Ownership | Recommended Mode
+
+| `etc/passwd`
+| Files
+| `root:root`
+| `0644`
+
+| `/etc/rancher/rke2`
+| Files
+| `root:root` (`0:0`)
+| `0600`
+
+| `etc/shadow`
+| Files
+| `root:root` or `root:shadow`
+| `0000` or `0400`
+
+| `etc/sysctl.d`
+| File
+| `root:root`
+| `0600` or `0400`
+
+| `/root/`
+| Home directory
+| `root:root`
+| `0700`
+
+| Varies
+| User home directories
+| `owner:group`
+| `0700`
+
+| `/var/lib/rancher/rke2/agent`
+| Subdirectories and files
+| `root:root` (`0:0`)
+| See <<#_rke2_agent_permissions>>.
+
+| `/var/lib/rancher/rke2/bin`
+| Files
+| `root:root` (`0:0`)
+| `0750`
+
+| `/var/lib/rancher/rke2/data`
+| Directory and files
+| `root:root` (`0:0`)
+| `0750`
+
+| `/var/lib/rancher/rke2/server`
+| Subdirectories and files
+| `root:root` (`0:0`)
+| See <<#_rke2_server_permissions>>.
+|===
+
+You must also verify that the RKE2 server configuration file on each node contains the following text:
+
+[,text]
+----
+(cat /etc/rancher/rke2/config.yaml)
+write-kubeconfig-mode: "0600"
+----
+
+[#_rke2_agent_permissions]
+=== RKE2 agent permissions
+
+The following table lists the recommended modes for objects in `/var/lib/rancher/rke2/agent`.
+
+|===
+| Object | Name | Recommended Mode
+
+| Subdirectories
+| `pod-manifests`, `etc`
+| `0700`
+
+| Certificate files
+| `client-ca.crt`, `client-kubelet.crt`, `client-kube-proxy.crt`, `client-rke2-controller.crt`, `server-ca.crt`, `serving-kubelet.crt`
+| `0600`
+
+| Key file
+| `client-kubelet.key`, `client-kube-proxy.key`, `client-rke2-controller.key`, `serving-kubelet.key`
+| `0600`
+
+| Kubeconfig files
+| `rke2controller.kubeconfig`, `kubelet.kubeconfig`, `kubeproxy.kubeconfig`
+| At least `0640`
+|===
+
+[#_rke2_server_permissions]
+=== RKE2 server permissions
+
+The following table lists the recommended modes for objects in `/var/lib/rancher/rke2/server`.
+
+|===
+| Object | Name | Recommended Mode
+
+| Subdirectories
+| `cred`, `db`, `tls`
+| `0700`
+
+| Subdirectories
+| `logs`, `manifests`
+| `0750`
+
+| Token file
+| `token`
+| `0600`
+|===
+
+=== Management node configuration files
+
+You can find the configuration files for management (control plane) nodes in the following locations:
+
+|===
+| Path | File Description | Recommended Ownership
+
+| `/var/lib/rancher/rke2/agent/pod-manifests/kube-apiserver.yaml`
+| API server pod specification file
+| `root:root`
+
+| `/var/lib/rancher/rke2/agent/pod-manifests/kube-controller-manager.yaml`
+| Controller manager pod specification file
+| `root:root`
+
+| `/var/lib/rancher/rke2/agent/pod-manifests/kube-scheduler.yaml`
+| Scheduler pod specification file
+| `root:root`
+
+| `/var/lib/rancher/rke2/agent/pod-manifests/etcd.yaml`
+| etcd pod specification file
+| `root:root`
+
+| Varies (example: `/var/lib/cni/networks/<filename>`)
+| Container Network Interface file
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/cred/admin.kubeconfig`
+| Admin configuration file
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/cred/scheduler.kubeconfig`
+| Scheduler configuration file
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/cred/controller.kubeconfig`
+| Controller manager configuration file
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/db/etcd`
+| etcd data directory
+| `etcd:etcd`
+
+| `/var/lib/rancher/rke2/server/tls`
+| Kubernetes PKI directory
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/tls/*.crt`
+| Kubernetes PKI certificate file
+| `root:root`
+
+| `/var/lib/rancher/rke2/server/tls/*.key`
+| Kubernetes PKI key file 
+| `root:root`
+|===
+
+=== Worker node configuration files
+
+You can find the configuration files for worker nodes in the following locations:
+
+|===
+| Path | File Description | Recommended Ownership
+
+| `/var/lib/rancher/rke2/agent/kubeproxy.kubeconfig`
+| Proxy kubeconfig file
+| `root:root`
+
+| `/var/lib/rancher/rke2/agent/kubelet.kubeconfig`
+| kubelet kubeconfig file
+| `root:root`
+
+| `/var/lib/rancher/rke2/agent/client-ca.crt`
+| Certificate authorities file
+| `root:root`
+|===
+
+== Mitigating insecure file system permissions
+
+. Set the correct permissions for insecure files and directories.
+
+** Files in `/etc/rancher/rke2`
++
+[,shell]
+----
+cd /etc/rancher/rke2
+chmod 0600 ./*
+chown root:root ./*
+ls -l
+----
+
+** Files in `/var/lib/rancher/rke2`
++
+[,shell]
+----
+cd /var/lib/rancher/rke2
+chown root:root ./*
+ls -l
+----
+
+** Subdirectories and files in `/var/lib/rancher/rke2/agent`
++
+[,shell]
+----
+cd /var/lib/rancher/rke2/agent
+chown root:root ./*
+chmod 0700 pod-manifests
+chmod 0700 etc
+find . -maxdepth 1 -type f -name "*.kubeconfig" -exec chmod 0640 {} \;
+find . -maxdepth 1 -type f -name "*.crt" -exec chmod 0600 {} \;
+find . -maxdepth 1 -type f -name "*.key" -exec chmod 0600 {} \;
+ls -l
+----
+
+** Files in `/var/lib/rancher/rke2/bin`
++
+[,shell]
+----
+cd /var/lib/rancher/rke2/bin
+chown root:root ./*
+chmod 0750 ./*
+ls -l
+----
+
+** `/var/lib/rancher/rke2/data` directory
++
+[,shell]
+----
+cd /var/lib/rancher/rke2
+chown root:root data
+chmod 0750 data
+ls -l
+----
+
+** Files in `/var/lib/rancher/rke2/data`
++
+[,shell]
+----
+cd /var/lib/rancher/rke2/data
+chown root:root ./*
+chmod 0750 ./*
+ls -l
+----
+
+** Files and subdirectories in `/var/lib/rancher/rke2/server`
++
+[,shell]
+----
+cd /var/lib/rancher/rke2/server
+chown root:root ./*
+chmod 0700 cred
+chmod 0700 db
+chmod 0700 tls
+chmod 0750 manifests
+chmod 0750 logs
+chmod 0600 token
+ls -l
+----
+
+. Edit the RKE2 server configuration file (`/etc/rancher/rke2/config.yaml`) on all nodes and add the following:
++
+[,yaml]
+----
+write-kubeconfig-mode: "0600"
+----
++
+After updating the configuration file, restart the RKE2 server.
++
+[,shell]
+----
+systemctl restart rke2-server
+----
+
+. Set the correct permission for the Container Network Interface file.
++
+Example:
++
+[,shell]
+----
+cd /var/lib/cni/networks
+chmod 600 <filename>
+ls -l
+----
