@@ -1,5 +1,5 @@
 = Vendor Compatibility and Comparison Guide
-:revdate: 2026-07-15
+:revdate: 2026-10-07
 :page-revdate: {revdate}
 
 Migrating existing virtual machines into {harvester-product-name-tm} is a common first step when moving away from a traditional hypervisor such as VMware vSphere. Several tools are available, ranging from built-in {harvester-product-name} add-ons to a SUSE partner platform. This guide compares them so that you can choose the right approach for your source environment, scale, and support requirements.
@@ -77,7 +77,7 @@ The SUSE VM Migration Toolkit is an *experimental* add-on and is incompatible wi
 ====
 
 When to use it::
-* Your source is VMware vSphere and you want a Forklift-based workflow (familiar to users of {rancher-product-name-tm} and OpenShift Virtualization migration tooling).
+* Your source is VMware vSphere and you want a Forklift-based workflow.
 * You are comfortable working with an experimental add-on and its current limitations.
 
 Key considerations::
@@ -88,6 +88,44 @@ Key considerations::
 * Migration of virtual machines with NVMe controller-based disks is not supported (see Forklift issue https://github.com/kubev2v/forklift/issues/1188[#1188]).
 * Virtual machines using legacy BIOS emulation are powered off during migration and are not powered back on automatically.
 * Optionally build a custom VDDK image from the SUSE base image to accelerate migration.
+
+[#migration-toolkit-steps]
+=== Migration steps
+
+Each virtual machine in a migration plan progresses through a series of steps. The {harvester-product-name} UI displays the current step for each virtual machine in the plan.
+
+[cols="1,3",options="header"]
+|===
+|Step |Description
+
+|`Initialize`
+|Validates the plan and prepares the migration. In a cold migration, this step also shuts down the source virtual machine.
+
+|`DiskAllocation`
+|Creates a persistent volume claim for each source disk, using the storage class, volume mode, and access mode defined in the storage map.
+
+|`ImageConversion`
+|Starts a conversion pod that reads the source disks, detects the guest operating system, installs VirtIO drivers, and schedules first-boot tasks, such as installing the guest agent and removing VMware Tools.
+
+|`DiskTransferV2v`
+|Copies the converted disk data to the destination volumes.
+
+|`DiskTransfer` and `Cutover`
+|Warm migration only. Copies disk data while the source virtual machine is running, and then shuts down the source and transfers the remaining changes.
+
+|`VirtualMachineCreation`
+|Creates the virtual machine in the target namespace with the mapped networks and volumes.
+|===
+
+[#migration-toolkit-monitoring]
+=== Monitoring and troubleshooting
+
+To monitor a migration and investigate failures, use the following:
+
+* *Migration progress*: The {harvester-product-name} UI displays the current step and status of each virtual machine in the migration plan. To view the same information from the command line, run `kubectl get plan <plan-name> -n forklift -o yaml` and review `status.migration.vms`, which lists each step and any error.
+* *Conversion logs*: The `ImageConversion` and `DiskTransferV2v` steps run in a conversion pod in the target namespace. The pod name starts with the plan name and the source virtual machine ID. Review its logs for guest conversion and disk copy errors. To list conversion pods, run `kubectl get pods -A -l forklift.app=virt-v2v`.
+* *Controller logs*: For errors in other steps, such as connecting to the source provider or creating volumes and virtual machines, review the controller logs with `kubectl logs deployment/forklift-controller -c main -n forklift`.
+* *Virtual machine stays in Terminating*: If a migrated virtual machine remains in the `Terminating` state after you delete it, its completed conversion pod is still using the virtual machine's disk. Delete the conversion pod, and the deletion of the virtual machine then completes.
 
 Because this add-on is experimental, its detailed installation and migration procedure is maintained in the SUSE Customer Center documentation. See the https://scc.suse.com/rancher-docs/rancherprime/latest/en/suse-virtualization/[{rancher-product-name} SUSE Virtualization documentation] for the current SUSE VM Migration Toolkit guide.
 
@@ -128,12 +166,39 @@ Use the following guidance to narrow your choice:
 Regardless of the tool, a successful migration follows a similar path. The following checklist summarizes the key stages:
 
 . *Pre-migration assessment*: Inventory the source virtual machines (CPU, RAM, disk), verify guest operating system support, and map source networks (VLANs, switches) to {harvester-product-name} xref:networking/vm-network.adoc[VM Networks].
-. *Infrastructure readiness*: Confirm nodes meet the hardware requirements and support hardware virtualization (Intel VT-x/AMD-V), ensure {longhorn-product-name-tm} has sufficient capacity (aim for at least twice the size of your largest virtual machine), and enable the required migration add-on.
+. *Infrastructure readiness*: Confirm nodes meet the hardware requirements and support hardware virtualization (Intel VT-x/AMD-V), ensure the target storage has sufficient capacity (aim for at least twice the size of your largest virtual machine), and enable the required migration add-on.
+. *Source preparation*: Prepare each source virtual machine as described in <<preparing-source-virtual-machines,Preparing source virtual machines>>.
 . *Execution*: Connect to the source endpoint with credentials, verify the source is reachable, map networks and storage, and run the migration. Use cold migration (shut the virtual machine down) for consistency, or a warm/staged cutover where the tool supports it.
 . *Post-migration and optimization*:
-** Replace VMware Tools with VirtIO drivers (or `open-vm-tools`) for optimal disk and network performance.
+** Verify each migrated virtual machine as described in <<during-and-after-the-migration,During and after the migration>>.
+** Make sure VirtIO drivers are in use and VMware Tools is removed for optimal disk and network performance. Some tools perform this during conversion; with others, you must do it manually.
 ** Configure protection for the migrated virtual machines using the xref:virtual-machines/backup-restore.adoc[backup and restore] tools.
 ** Optionally import the {harvester-product-name} cluster into {rancher-product-name-tm} to manage virtual machines and container workloads together.
+
+[#preparing-source-virtual-machines]
+== Preparing source virtual machines
+
+The state of the source virtual machine is the most common cause of a failed or degraded migration. Complete the following checks before you start a migration, regardless of the tool you use. Some items apply only to cold migration or to a final cutover, when the source virtual machine is shut down.
+
+* *Shut down the guest operating system gracefully.* Shut down from within the guest operating system, or let the migration tool do it through VMware Tools, instead of powering off the virtual machine. A forced power-off leaves file systems marked as not cleanly unmounted, and conversion tools cannot safely modify them to install drivers.
+* *Disable hibernation and Fast Startup on Windows.* Both features leave the system volume in a hibernated state that conversion tools treat as unsafe to modify. To disable both, run `powercfg /h off` from an elevated command prompt, and then shut down the guest.
+* *Keep VMware Tools installed until the migration.* VMware Tools allows a migration tool to shut down the guest gracefully. Depending on the tool, VMware Tools is removed during conversion or must be removed after the migration.
+* *Eject ISO images and disconnect CD/DVD and floppy devices.* Media mounted from a source datastore is not available on {harvester-product-name}. Installation or answer media that remains attached can also change the boot order or start an unwanted installation when the virtual machine boots.
+* *Remove or consolidate snapshots.* Long snapshot chains slow down disk transfer and increase the amount of data that must be read from the source.
+* *Suspend or remove full-disk encryption.* Conversion tools must read and modify guest file systems to install drivers. Suspend BitLocker or similar encryption for the duration of the migration, or provide the keys if the tool supports it.
+* *Leave free space in the guest.* Conversion installs drivers and can rebuild the boot image. Keep free space on the system volume and, on Linux, on the `/boot` file system.
+* *Make sure Linux guests can install packages.* Some tools install the QEMU guest agent during the first boot using the guest's package manager. Register the system with its update service or make its repositories reachable; otherwise, install the agent manually after the migration.
+* *Verify that the guest configuration is supported.* Check the migration tool's support for the guest operating system and virtual hardware. For example, transactional (immutable) operating systems and disks attached to NVMe controllers might not be supported.
+* *Allow extra time for large Btrfs file systems.* Some tools check file system integrity before and after conversion. On Btrfs, the default file system of SUSE Linux Enterprise Server (SLES), this check reads all data on the file system and can add significant time to the migration.
+* *Avoid changes to the source during the migration.* Do not relocate (for example, with Storage vMotion), snapshot, or reconfigure the source virtual machine while a migration is running. The transfer reads disks from their original location and fails if the disks are moved.
+
+[#during-and-after-the-migration]
+== During and after the migration
+
+* *Match the volume settings to the target storage class when mapping storage.* Select the volume mode and access mode that the storage class supports. Use the *Block* volume mode for block storage, such as {longhorn-product-name}, Ceph RBD, iSCSI, or LVM, and the *Filesystem* volume mode for file storage, such as NFS. Select the *ReadWriteMany* access mode where the storage class supports it so that the virtual machine can be live-migrated; node-local storage supports only *ReadWriteOnce* and does not support live migration. Where available, the storage class's CDI storage profile lists the supported combinations.
+* *Allow the first boot to complete.* During the first boot, the guest installs drivers and the guest agent, and Windows guests can restart one or more times. Interrupting this process can leave the guest without the drivers it needs.
+* *Do not power on the source virtual machine after cutover.* The migrated virtual machine keeps the MAC addresses and, where applicable, the static IP configuration of the source. Running both at the same time causes address conflicts. Keep the source powered off until you have validated the migrated virtual machine, and then decommission it.
+* *Validate the migrated virtual machine.* Confirm that the virtual machine boots from the correct disk, its network interfaces receive the expected addresses, and the guest agent reports to {harvester-product-name}. Correct the boot order if necessary, and confirm that VMware Tools is no longer installed.
 
 == Support and licensing summary
 
