@@ -89,6 +89,34 @@ Key considerations::
 * Virtual machines using legacy BIOS emulation are powered off during migration and are not powered back on automatically.
 * Optionally build a custom VDDK image from the SUSE base image to accelerate migration.
 
+[#migration-toolkit-steps]
+=== Migration steps
+
+Each virtual machine in a migration plan progresses through a series of steps. The {harvester-product-name} UI displays the current step for each virtual machine in the plan.
+
+[cols="1,3",options="header"]
+|===
+|Step |Description
+
+|`Initialize`
+|Validates the plan and prepares the migration. In a cold migration, this step also shuts down the source virtual machine.
+
+|`DiskAllocation`
+|Creates a persistent volume claim for each source disk, using the storage class, volume mode, and access mode defined in the storage map.
+
+|`ImageConversion`
+|Starts a conversion pod that reads the source disks, detects the guest operating system, installs VirtIO drivers, and schedules first-boot tasks, such as installing the guest agent and removing VMware Tools.
+
+|`DiskTransferV2v`
+|Copies the converted disk data to the destination volumes.
+
+|`DiskTransfer` and `Cutover`
+|Warm migration only. Copies disk data while the source virtual machine is running, and then shuts down the source and transfers the remaining changes.
+
+|`VirtualMachineCreation`
+|Creates the virtual machine in the target namespace with the mapped networks and volumes.
+|===
+
 Because this add-on is experimental, its detailed installation and migration procedure is maintained in the SUSE Customer Center documentation. See the https://scc.suse.com/rancher-docs/rancherprime/latest/en/suse-virtualization/[{rancher-product-name} SUSE Virtualization documentation] for the current SUSE VM Migration Toolkit guide.
 
 == Coriolis by Cloudbase
@@ -161,6 +189,23 @@ The state of the source virtual machine is the most common cause of a failed or 
 * *Allow the first boot to complete.* During the first boot, the guest installs drivers and the guest agent, and Windows guests can restart one or more times. Interrupting this process can leave the guest without the drivers it needs.
 * *Do not power on the source virtual machine after cutover.* The migrated virtual machine keeps the MAC addresses and, where applicable, the static IP configuration of the source. Running both at the same time causes address conflicts. Keep the source powered off until you have validated the migrated virtual machine, and then decommission it.
 * *Validate the migrated virtual machine.* Confirm that the virtual machine boots from the correct disk, its network interfaces receive the expected addresses, and the guest agent reports to {harvester-product-name}. Correct the boot order if necessary, and confirm that VMware Tools is no longer installed.
+
+[#monitoring-migrations-and-finding-logs]
+== Monitoring migrations and finding logs
+
+When a migration fails or stalls, check the status reported by the tool first, and then the logs of the component that performs the step that failed.
+
+VM Import Controller::
+* Check the status of the `VirtualMachineImport` resource with `kubectl describe virtualmachineimport <name> -n <namespace>`.
+* View the logs of the `vm-import-controller` pod in the `harvester-system` namespace.
+
+SUSE VM Migration Toolkit::
+* Check the progress of each virtual machine on the migration plan in the {harvester-product-name} UI, or run `kubectl get plan <name> -n forklift -o yaml` and review `status.migration.vms`, which lists each step and any error.
+* For failures in the `ImageConversion` or `DiskTransferV2v` step, view the logs of the conversion pod. The pod runs in the target namespace and is named after the plan and the source virtual machine ID. To list conversion pods, run `kubectl get pods -A -l forklift.app=virt-v2v`.
+* For failures in other steps, view the controller logs with `kubectl logs deployment/forklift-controller -c main -n forklift`.
+
+Coriolis::
+* Use the Coriolis appliance to view the status and logs of migration jobs. For details, see the https://cloudbase.it/coriolis/[Coriolis documentation].
 
 == Support and licensing summary
 
