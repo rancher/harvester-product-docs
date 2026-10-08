@@ -1,5 +1,6 @@
 = Upgrade from v1.7.x to v1.7.y
-:revdate: 2026-07-07
+:description: Upgrade from v1.7.x to v1.7.y by checking the Dashboard for the Upgrade button, preparing air-gapped environments if needed, and updating the Harvester UI
+:revdate: 2026-10-02
 :page-languages: [en, de, es, fr, ja, pt, zh]
 :page-revdate: {revdate}
 
@@ -201,3 +202,88 @@ kubectl rollout restart deployment/system-upgrade-controller -n cattle-system
 After the restart, SUC reschedules the plan job for the affected node. The upgrade automatically resumes within a few minutes.
 
 Related issue: https://github.com/harvester/harvester/issues/9880[#9880]
+
+=== Upgrade stuck in crash loop after CDI Importer pod is OOM-killed
+
+During Phase 1 (Provision an Upgrade Repository Virtual Machine), the Containerized Data Importer (CDI) downloads the target ISO file and converts it to a raw disk image using `qemu-img convert -t writeback`, which buffers converted data in memory. On slow destination storage, this buffer can grow until it exceeds the CDI importer pod's memory limit, causing the pod to be OOM-killed.
+
+This issue stems from the CDI configuration running on the *source* cluster rather than the target release. Clusters running v1.8.0 use the default importer pod memory limit of `600M`, which is prone to this failure. The limit was raised to `2G` in v1.8.1, but slow destination storage and large ISO images can still drive memory consumption past this threshold.
+
+After the importer pod is OOM-killed, its `/data` PVC is not cleaned up automatically (unlike the `/scratch` PVC). The partially converted disk image remains on the volume, causing subsequent retries to miscalculate available storage space and fail immediately, leaving the pod crash-looping indefinitely.
+
+[NOTE]
+====
+This issue primarily affects upgrades from v1.8.0, which lacks the 2 GiB memory limit adjustment. {harvester-product-name} v1.8.1 and later releases include this fix, making clusters running these versions unlikely to encounter the issue.
+====
+
+=== Symptoms
+
+* The `importer-prime-*` pod in the `harvester-system` namespace is in a `CrashLoopBackOff` state.
+
+* Node kernel logs indicate an `oom-kill` event for the `virt-cdi-import` and `qemu-img` processes, typically occurring during the initial crash:
++
+[,shell]
+----
+Memory cgroup out of memory: Killed process ... (virt-cdi-import) ...
+Memory cgroup out of memory: Killed process ... (qemu-img) ...
+----
+
+* Subsequent restarts do not trigger an OOM-kill. Instead, the pod fails with an error message similar to the following:
++
+[,shell]
+----
+Unable to convert source data to target format: virtual image size <X> is larger than the reported available storage <Y>. A larger PVC is required
+----
+
+=== Workaround
+
+. xref:upgrades/troubleshooting.adoc#_stopping_the_upgrade[Stopping the upgrade].
++
+This action deletes the `Upgrade` CR along with its associated DataVolume and PVCs, clearing the stale `/data` content.
+
+. Edit the `harvester` ManagedChart resource.
++
+[,shell]
+----
+kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Increase the CDI importer pod's memory limit beyond the default value.
++
+Under `spec.values`, configure a higher value for the `cdi.spec.config.podResourceRequirements.limits.memory` field based on available node memory. Slow storage backends and large images may require a higher allocation.
++
+If the `cdi` key (or any part of its nested path) does not exist under `spec.values`, add the missing structure.
++
+[,yaml]
+----
+   spec:
+     values:
+       cdi:
+         spec:
+           config:
+             podResourceRequirements:
+               limits:
+                 memory: 4G
+----
++
+[CAUTION]
+====
+Only modify the `cdi.spec.config.podResourceRequirements.limits.memory` field. Do not modify or delete any other existing fields in the `harvester` ManagedChart resource.
+
+The YAML snippet is an excerpt, not a full resource manifest.
+====
+
+. Verify that the CDI CR reflects the change:
++
+[,shell]
+----
+kubectl get cdi cdi -o jsonpath='{.spec.config.podResourceRequirements.limits.memory}{"\n"}'
+----
+
+. Restart the upgrade.
+
+. After the upgrade completes successfully, remove the `podResourceRequirements` override you added to the `harvester` ManagedChart resource in step 3.
++
+The version you upgraded to already includes the memory-limit fix, so the override is no longer needed.
+
+Related issues: https://github.com/harvester/harvester/issues/11143[#11143] and https://github.com/harvester/harvester/issues/10056[#10056]

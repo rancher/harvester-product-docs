@@ -1,5 +1,6 @@
 = Settings
-:revdate: 2026-09-15
+:description: Configure advanced settings using the UI or kubectl to modify the settings.harvesterhci.io custom resource, including additional CA certificates
+:revdate: 2026-10-02
 :page-revdate: {revdate}
 
 The following is a list of advanced settings that you can use. You can modify the `settings.harvesterhci.io` custom resource using both the UI and the `kubectl` command.
@@ -274,9 +275,11 @@ You must specify key information in the `noProxy` field if you configured the fo
 
 === `instance-manager-resources`
 
-*Definition*: CPU resources reserved for Longhorn Instance Manager pods.
+*Definition*: CPU resources reserved for Longhorn `instance-manager` pods.
 
 {harvester-product-name} synchronizes this setting with the *Guaranteed Instance Manager CPU* setting in {longhorn-product-name}. You can configure separate values for the Longhorn V1 and V2 Data Engines.
+
+For V2 `instance-manager` pods, when the `data-engine-number-of-cpu-cores` setting is set to a value greater than `0`, Longhorn compares that value with the CPU request calculated from `instance-manager-resources.cpu.v2` (rounded up to full cores) and uses the larger value. For more information, see xref:storage/longhorn-v2-data-engine.adoc#_cpu_core_configuration_with_cpu_pinned_virtual_machines[CPU core configuration with CPU-pinned virtual machines].
 
 [CAUTION]
 ====
@@ -320,7 +323,7 @@ The value must be an integer from `0` to `40`.
 
 === `kubevirt-migration`
 
-*Definition*: Cluster-wide configuration for virtual machine xref:virtual-machines/live-migration.adoc[live migration].
+*Definition*: Cluster-wide configuration for virtual machine xref:virtual-machines/vm-migration/live-migration.adoc[live migration].
 
 {harvester-product-name} manages live migration configuration using this setting. Always configure live migration through this setting rather than editing the `kubevirt` object directly.
 
@@ -456,7 +459,7 @@ The `nodeDrainTaintKey` and `network` fields cannot be configured using this set
 debug
 ----
 
-=== `longhorn-v2-data-engine-enabled` [Experimental]
+=== `longhorn-v2-data-engine-enabled` [Technical Preview]
 
 *Definition*: Setting that enables and disables the Longhorn V2 Data Engine.
 
@@ -478,9 +481,42 @@ To disable the Longhorn V2 Data Engine on specific nodes (for example, nodes wit
 
 *Example*:
 
-```
+----
 true
-```
+----
+
+=== `longhorn-v2-data-engine-hugepage-enabled` [Technical Preview]
+
+*Definition*: Setting that enables or disables hugepages when using the Longhorn V2 Data Engine.
+
+Disabling hugepages reduces memory pressure on resource-constrained nodes and increases deployment flexibility. However, performance may be lower compared to running the engine with hugepages enabled.
+
+[CAUTION]
+====
+Disabling hugepages is currently supported only for Longhorn V2 disks that use the AIO bdev driver. Do not disable hugepages when using the NVMe or virtio bdev driver.
+====
+
+*Default Value*: `true`
+
+*Example*:
+
+----
+false
+----
+
+=== `longhorn-v2-data-engine-memory-size` [Technical Preview]
+
+*Definition*: Amount of memory in MiB allocated to the SPDK target daemon when using the Longhorn V2 Data Engine.
+
+You must detach all V2 volumes before changes to this setting take effect.
+
+*Default Value*: `2048`
+
+*Example*:
+
+----
+4096
+----
 
 === `max-hotplug-ratio`
 
@@ -663,10 +699,14 @@ Changing this setting might cause single-node clusters to temporarily become una
 
 === `ssl-parameters`
 
+[NOTE]
+====
+`ssl-parameters` is deprecated as of v1.9.0 and will be removed in a future release. Use `traefik-default-tls-options` to configure TLS settings instead.
+====
+
 *Definition*: Enabled SSL/TLS protocols and ciphers of the UI and API.
 
 [IMPORTANT]
-.important
 ====
 If you misconfigure this setting and are unable to access the UI and API, see xref:troubleshooting/cluster.adoc#_i_cant_access_suse_virtualization_after_i_changed_ssltls_enabled_protocols_and_ciphers[Troubleshooting].
 ====
@@ -909,6 +949,26 @@ You can set the `pass:[{string}]` value using environment variables. This can he
 
 *Default value*: None
 
+=== `traefik-default-tls-options`
+
+*Definition*: Setting that applies default https://doc.traefik.io/traefik/reference/routing-configuration/http/tls/tls-options/[TLS options] for the Traefik Ingress Controller.
+
+[IMPORTANT]
+====
+This setting replaces the `ssl-parameters` setting for the Ingress NGINX Controller (`ingress-nginx`).
+
+If you misconfigure this setting and are unable to access the {harvester-product-name} UI and API, see xref:troubleshooting/cluster.adoc#_i_cant_access_the_cluster_after_i_changed_ssltls_enabled_protocols_and_ciphers[Troubleshooting].
+====
+
+*Default value*: `{"minVersion":"VersionTLS12", "maxVersion":"VersionTLS13", "sniStrict":false,"cipherSuites":[],"clientAuth":{"secretNames":[],"clientAuthType":""}}`
+
+*Example*:
+
+[,json]
+----
+`{"minVersion":"VersionTLS12", "maxVersion":"VersionTLS13", "sniStrict":true,"cipherSuites":["TLS_ECDHE_RSA_WITH_AES_128_GCM_SHA256"],"clientAuth":{"secretNames":[],"clientAuthType":""}}`
+----
+
 === `upgrade-checker-enabled`
 
 *Definition*: Setting that automatically checks for available upgrades.
@@ -1023,7 +1083,7 @@ Example:
 "pauseNodes": ["node-0", "node-2"]
 ----
 
-* `restoreVM`: Option that enables {harvester-product-name} to automatically restore previously running xref:virtual-machines/live-migration.adoc#_non_migratable_virtual_machines[non-migratable virtual machines] after the upgrade is *successfully* completed. You can specify either of the following values:
+* `restoreVM`: Option that enables {harvester-product-name} to automatically restore previously running xref:virtual-machines/vm-migration/live-migration.adoc#_non_migratable_virtual_machines[non-migratable virtual machines] after the upgrade is *successfully* completed. You can specify either of the following values:
 +
 ** `true`: {harvester-product-name} forcibly shuts down *running* and *paused* non-migratable virtual machines on each node. After the upgrade is completed, the previously running virtual machines are automatically restarted, while the paused virtual machines remain shut down.
 ** `false`: This is the default value. In multi-node environments, you must stop all non-migratable virtual machines to allow the upgrade to proceed. {harvester-product-name} does not restart these virtual machines after the upgrade is completed.
