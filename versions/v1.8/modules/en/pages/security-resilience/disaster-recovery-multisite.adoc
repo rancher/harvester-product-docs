@@ -1,0 +1,83 @@
+= Disaster Recovery in Multi-Site Architectures
+:description: Disaster recovery strategies for multi-site architectures using SUSE Virtualization and SUSE Storage.
+:revdate: 2026-10-01
+:page-revdate: {revdate}
+
+When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, you must choose between two distinct disaster recovery (DR) strategies: a *Stretched Cluster (Active-Active)* or a *Multi-Cluster DR (Active-Passive)* setup. 
+
+Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
+
+== Unsupported Topology: Stretched Clusters (Active-Active)
+
+A stretched cluster attempts to span a single {harvester-product-name} deployment across multiple physical data centers. **{harvester-product-name} does not officially support stretched clusters.** 
+
+For multi-site disaster recovery, you must use two independent clusters as described in the Multi-Cluster DR section below. Attempting to stretch a single cluster across physical locations is highly risky due to the following strict architectural constraints:
+
+=== 1. etcd Quorum and Split-Brain Risks
+
+Kubernetes uses etcd to store cluster state, which requires a strict member quorum (a majority of nodes) to function. If you split management nodes evenly across two data centers (for example, 2 nodes in DC-A and 2 nodes in DC-B), a network partition between the sites will cause both sides to lose quorum, bringing the entire cluster down.
+
+While {harvester-product-name} supports a *Witness Node* to act as a tie-breaker in specific three-node clusters, using this role to construct a multi-site stretched cluster is unsupported. Furthermore, witness nodes do not store data. If a cluster uses a witness node, {longhorn-product-name} can only provision a maximum of two replicas for each volume, forcing the cluster to operate with degraded storage high availability.
+
+=== 2. Synchronous Storage Replication Latency
+
+{longhorn-product-name} replicates data across nodes synchronously. The storage network is extremely sensitive to disk write latency. Stretching the storage network over a Wide Area Network (WAN) will directly bottleneck virtual machine performance based on the cross-site network latency.
+
+=== 3. Strict Clock Drift Limits
+
+Accurate time synchronization is mandatory. Clock drift exceeding *500 ms* between any nodes across your sites will cause leader election timeouts in etcd, leading to cluster flap, loss of quorum, and total cluster instability.
+
+== Multi-Cluster Disaster Recovery (Active-Passive)
+
+For true geographic disaster recovery across distinct physical locations, the recommended architecture is an Active-Passive topology. This involves two completely separate {harvester-product-name} clusters (Primary and Secondary) linked by a shared external backup target.
+
+=== 1. The Shared Backup Target (S3 Recommended)
+
+Both the Primary and Secondary clusters must be configured to point to the exact same external backup target. 
+
+[NOTE]
+====
+*S3 vs. NFS*: While {harvester-product-name} supports both S3 and NFS backup targets, using an S3-compatible object store (like AWS S3 or MinIO) is strongly recommended for multi-site DR. S3 does not require mounting and unmounting to the nodes, which significantly reduces the risk of failover complications or stale connections when a site goes offline.
+====
+
+=== 2. Cross-Cluster Virtual Machine Restore (Harvester Workflow)
+
+Failover in {harvester-product-name} relies on synchronizing virtual machine backup metadata rather than directly managing storage volumes. When the Primary and Secondary clusters share the same backup target, the backup controller on the Secondary cluster automatically synchronizes the virtual machine backup metadata.
+
+* *Asynchronous Backups*: Your Recovery Point Objective (RPO) is determined by the cron schedules of the virtual machine backups on the Primary cluster.
+* *Restore Process*: To perform a failover, navigate to the *VM Backups* page on the Secondary cluster, select the synchronized backup, and choose to restore a new virtual machine. {harvester-product-name} will automatically provision the volumes and reconstruct the virtual machine metadata.
+
+=== 3. Virtual Machine Image Prerequisites
+
+For {harvester-product-name} v1.4.0 and later, the backup controller automatically synchronizes the required virtual machine images to the Secondary cluster during the restore process. Manual upload of the images is no longer required.
+
+[IMPORTANT]
+====
+Automatic image synchronization is skipped if a virtual machine image with the same name or display name already exists on the Secondary cluster. If you manually pre-stage images on the Secondary cluster, you must ensure that their names, display names, and configurations are absolutely identical to those on the Primary cluster; otherwise, the cross-cluster restore will fail.
+====
+
+=== Unsupported Workflow: Longhorn DR Volumes 
+
+While upstream {longhorn-product-name} documentation describes a feature called *Disaster Recovery (DR) Volumes*, **this workflow is not supported for {harvester-product-name} disaster recovery**. 
+
+{harvester-product-name} does not manage Longhorn DR volume activation, nor does it reconstruct the Kubernetes `VirtualMachine` custom resources and PersistentVolumeClaims (PVCs) required to use an activated volume. Do not attempt to use Longhorn DR volumes for virtual machine failover. Instead, you must use the supported *Cross-Cluster Virtual Machine Restore (Harvester Workflow)* described above.
+
+== Critical Constraints and Warnings
+
+When designing your storage and backup policies for DR, you must account for the following system behaviors:
+
+=== Unsupported Data Locality (strict-local)
+
+When configuring {longhorn-product-name} StorageClasses for multi-site topologies, you might encounter the `dataLocality: strict-local` setting in the upstream storage documentation. 
+
+**{harvester-product-name} explicitly does not support the `strict-local` option.** This setting is a Longhorn-only feature that directly interferes with {harvester-product-name}'s Virtual Machine Live Migration. You must restrict your StorageClass configurations to the supported `dataLocality` options: `disabled` (the default) or `best-effort`.
+
+=== Ubuntu/Netplan MAC Address Conflicts on Restore
+
+When restoring a VM backup that runs an Ubuntu release later than 16.04 (managed by `netplan`), the restored VM retains the machine ID of the original VM. Because `netplan` uses the machine ID as the DHCP client identifier by default, the restored VM in the DR site may request the same IP address from the DHCP server, causing network conflicts. 
+
+Ensure `dhcp-identifier: mac` is configured in the Ubuntu VM's `netplan` settings prior to taking backups.
+
+=== Longhorn V2 Data Engine Volumes
+
+{longhorn-product-name} V2 Data Engine volumes are **not supported** for backup and restore operations in a multi-site disaster recovery workflow. Do not attempt to use the V2 Data Engine for virtual machines that require cross-cluster failover or DR volume replication. You must use the default V1 Data Engine for these workloads.
