@@ -1,4 +1,4 @@
-= Migrating Virtual Machines from VMware to SUSE Virtualization Using Coriolis
+= Migrating VMware Virtual Machines Using Coriolis
 description: Field guide for migrating workloads from VMware vSphere to SUSE Virtualization using Coriolis.
 :revdate: 2026-10-13
 :page-revdate: {revdate}
@@ -38,12 +38,19 @@ Use a two-stage approach that transfers live replicas prior to final deployment:
 
 === Coriolis
 
-You must download the Coriolis Appliance directly from the link:https://scc.suse.com/download_coriolis_software[SUSE Customer Center] and deploy it on Harvester or a separate management cluster. Do not deploy the appliance on the source VMware cluster scheduled for decommissioning.
+You must download the Coriolis Appliance directly from the link:https://scc.suse.com/download_coriolis_software[SUSE Customer Center (SCC)] and deploy it on Harvester or a separate management cluster.
+
+[CAUTION]
+====
+Do not deploy the appliance on the source VMware cluster scheduled for decommissioning.
+====
 
 * *vCPU*: 4 cores (8 cores for 4 or more concurrent disk transfers)
 * *Memory*: 8 GB RAM (16 GB for high concurrency)
 * *Disk*: 40 GB NVMe or fast SSD
 * *Network*: 10 GbE interface with access to both management and migration VLANs
+
+You must also obtain the appliance ID, generate the corresponding license key, and then activate the license. For instructions, see <<#_appliance_image_license_key>>.
 
 === Networking
 
@@ -129,3 +136,145 @@ If DHCP is not available on the migration network, you must use custom worker te
 * Create a dedicated VLAN in Harvester using a NetworkAttachmentDefinition (NAD) resource.
 * Ensure the DHCP service on this VLAN has a sufficiently large address pool to support concurrent worker virtual machines (each active disk copy requires one worker).
 * Ensure the Coriolis Appliance can reach this subnet on TCP ports 22 and 5566.
+
+[#_appliance_image_license_key]
+=== Coriolis Appliance image and license key
+
+. Download the Coriolis Appliance directly from the link:https://scc.suse.com/download_coriolis_software[SUSE Customer Center (SCC)].
++
+The SCC provides the image directly in the correct format for your platform. Import the downloaded image into Harvester under *Images* to launch the appliance virtual machine.
+
+. Obtain the Appliance ID.
+.. Boot the Coriolis virtual machine.
++
+[NOTE]
+====
+In the serial console, option `2` displays the initial `admin` password, while option `4` configures a static IP if the network has no DHCP.
+====
++
+.. In a browser, open `+https://<appliance-ip>+` and log in.
+.. Click the user icon, and then select *About Coriolis*.
+.. Copy the appliance ID.
+
+.  Generate the license key in SCC.
+.. Log in to the link:https://scc.suse.com/[SUSE Customer Center (SCC)].
+.. Under your Coriolis subscription, click *Generate License Key*.
+.. Paste the appliance ID.
+.. Copy the generated license key.
+
+. Activate the license key.
++
+.. On the Coriolis Web UI, go to *About Coriolis*.
+.. Click *Add license*.
+.. Paste the license key, and click *Add License*.
+
+== Migration
+
+Perform the following steps on the Coriolis Web UI.
+
+. <<#_registering_cloud_endpoints,Register the source and target cloud endpoints.>>
+. <<#_creating_minion_pool,Create the Minion Pool.>>
+. <<#_creating_transferring_replicas,Create and transfer replicas.>>
+. <<#_deploying_replicas,Deploy replicas.>>
+
+[#_registering_cloud_endpoints]
+=== Registering cloud endpoints
+
+. Go to *Cloud Endpoints* and then select *New -> Endpoint*.
+
+. On the *New Cloud Endpoint* window, select *VMware* and configure the following settings:
++
+** *NAME*: Name of the source endpoint
+** *USERNAME* and *PASSWORD*: Credentials for accessing the VMWare vSphere host
+** *HOST*: IP address of the VMWare vSphere host
+** *PORT*: 443
+
+. Click *Validate and save*.
+
+. Select *New -> Endpoint*.
+
+. On the *New Cloud Endpoint* window, select *SUSE Virtualization* and configure the following settings:
++
+** *NAME*: Name of the target endpoint
+** *KUBE CONFIG*: SUSE Virtualization kubeconfig (YAML) file
+
+. Click *Validate and save*.
+
+[#_creating_minion_pool]
+=== Creating the Minion Pool
+
+Coriolis relies on temporary virtual machines (commonly called “minion machines“), which it deploys on the source or destination platforms to perform various actions during transfer operations. To eliminate the overhead of provisioning these virtual machines on demand during transfers, configure a Minion Pool on the SUSE Virtualization destination endpoint:
+
+. Go to *Minion Pools* and then select *New -> Minion Pool*.
+
+. On the *Choose Minion Pool Endpoint* screen, select the SUSE Virtualization endpoint and toggle the switch to *Destination Minion Pool*.
+
+. Configure the required settings, including the migration network VLAN and worker image.
+
+. Click *Save*.
+
+For sizing and pool management guidelines, see the https://cloudbase.it/coriolis-minion-pools-operations-and-usage/[Coriolis Minion Pools Operations and Usage Guide].
+
+[#_creating_transferring_replicas]
+=== Creating and transferring replicas (baseline and incremental syncs)
+
+. Go to *Replicas* and then select *New -> Replica*.
+
+. On the *Select your source cloud* screen, select your VMware endpoint and then click *Next*.
+
+. On the *Select instances* screen, select the virtual machines to be replicated and then click *Next*.
+
+. On the *Select your target cloud* screen, select your SUSE Virtualization endpoint and then click *Next*.
+
+. Set destination parameters:
++
+** *Namespace*: Target namespace (for example, `workload-migration`)
+** *Storage Class*: `harvester-longhorn` (or other if non-default)
+** *Migration Network*: DHCP-enabled migration VLAN
+** *Network Mapping*: Map VMware Port Groups to Harvester VM Networks
+
+. Open *Advanced* migration settings to select the specific migration worker image (see link:https://cloudbase.it/how-to-create-a-migration/#:~:text=Specify%20advanced%20migration%20settings[Specify advanced migration settings]).
+
+. Click **Create and Execute**.
++
+The initial baseline transfer copies disk data while the VM runs uninterrupted.
+
+. Leading up to the cutover window, trigger periodic incremental syncs by selecting the replica and then *Actions -> Execute Replica*.
+
+[#_deploying_replicas]
+=== Deploying replicas (operating system morphing)
+
+Perform the following steps during the maintenance window:
+
+. Select the replica and click **Deploy Replica**.
+
+. Check *Shutdown Source Instance* to shut down the VMware virtual machine before pulling final deltas.
+
+. Select *Preserve Static IPs* if keeping current addresses.
+
+. Select the worker image.
+
+. Click *Deploy*.
+
+Once you click *Deploy*, Coriolis executes the following actions:
+
+. Powers off the source virtual machine on VMware.
+. Performs the final Changed Block Tracking (CBT) delta sync.
+. Clones the replica volumes to production PVCs.
+. Boots a temporary worker virtual machine to perform operating system morphing and inject VirtIO drivers.
+. Starts the permanent virtual machine on Harvester.
+
+== Verification
+
+After deployment completes, perform the following verification checks on the migrated virtual machine:
+
+. On the Harvester UI, open the virtual machine and click *Console*.
+
+. Verify that the operating system boots successfully without kernel panics, boot loops, or missing root disk errors.
+
+. Verify driver installation and guest agent status:
++
+** *Linux*: Run `systemctl status qemu-guest-agent`. Ensure disk devices appear as `/dev/vda` or `/dev/sda` using VirtIO drivers.
+** *Windows*: Open Device Manager and verify that there are no missing drivers or yellow warnings under *Storage controllers* or *Network adapters*.
+
+. Verify network connectivity by confirming that the virtual machine retains its assigned IP address and can reach the default gateway and DNS server.
