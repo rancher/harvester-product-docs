@@ -1,0 +1,131 @@
+= Migrating Virtual Machines from VMware to SUSE Virtualization Using Coriolis
+description: Field guide for migrating workloads from VMware vSphere to SUSE Virtualization using Coriolis.
+:revdate: 2026-10-13
+:page-revdate: {revdate}
+
+== Strategy
+
+[CAUTION]
+====
+Do not run a single-stage cold migration on production disks. Copying multi-terabyte disks while a virtual machine is powered off causes hours of avoidable downtime.
+====
+
+Use a two-stage approach that transfers live replicas prior to final deployment:
+
+. *Replica transfer (baseline & incremental syncs)*: Create a Coriolis Replica while the virtual machine is running on VMware. Coriolis takes a snapshot, reads Changed Block Tracking (CBT) metadata, and copies baseline disks to Harvester persistent volumes. Perform periodic incremental syncs leading up to the maintenance window to copy only changed blocks.
+
+. *Deployment (operating system morphing)*: Deploy the Coriolis Replica with the *Shutdown Instance* execution option enabled. Coriolis powers off the VMware virtual machine, copies the final disk delta, injects VirtIO drivers and `cloud-init`, and boots the virtual machine on Harvester.
+
+== Prerequisites
+
+=== VMware vSphere
+
+* *Snapshots*: Delete orphaned snapshots before enabling CBT or creating the baseline replica.
+* *Changed Block Tracking (CBT)*: Set `ctkEnabled = true` on all virtual disks. Disk mode must be set to *Dependent*. Independent disks and Raw Device Mappings (RDMs) do not support CBT incremental syncs.
+* *File system free space*: Ensure at least 15–20% (or 1–2 GB) of free space on the guest operating system's `/boot` and `/` (root) file systems. The morphing step mounts these partitions to install VirtIO drivers, rebuild `initramfs`/`initrd`, and configure `qemu-guest-agent`. If either partition lacks sufficient space, morphing fails.
+* *VMware Tools*: Ensure VMware Tools is running and reporting guest operating system and network information to vCenter. Coriolis relies on active VMware Tools running on the source virtual machine to read network configurations prior to cutover.
+
+=== Harvester
+
+* *Version*: v1.7, v1.8, or v1.9
+* *Target namespace*: Must be created before migration (for example, `workload-migration`).
+* *StorageClass*: `harvester-longhorn` (or another active StorageClass) with sufficient free capacity.
+* *KubeConfig*: Downloaded from the Harvester UI (*Support -> Download KubeConfig*).
+* *Worker images*: Must be uploaded. For image setup instructions, see link:https://cloudbase.it/kubevirt-harvester-as-a-destination-cloud/#:~:text=Temporary%20worker%20image%20for%20Replica%2FMigration[Temporary worker image for Replica/Migration] in the Coriolis documentation.
+** *Linux*: Cloud image (for example, `openSUSE-Leap-15.6.x86_64-NoCloud.qcow2`) labeled `harvesterhci.io/os-type: linux`.
+** *Windows*: Windows Server image with VirtIO or VMDP drivers and Cloudbase-Init, labeled `harvesterhci.io/os-type: windows`. For more information, see xref:virtual-machines/create-windows-vm.adoc[Create a Windows Virtual Machine].
+** *UEFI*: If you are migrating UEFI guests, ensure the worker image has the annotation `vm.boot/firmware: uefi`.
+
+=== Coriolis
+
+You must download the Coriolis Appliance directly from the link:https://scc.suse.com/download_coriolis_software[SUSE Customer Center] and deploy it on Harvester or a separate management cluster. Do not deploy the appliance on the source VMware cluster scheduled for decommissioning.
+
+* *vCPU*: 4 cores (8 cores for 4 or more concurrent disk transfers)
+* *Memory*: 8 GB RAM (16 GB for high concurrency)
+* *Disk*: 40 GB NVMe or fast SSD
+* *Network*: 10 GbE interface with access to both management and migration VLANs
+
+=== Networking
+
+==== Network paths
+
+Open these network paths before running migrations:
+
+[cols="1,1,1,1,2,2", options="header"]
+|===
+| Source | Destination | Protocol | Port | Purpose | Notes
+
+| Coriolis Appliance
+| VMware vCenter
+| TCP
+| 443
+| Inventory querying and snapshot management
+| Requires vSphere Read + Snapshot permissions
+
+| Coriolis Appliance
+| All ESXi hosts
+| TCP
+| 902
+| Disk block transfer via NFC / OpenVixDiskLib
+| *Critical*: vCenter returns ESXi hostnames as FQDNs. Coriolis must be able to resolve every ESXi FQDN via DNS or `/etc/hosts`.
+
+| Coriolis Appliance
+| Harvester VIP or API
+| TCP
+| 443
+| Kubernetes and KubeVirt API calls
+| Authenticated with the downloaded Harvester `kubeconfig`
+
+| Coriolis Appliance
+| Worker virtual machines
+| TCP
+| 22
+| Worker orchestration and operating system morphing
+| Temporary workers boot on the Harvester VM migration network.
+
+| Coriolis Appliance
+| Worker virtual machines
+| TCP
+| 5566
+| Fast disk data streaming to destination PVCs
+| Recommended protocol (`data_transfer_mechanism = HTTPS`)
+
+| Coriolis Appliance
+| Worker virtual machines
+| TCP
+| 5986
+| Windows worker orchestration
+| Required only when using a Windows worker for operating system morphing
+
+| Appliance and workers
+| DNS or NTP
+| UDP
+| 53 or 123
+| Hostname resolution and time synchronization
+| Clock skew causes TLS authentication and API token failures.
+|===
+
+[WARNING]
+====
+.ESXi host FQDN resolution
+
+vCenter delegates NFC disk streams to the ESXi host running the virtual machine, returning the host's *FQDN* rather than its IP address. If the Coriolis Appliance cannot resolve that FQDN, disk transfers fail immediately on port 902. If internal DNS does not resolve ESXi hostnames, add them to `/etc/hosts` on the Coriolis Appliance.
+====
+
+==== DHCP on the VM migration network
+
+An active DHCP server on the Harvester VM migration network is strongly recommended. During disk copy and operating system morphing, Coriolis boots temporary worker virtual machines that attach target PVCs, format file systems, install drivers, and stream data over TCP ports 22 (SSH) and 5566 (HTTPS). DHCP allows these temporary workers to automatically acquire IP addresses upon booting.
+
+Separately, Coriolis can retain existing static IP configurations on your target workload virtual machines after migration. To preserve source static IPs on Harvester, ensure VMware Tools is active on the source virtual machine prior to cutover and select *Preserve Static IPs* in the deployment settings.
+
+[TIP]
+====
+.Static IP template alternative for workers
+If DHCP is not available on the migration network, you must use custom worker template images preconfigured with static IP addresses. Note that each static template supports only one concurrent transfer task.
+====
+
+==== Dedicated migration VLAN
+
+* Create a dedicated VLAN in Harvester using a NetworkAttachmentDefinition (NAD) resource.
+* Ensure the DHCP service on this VLAN has a sufficiently large address pool to support concurrent worker virtual machines (each active disk copy requires one worker).
+* Ensure the Coriolis Appliance can reach this subnet on TCP ports 22 and 5566.
