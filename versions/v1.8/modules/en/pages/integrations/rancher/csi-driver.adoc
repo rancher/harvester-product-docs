@@ -1,6 +1,6 @@
 = Harvester CSI Driver
 :description: Use the Harvester CSI Driver to connect SUSE Virtualization clusters and hot-plug volumes for guest Kubernetes nodes
-:revdate: 2026-07-29
+:revdate: 2026-10-01
 :page-revdate: {revdate}
 
 The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the {harvester-product-name} cluster and hot-plugs volumes to the virtual machines to provide native storage performance.
@@ -49,10 +49,6 @@ The Harvester CSI Driver supports the following features:
 
 For **ReadWriteOnce (RWO)** volumes, the Harvester CSI Driver hotplugs underlying persistent volumes directly to virtual machines acting as guest nodes.
 
-KubeVirt enforces a hard limit of 256 volumes per virtual machine instance, including non-CSI disks such as the root disk and cloud-init disk. Consequently, a single guest node can realistically host a maximum of 256 CSI volumes.
-
-If too many PVC-dependent workloads are scheduled on the same guest node, volume attachment will fail with the error `VM Schema Invalid: Max Disk Limit (256) Exceeded on Guest Cluster`. To prevent this issue, distribute PVC-dependent workloads across multiple guest nodes or add guest worker nodes.
-
 [CAUTION]
 ====
 A https://github.com/harvester/harvester/issues/6849[known issue] in v0.1.20 of the Harvester CSI Driver causes volumes to get stuck when the host cluster is running a {harvester-product-name} version that was released before v1.4.0.
@@ -90,7 +86,15 @@ This issue was fixed in v0.1.21. If your system is affected, you can follow the 
 
 [NOTE]
 ====
-Currently, the Harvester CSI Driver only supports single-node read-write (RWO) volumes. Check https://github.com/harvester/harvester/issues/1992[issue #1992] for information regarding possible multi-node read-only (ROX) and read-write (RWX) support.
+The Harvester CSI Driver supports *ReadWriteMany (RWX)* volumes starting with driver version *v0.1.20* ({harvester-product-name} v1.4 and later) by mounting host `NetworkFS` endpoints over NFS. 
+
+To use RWX volumes on guest clusters, ensure the following requirements are met:
+
+* The {harvester-product-name} host cluster has the `rwx-network` setting configured.
+* An RWX `StorageClass` (with `provisioner: driver.longhorn.io`) is created on the host cluster.
+* An NFS client is installed on each guest cluster node (`nfs-common`, `nfs-utils`, or `nfs-client`).
+
+For full configuration steps, see xref:_rwx_volume_support[RWX Volume Support].
 ====
 
 === Deploying with Harvester RKE2 node driver
@@ -779,3 +783,33 @@ You can upgrade K3s using the Rancher UI.
 Because newer versions of the Harvester CSI Driver have more capabilities, you may need to update your RBAC permissions. Some features and enhancements may not function correctly if you lack the necessary permissions.
 
 For more information, see the https://github.com/harvester/harvester/blob/v1.8/deploy/charts/harvester/templates/rbac.yaml[RBAC configuration] in the GitHub repository.
+
+== Scaling and Resource Limits
+
+When designing guest clusters and allocating storage, you must account for hardware and resource constraints enforced by both the virtualization layer ({harvester-product-name}) and the storage data engine ({longhorn-product-name}).
+
+=== Guest Node RWO Volume Limits
+
+KubeVirt enforces an API schema limit of **256 total disks/volumes per virtual machine instance (VMI)**. Because guest Kubernetes nodes are provisioned as virtual machines, a single guest node can only attach a finite number of ReadWriteOnce (RWO) volumes as block disks. 
+
+* This limit **includes** non-CSI disks such as the root disk and cloud-init disk. Consequently, the maximum number of RWO CSI volumes a guest node can host is 256 minus the VM's existing disks.
+* ReadWriteMany (RWX) volumes do **not** consume these disk slots because they are mounted through NFS.
+* If too many RWO PVC-dependent workloads are scheduled on a single guest node, volume attachment will fail with the error: `VM Schema Invalid: Max Disk Limit (256) Exceeded on Guest Cluster`. 
+* **Recommendation:** To prevent this issue, distribute RWO PVC-dependent workloads across multiple guest worker nodes.
+
+=== {longhorn-product-name} V2 Data Engine Resource Constraints
+
+If you enable the {longhorn-product-name} V2 Data Engine, the underlying {harvester-product-name} nodes must meet strict resource reservations to guarantee stability and prevent I/O starvation. 
+
+Even if you optimize {longhorn-product-name} resource reservations in {harvester-product-name} v1.8, the V2 Data Engine strictly requires the following on each node:
+
+* **HugePages:** 2 GiB of 2 MiB-sized pages (1024 pages).
+* **CPU Cores:** 1 dedicated CPU core assigned to the V2 instance-manager pod. This is required to handle the busy-polling `spdk_tgt` process, which consumes 100% of a dedicated core to efficiently process I/O requests.
+
+=== Performance, Scalability, and Node Sizing
+
+Because cluster specifications vary widely across environments (for example, bare-metal vs. cloud instances), storage performance and practical scalability—such as maximum IOPS and maximum volumes per cluster—depend heavily on your specific hardware and topology.
+
+The {longhorn-product-name} project publishes reference benchmark reports to illustrate performance characteristics across representative node specifications. Note that these reports serve as historical baseline data (conducted on earlier Longhorn releases such as v1.6.x and v1.7.0) rather than version-specific metrics for {longhorn-product-name} v1.11.2 or the V2 Data Engine.
+
+For reference setups, node sizing guides, and historical performance benchmarks, see the official https://github.com/longhorn/longhorn/tree/v1.11.2/scalability/reference-setup-performance-scalability-and-sizing-guidelines[{longhorn-product-name} Setup, Performance, Scalability, and Sizing Guidelines].
