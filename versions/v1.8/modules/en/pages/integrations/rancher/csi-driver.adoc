@@ -1,5 +1,5 @@
 = Harvester CSI Driver
-:revdate: 2026-10-01
+:revdate: 2026-10-19
 :page-revdate: {revdate}
 
 The Harvester Container Storage Interface (CSI) driver provides a standard CSI interface used by guest Kubernetes clusters. It connects to the {harvester-product-name} cluster and hot-plugs volumes to the virtual machines to provide native storage performance.
@@ -85,15 +85,22 @@ This issue was fixed in v0.1.21. If your system is affected, you can follow the 
 
 [NOTE]
 ====
-The Harvester CSI Driver supports *ReadWriteMany (RWX)* volumes starting with driver version *v0.1.20* ({harvester-product-name} v1.4 and later) by mounting host `NetworkFS` endpoints over NFS. 
+The Harvester CSI Driver supports **ReadWriteMany (RWX)** volumes starting with driver version **v0.1.20** ({harvester-product-name} v1.4 and later) by mounting host `NetworkFS` endpoints over NFS. 
 
-To use RWX volumes on guest clusters, ensure the following requirements are met:
+*Key prerequisites include*:
 
-* The {harvester-product-name} host cluster has the `rwx-network` setting configured.
+* The {harvester-product-name} host cluster has the `rwx-network` setting configured and `networkfs-manager` pods running.
+* Updated RBAC permissions are applied on the host cluster.
 * An RWX `StorageClass` (with `provisioner: driver.longhorn.io`) is created on the host cluster.
+* Guest VMs are configured with a secondary NIC connected to the storage network and assigned an IP address.
 * An NFS client is installed on each guest cluster node (`nfs-common`, `nfs-utils`, or `nfs-client`).
 
-For full configuration steps, see xref:_rwx_volume_support[RWX Volume Support].
+*Known RWX Limitations*:
+
+* Online volume expansion is not supported for RWX volumes.
+* Creating RWX volumes from snapshots is not supported.
+
+For complete setup instructions and network configuration steps, see <<_rwx_volume_support,RWX Volume Support>>.
 ====
 
 === Deploying with Harvester RKE2 node driver
@@ -115,7 +122,7 @@ Ensure that you have the following prerequisites in place:
 +
 [,shell]
 ----
-  export KUBECONFIG=/path/to/your/harvester-kubeconfig
+export KUBECONFIG=/path/to/your/harvester-kubeconfig
 ----
 
 Perform the following steps to deploy the Harvester CSI Driver manually:
@@ -796,14 +803,11 @@ KubeVirt enforces an API schema limit of **256 total disks/volumes per virtual m
 * If too many RWO PVC-dependent workloads are scheduled on a single guest node, volume attachment will fail with the error: `VM Schema Invalid: Max Disk Limit (256) Exceeded on Guest Cluster`. 
 * **Recommendation:** To prevent this issue, distribute RWO PVC-dependent workloads across multiple guest worker nodes.
 
-=== {longhorn-product-name} V2 Data Engine Resource Constraints
+=== {longhorn-product-name} V2 Data Engine Host Prerequisites
 
-If you enable the {longhorn-product-name} V2 Data Engine, the underlying {harvester-product-name} nodes must meet strict resource reservations to guarantee stability and prevent I/O starvation. 
+Host-level node hardware requirements—including HugePages allocation, dedicated CPU core reservations for the V2 instance-manager pod, and local NVMe disk provisioning—are defined canonical parameters of the storage engine.
 
-Even if you optimize {longhorn-product-name} resource reservations in {harvester-product-name} v1.8, the V2 Data Engine strictly requires the following on each node:
-
-* **HugePages:** 2 GiB of 2 MiB-sized pages (1024 pages).
-* **CPU Cores:** 1 dedicated CPU core assigned to the V2 instance-manager pod. This is required to handle the busy-polling `spdk_tgt` process, which consumes 100% of a dedicated core to efficiently process I/O requests.
+For detailed host node prerequisite requirements when enabling the V2 Data Engine on {harvester-product-name}, see xref:../storage/longhorn-v2-data-engine.adoc#_prerequisites[Longhorn V2 Data Engine Prerequisites].
 
 === Performance, Scalability, and Node Sizing
 
