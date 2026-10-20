@@ -1,19 +1,492 @@
 = Harvester Cloud Provider
-:revdate: 2026-08-18
+:description: Provision RKE2 and K3s clusters in {rancher-short-name} using the Harvester Cloud Provider with SUSE Virtualization support
+:revdate: 2026-10-05
 :page-revdate: {revdate}
 
-You can provision xref:integrations/rancher/node-driver/rke2-cluster.adoc[RKE2] clusters in Rancher using the built-in Harvester Node Driver. {harvester-product-name} provides <<#_load_balancer_support,load balancer>> and xref:integrations/rancher/csi-driver.adoc[storage passthrough] support to the guest Kubernetes cluster.
+You can provision xref:integrations/rancher/node-driver/rke2-cluster.adoc[{rke2-product-name}] clusters in {rancher-product-name-tm} using the built-in *Harvester Node Driver*. This component provides <<#_load_balancer_support,load balancer>> and xref:integrations/rancher/csi-driver.adoc[storage passthrough] capabilities to guest Kubernetes clusters.
 
-== Backward Compatibility Notice
+== Main functionalities
+
+The *Harvester Cloud Provider* (also known as *Cloud Controller Manager*) implements a subset of the `cloudprovider` interface defined by `k8s.io/cloud-provider`.
+
+* <<#_guest_node_instance_metadata,Node metadata discovery and reporting>>: Dynamically discovers and reports node metadata (such as node names, regions, zones, and IP addresses), acting as a critical bootstrap component for the guest cluster.
+
+* <<#_load_balancer_support,Load balancer provisioning>>*: Automatically provisions and configures load balancers for Kubernetes `Service` objects (type: `LoadBalancer`), routing external traffic to the correct guest nodes.
+
+=== Strictly cloud-native operation
+
+The Harvester Cloud Provider is built on the Kubernetes Cloud Controller Manager (CCM) framework. It operates natively by querying and managing resources directly through the {harvester-product-name} Kubernetes API server:
+
+* *API-driven metadata*: Retrieves node metadata (such as `ProviderID`, region/zone topology, and IP addresses) by observing `VirtualMachineInstance` (VMI) status directly from the API server, eliminating host-level commands and hard-coded network interfaces or ports. Using the VMI status as the single source of truth guarantees consistent and deterministic metadata reporting across all nodes, providing a reliable foundation for downstream node lifecycle synchronization and load balancer traffic routing.
+
+* *Centralized management*: Runs as a standard Deployment rather than a per-node DaemonSet, centrally querying and monitoring virtual machine metadata across the guest cluster via standard Kubernetes API interactions.
+
+* *CCM framework alignment*: Uses both standard public flags and extended {harvester-product-name} flags (`--flag`) to modularly toggle controllers (standard CCM or custom VMI) and configure networking for complex cluster setups.
+
+== Backward compatibility notice
 
 [NOTE]
 ====
-Please note a known backward compatibility issue if you're using the Harvester Cloud Provider version *v0.2.2* or higher. If your {harvester-product-name} version is below *v1.2.0* and you intend to use newer RKE2 versions (i.e., >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`), it is essential to upgrade your cluster to v1.2.0 or a higher version before proceeding with the upgrade of the guest Kubernetes cluster or Harvester Cloud Provider.
+Please note a known backward compatibility issue if you're using the Harvester Cloud Provider version *v0.2.2* or higher. If your {harvester-product-name} version is below *v1.2.0* and you intend to use newer {rke2-short-name} versions (i.e., >= `v1.26.6+rke2r1`, `v1.25.11+rke2r1`, `v1.24.15+rke2r1`), it is essential to upgrade your cluster to v1.2.0 or a higher version before proceeding with the upgrade of the guest Kubernetes cluster or Harvester Cloud Provider.
 
 For more informmation, see the *Harvester CCM & CSI Driver with RKE2 Releases* section of the https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[Support Matrix].
 ====
 
-== Deploying
+== Deployment
+
+The Harvester Cloud Provider is packaged as an official Helm chart and is natively integrated into the {rancher-short-name} and {rke2-short-name} ecosystem.
+
+* *Automatic deployment ({rke2-short-name})*: When provisioning an {rke2-short-name} guest cluster using the Harvester Node Driver, the Harvester Cloud Provider is automatically deployed to the guest cluster during cluster initialization as an *{rke2-short-name} bootstrap chart*.
+
+* *Manual deployment*: You can also <<#_deploying_k3s_cluster,manually install>>, upgrade, or customize the provider's configuration settings using the official Helm chart.
+
+=== Chart parameters
+
+The following table lists the most common parameters:
+
+|===
+| Parameter | Description | Default Value | First Available Version
+
+| `extraArgs`
+| Additional CLI flags passed to cloud provider container
+| `[]`
+| 0.2.12
+
+| `cloudConfigPath`
+| Legacy host path to cloud-config file
+| `"/var/lib/rancher/rke2/etc/config-files/cloud-provider-config"` (Versions 0.2.3 to 0.2.9: `"/etc/kubernetes/cloud-config"`)
+| 0.2.10
+
+| `cloudConfig.secretName`
+| Name of Kubernetes Secret containing cloud-config data
+| `""`
+| 0.2.12
+
+| `cloudConfig.secretKey`
+| Key of Kubernetes Secret containing cloud-config data
+| `"cloud-config"`
+| 0.2.12
+
+| `cloudConfig.hostPath`
+| Fallback host path to cloud-config file
+| `"/var/lib/rancher/rke2/etc/config-files/cloud-provider-config"`
+| 0.2.12
+
+| `global.cattle.clusterName`
+| Name of target cluster in {rancher-short-name}
+| `""`
+| 0.2.3
+
+| `kube-vip.enabled`
+| Enables embedded `kube-vip` for load balancer VIPs
+| `true`
+| 0.2.7
+
+| `kube-vip.env.svc_enable`
+| Enables `kube-vip` service controller
+| `"true"`
+| 0.2.7
+
+| `kube-vip.env.svc_election`
+| Enables leader election for services (required for `externalTrafficPolicy: Local`)
+| `"false"`
+| 0.2.12
+|===
+
+For information about other configurable parameters, refer to the chart's https://github.com/harvester/charts/blob/release/charts/harvester-cloud-provider/values.yaml[`values.yaml`].
+
+=== {rancher-short-name} UI options
+
+The {rancher-short-name} UI provides dynamic forms driven by the chart's `questions.yaml` file. While these forms expose standard settings, you can use the *Edit as YAML* feature to configure any parameter in `values.yaml`.
+
+The following image shows the default UI options for Harvester Cloud Provider v0.2.12:
+
+image::rancher/hcp-ui-options.png[Rancher UI - Harvester Cloud Provider settings]
+
+=== Cluster identifier configuration
+
+The `global.cattle.clusterName` parameter configures a unique cluster identifier that the Harvester Cloud Provider uses to tag and track resources allocated in the {harvester-product-name} cluster.
+
+[,yaml]
+----
+global:
+  cattle:
+    clusterName: "cgc"
+----
+
+How the cluster identifier is set depends on your deployment method:
+
+* *Manual chart deployments*: If you deploy or manage the `harvester-cloud-provider` chart manually, you must explicitly set a unique name for your cluster.
+
+* *{rancher-short-name}-provisioned clusters*: If you deploy an {rke2-short-name} guest cluster using the {rancher-short-name} UI, {rancher-short-name} automatically injects the cluster's unique name into `global.cattle.clusterName`.
++
+In addition, {rancher-short-name} automatically embeds the `harvester-cloud-provider` chart configuration in the `Cluster` custom resource (`provisioning.cattle.io/v1`). You can edit this resource using the {rancher-short-name} UI.
++
+[,yaml]
+----
+apiVersion: provisioning.cattle.io/v1
+kind: Cluster
+metadata:
+  name: cgc
+spec:
+  rkeConfig:
+    chartValues:
+      harvester-cloud-provider:
+        cloudConfigPath: /var/lib/rancher/rke2/etc/config-files/cloud-provider-config
+        global:
+          cattle:
+            clusterName: cgc
+----
++
+image::rancher/hcp-chart-config-path.png[Rancher UI - Harvester Cloud Provider chart configuration path]
++
+[TIP]
+====
+All Harvester Cloud Provider parameters must be nested directly under the `harvester-cloud-provider` key. Pay close attention to YAML indentation, as incorrect formatting can cause Helm to ignore or misinterpret your parameters.
+
+When using the *Edit as YAML* feature on the {rancher-short-name} UI, the built-in editor automatically checks syntax and highlights indentation errors before you save.
+====
+
+==== Resource allocation and leakage risks
+
+If the `global.cattle.clusterName` parameter is missing, the Cloud Controller Manager framework uses `kubernetes` as the cluster name by default.
+
+Because {harvester-product-name} manages multi-tenant and multi-cluster environments, using this generic name prevents {harvester-product-name} from effectively determining which guest cluster owns specific backing resources (such as load balancers). This can cause resource tracking conflicts, resource leaks, or unexpected resource exhaustion across clusters sharing the same {harvester-product-name} installation.
+
+Starting with Harvester Cloud Provider v0.2.12 and {harvester-product-name} v1.9.0, both `harvester-cloud-provider` (running in the guest cluster) and `harvester-load-balancer` (running in the {harvester-product-name} cluster) generate warning logs whenever `global.cattle.clusterName` is missing or `kubernetes` is used as the cluster name. If you observe these warning logs, inspect and update your Helm chart parameters immediately.
+
+==== Parameter alignment and terminology mapping
+
+The cluster identifier is represented by different parameter names depending on where it is configured or referenced.
+
+|===
+| Context or Location | Parameter | Alignment Notes
+
+| {rancher-short-name} UI
+| `Cluster Name`
+| Set during guest cluster creation.
+
+| Harvester Cloud Provider Helm chart
+| `global.cattle.clusterName`
+| Configured in `values.yaml`. Injected automatically by the {rancher-short-name} UI for {rke2-short-name} guest clusters; must be set manually in all other cases.
+
+| Harvester Cloud Provider deployment flag
+| `--cluster-name`
+| Internal container argument injected into the Harvester Cloud Provider deployment. The Helm chart template automatically converts `global.cattle.clusterName` to `--cluster-name`. When troubleshooting, check the deployment manifest to verify this parameter, but **do not edit it directly**.
+
+| Cloud Config Generation
+| `serviceAccountName`
+| Parameter specified when generating the cloud-config payload.
+|===
+
+[WARNING]
+====
+*Critical alignment requirement*
+
+Although different components use different parameter names, they all represent the exact same cluster identifier and *must strictly match*. If these values do not match, the Harvester Cloud Provider will fail to authenticate or properly manage resources in {harvester-product-name}.
+====
+
+=== Remote cluster cloud configuration
+
+Harvester Cloud Provider requires a <<#_generating_cloudconfig_cloudprovider,cloud-config>> payload to connect to the remote {harvester-product-name} cluster for management of virtual machine metadata and load balancers. You can configure this payload using either legacy host-path mounts or Kubernetes Secrets.
+
+==== File-based cloud configuration (legacy)
+
+This approach relies on mounting the configuration file directly from the {harvester-product-name} node's filesystem.
+
+* *Default path* (`cloudConfigPath`): {rke2-short-name} automatically injects the configuration file into `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config` for the cloud-provider container to access.
+
+* *Configuration syntax*:
++
+[,yaml]
+----
+    cloudConfigPath: "/var/lib/rancher/rke2/etc/config-files/cloud-provider-config"
+----
+
+* *Host path fallback* (`cloudConfig.hostPath`): This is maintained for backward compatibility and evaluated only if `cloudConfig.secretName` is empty and `cloudConfigPath` is omitted.
+
+==== Secret-based cloud configuration (recommended)
+
+This approach uses a Kubernetes Secret to store and manage the configuration payload natively inside the cluster.
+
+[,yaml]
+----
+cloudConfig:
+  secretName: ""
+  secretKey: "cloud-config"
+  hostPath: "/var/lib/rancher/rke2/etc/config-files/cloud-provider-config"
+----
+
+. Generate and copy the cloud-config content.
++
+You must <<#_generating_cloudconfig_cloudprovider,generate>> and copy the full string under the `content` key. This value is already Base64-encoded.
++
+[IMPORTANT]
+====
+The value of `namespace` must match the namespace where the guest cluster is deployed, and the value of `serviceAccountName` must match the exact cluster name. Mismatched values will prevent the Harvester Cloud Provider from connecting to {harvester-product-name}.
+====
++
+image::rancher/hcp-config-secret-content.png[Rancher UI - Harvester Cloud Provider Cloud Config Secret contents]
+
+. Paste the secret manifest during cluster provisioning.
++
+When provisioning the new guest cluster using the {rancher-short-name} UI, paste the generated secret definition onto the *Additional Manifest* tab on the *Cluster Configuration* screen.
++
+[,yaml]
+----
+apiVersion: v1
+kind: Secret
+metadata:
+  name: hcp-cloud-config
+  namespace: kube-system
+type: Opaque
+data:
+  cloud-config: <BASE64_ENCODED_CLOUD_CONFIG>
+----
++
+Consider the following requirements when creating the secret:
++
+** *Namespace*: The secret must be created in `kube-system` to match the default `harvester-cloud-provider` namespace.
+** *Secret key*: If you use a custom key name instead of the default `cloud-config` under `data`, update the *Cloud Config Secret Key* field on the *Addon: Harvester Cloud Provider* tab.
++
+image::rancher/hcp-config-additional-manifest.png[Rancher UI - Additional Manifest]
+
+. Reference the secret name in the Harvester Cloud Provider add-on.
++
+Specify the secret name in the *Cloud Config Secret Name* field on the *Addon: Harvester Cloud Provider* tab.
++
+image::rancher/hcp-config-sc-name.png[Rancher UI - Cloud Config Secret Name field]
+
+[IMPORTANT]
+====
+In SELinux-enabled clusters, container runtimes enforce strict security context labeling that blocks the `harvester-cloud-provider` container from reading host files under `/var/lib/rancher/rke2/...` (`EACCES: Permission denied`).
+
+Using a Kubernetes Secret eliminates host path dependencies, allowing the pod to access the configuration natively via Kubernetes volume mounts without SELinux permission violations.
+====
+
+Configuration settings are evaluated in the following order of precedence:
+
+|===
+| Parameter | Precedence | Description
+
+| `cloudConfig.secretName`
+| Highest
+| Mounts a Kubernetes Secret and overrides all other settings when set.
+
+| `cloudConfig.secretKey`
+| N/A
+| Specifies the key inside the Secret containing the configuration payload (defaults to `cloud-config`).
+
+| `cloudConfigPath`
+| Secondary (legacy default)
+| Maintained for backward compatibility; evaluated if `secretName` is empty.
+
+| `cloudConfig.hostPath`
+| Fallback
+| Evaluated only when `secretName` is empty and `cloudConfigPath` is explicitly set to `""`.
+|===
+
+[#_extra_arguments]
+=== Extra arguments
+
+Built on top of the https://kubernetes.io/docs/concepts/architecture/cloud-controller/[Kubernetes Cloud Controller Manager] (CCM) framework, the Harvester Cloud Provider supports standard upstream CCM flags as well as {harvester-product-name}-specific extended runtime flags. These flags allow you to flexibly tune controller features, networking logic, and system behavior.
+
+[NOTE]
+====
+Prior to v0.2.12, custom flags added directly to the `harvester-cloud-provider` deployment or pod specification were non-persistent and overwritten during guest cluster upgrades or redeployments.
+
+Starting with v0.2.12, the Helm chart natively supports flag configuration via `extraArgs`, ensuring custom arguments persist across upgrades and redeployments.
+====
+
+==== Supported flags
+
+The Harvester Cloud Provider supports both standard upstream CCM flags and {harvester-product-name}-specific extended flags.
+
+|===
+| Flag | Category | Description
+
+| `--controllers`
+| CCM framework
+| List of CCM controllers to enable (for example, `cloud-node-controller` and `node-route-controller`). Omit a controller to disable it.
+
+| `--v`
+| CCM framework
+| Logging verbosity level (for example, `--v=5` for debug logging).
+
+| `--disable-vmi-controller`
+| {harvester-product-name} extended
+| Disables {harvester-product-name}'s custom VMI controller.
+
+| `--show-full-help-on-error`
+| {harvester-product-name} extended
+| Prints full CLI help if a flag parsing error occurs at startup.
+
+| `--management-network`
+| Networking and IP selection
+| Target virtual machine network name used to allocate load balancer IP addresses and report node IP addresses in multi-network environments.
+
+| `--node-ip-cidr`
+| Networking and IP selection
+| CIDR range for exact node IP selection in multi-IP address environments.
+
+| `--node-exclude-ip-ranges`
+| Networking and IP selection
+| Comma-separated list of IP addresses or subnets to exclude from node status reports.
+
+| `--disable-annotation-alpha-provided-ip-addr`
+| Networking and IP selection
+| Disables legacy alpha annotations, forcing the provider to rely strictly on CIDR logic.
+|===
+
+Consider the following usage notes when configuring complex flags:
+
+* `--disable-vmi-controller`: The standard `--controllers` flag only manages upstream CCM controllers. {harvester-product-name} uses a dedicated VMI controller to watch VirtualMachineInstance resources and sync topology changes (such as region and zone updates) to guest `Node` objects. Set this flag to `false` to ensure dynamic topology sync works correctly as detailed in <<#_guest_node_instance_metadata>>.
+
+* `--show-full-help-on-error`: By default, the Harvester Cloud Provider silences the upstream CCM's long help output on startup errors to keep logs clean. Set this flag to `true` only when debugging startup configuration issues.
+
+* `--management-network`: Essential for environments where guest nodes are attached to multiple VM networks. Setting this flag overrides the default "first-hit" network selection logic.
++
+The target {harvester-product-name} cluster must run {harvester-product-name} v1.9.0 or later to support the `--management-network` flag for `LoadBalancer` services, designating it as the target load balancer network. Earlier {harvester-product-name} versions fall back to `first-fit` resolution to select the target network. For more information, see xref:networking/ip-pool.adoc#_guest_cluster_load_balancer_network_resolution[Guest Cluster Load Balancer Network Resolution].
+
+==== Configuration examples
+
+The following examples demonstrate how to configure `extraArgs` for various deployment scenarios:
+
+===== Disabling the default load balancer controller
+
+Use this configuration when deploying an alternative to the default load balancer controller of the Harvester Cloud Provider.
+
+[,yaml]
+----
+extraArgs:
+  - "--controllers=cloud-node-controller,cloud-node-lifecycle-controller,node-route-controller"
+----
+
+[IMPORTANT]
+====
+Because `kube-vip` is embedded within the Harvester Cloud Provider to advertise load balancer IP addresses, disabling the upstream service controller typically requires disabling `kube-vip` in your Helm values as well.
+
+If you keep `kube-vip` enabled while using an alternative load balancer controller, ensure the controller is compatible with `kube-vip`. Integrating third-party load balancer controllers with `kube-vip` is outside the scope of the Harvester Cloud Provider.
+====
+
+===== Multi-network and multi-IP configurations (recommended)
+
+When guest cluster nodes use multiple networks, dual-stack IPs, or secondary IPv4 addresses on a single interface, the default `first-hit` selection logic can cause non-deterministic IP reporting.
+
+The following scenarios demonstrate how to use `extraArgs` to handle complex networking setups:
+
+*Network selection in multi-network environments*
+
+* Scenario: Nodes are attached to multiple {harvester-product-name} VM networks (for example, `default/vlan-100` and `default/vlan-200`).
+* Default behavior: The provider selects an interface non-deterministically based on discovery order.
+* Goal: Force the provider to allocate load balancer IPs and report node IPs exclusively from a designated network (for example, `default/vlan-100`).
+
+[,yaml]
+----
+extraArgs:
+  - "--management-network=default/vlan-100"
+----
+
+*Dual-stack interfaces in single-stack (IPv4-only) clusters*
+
+* Scenario: Nodes are assigned both IPv4 and IPv6 addresses in an IPv4-only cluster.
+* Default behavior: The provider may report both addresses as `InternalIP`.
+* Goal: Ensure the IPv4 address is assigned as the primary `InternalIP`, relegating the IPv6 address to `ExternalIP`.
+
+[,yaml]
+----
+extraArgs:
+  - "--node-ip-cidr=192.168.1.0/24"
+----
+
+*Excluding secondary IP ranges on the same network*
+
+* Scenario: Nodes have multiple IPv4 addresses on the same management interface (`default/vlan-100`), such as `192.168.100.0/25` for node management and `192.168.100.128/25` for internal storage.
+* Default behavior: The provider assigns the first IPv4 address as `InternalIP` and automatically publishes the second IPv4 address as `ExternalIP`.
+* Goal: Enforce network boundaries and prevent secondary internal subnets from leaking into Kubernetes node status as `ExternalIP`.
+
+[,yaml]
+----
+extraArgs:
+  - "--management-network=default/vlan-100" # Specifies the target network interface
+  - "--node-ip-cidr=192.168.100.0/25" # Locks the primary internal IP selection to the node management subnet range
+  - "--node-exclude-ip-ranges=192.168.100.128/25" # Prevents the secondary IP range from being reported as ExternalIP
+----
+
+*Production Multi-Network Stack*
+
+Goal: Combine strict network selection, subnet binding, range exclusion, and runtime flags for a deterministic production configuration.
+
+[,yaml]
+----
+extraArgs:
+    - "--management-network=default/vlan-100"
+    - "--node-ip-cidr=192.168.100.0/25"
+    - "--node-exclude-ip-ranges=192.168.100.128/25"
+    - "--disable-annotation-alpha-provided-ip-addr=true"
+    - "--show-full-help-on-error=true"
+----
+
+===== Limitation: {rancher-short-name} UI IP synchronization
+
+The Harvester Cloud Provider correctly applies network flags and updates Kubernetes node status (`InternalIP` or `ExternalIP`). However, the {rancher-short-name} UI does not dynamically re-sync node IP changes if they are updated after initial node registration (see https://github.com/harvester/harvester/issues/10381#issuecomment-5264412173[issue #10381]).
+
+*Example*: On an IPv4-only cluster where nodes initially report both IPv4 and IPv6 addresses as `InternalIP`, specifying `--node-ip-cidr` enables the Harvester Cloud Provider to successfully filter the Kubernetes node status to IPv4 addresses only. However, the {rancher-short-name} UI may continue displaying the unsynced IP information.
+
+*Workaround*: Set network flags in `extraArgs` during initial cluster bootstrapping. Applying these flags to an existing cluster requires a cluster redeployment for the {rancher-short-name} UI to reflect the updated node metadata.
+
+=== Embedded `kube-vip` integration
+
+The Harvester Cloud Provider integrates with `kube-vip` to provision and manage virtual IPs for Kubernetes `LoadBalancer` services.
+
+==== Disabling the embedded `kube-vip`
+
+If you want the Harvester Cloud Provider to retain its load balancer IP allocation logic (such as pool-based IP assignment), but prefer using an external BGP/ARP speaker or alternative tool to handle VIP traffic routing, disable the embedded `kube-vip` sub-chart:
+
+[,yaml]
+----
+kube-vip:
+  enabled: false
+----
+
+==== Configuring support for `externalTrafficPolicy: Local`
+
+By default, `kube-vip` runs exclusively on management nodes. To support `externalTrafficPolicy: Local` for `LoadBalancer` services, traffic must route directly to nodes hosting active workload pods.
+
+. Enable service leader election by setting `svc_election: "true"` in the `kube-vip` environment configuration.
+
+. Expand `kube-vip.affinity` rules so `kube-vip` pods run on both management nodes and worker nodes.
++
+[,yaml]
+----
+    kube-vip:
+      env:
+        svc_election: "true"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+            - matchExpressions:
+              - key: node-role.kubernetes.io/control-plane
+                operator: Exists
+            - matchExpressions:
+              - key: node-role.kubernetes.io/worker
+                operator: Exists
+----
+
+[IMPORTANT]
+====
+**Best practice: Ensure node coverage for `externalTrafficPolicy: Local`**
+
+Deploying `kube-vip` across all nodes in the guest cluster is strongly recommended when using `externalTrafficPolicy: Local`.
+Because `kube-vip` only elects a leader and advertises a VIP on nodes that actively host workload pods, restricting pod scheduling creates the following coverage gaps:
+
+* *No common nodes*: If `kube-vip` runs only on management nodes while workload pods run exclusively on worker nodes, `kube-vip` cannot elect a leader and will fail to advertise the VIP for that service.
+
+* *Partial overlap*: If `kube-vip` runs on a subset of worker nodes (for example, `node1` and `node2`) while workload pods run on `node2` and `node3`, only the overlapping node (`node2`) can advertise the VIP.
+
+In both scenarios, the high availability aspect of the `LoadBalancer` service is severely compromised or lost entirely.
+====
 
 === Prerequisites
 
@@ -23,7 +496,7 @@ For more informmation, see the *Harvester CCM & CSI Driver with RKE2 Releases* s
 
 [IMPORTANT]
 ====
-Each {harvester-product-name} VM must have the `macvlan` kernel module, which is required for the `LoadBalancer` services of the *DHCP* IPAM mode.
+If the Harvester Cloud Provider `kube-vip` is not disabled explicitly, each {harvester-product-name} virtual machine must have the `macvlan` kernel module, which is required for the `LoadBalancer` services of the *DHCP* IPAM mode.
 
 To check if the kernel module is available, access the VM and run the following commands:
 
@@ -45,11 +518,11 @@ To eliminate the need for manual intervention after the guest cluster is provisi
 
 === Deploying to the RKE2 Cluster with Harvester Node Driver
 
-When spinning up an RKE2 cluster using the Harvester Node Driver, select the `Harvester` cloud provider. The node driver will then help deploy both the CSI driver and CCM automatically.
+When spinning up an {rke2-short-name} cluster using the Harvester Node Driver, select the `Harvester` cloud provider. The node driver will then help deploy both the CSI driver and CCM automatically.
 
 image::rancher/rke2-cloud-provider.png[]
 
-Starting with Rancher v2.9.0, you can configure a specific folder for cloud config data using the *Data directory configuration path* field.
+Starting with {rancher-short-name} v2.9.0, you can configure a specific folder for cloud config data using the *Data directory configuration path* field.
 
 image::rancher/rke2-cloud-provider-custom-data-dir.png[]
 
@@ -57,7 +530,7 @@ image::rancher/rke2-cloud-provider-custom-data-dir.png[]
 
 . <<#_generating_cloudconfig_cloudprovider,Generate the `cloud-config` for the Harvester Cloud Provider>>.
 
-. On the RKE2 cluster creation page, go to the *Cluster Configuration* screen and set the value of *Cloud Provider* to *External*.
+. On the {rke2-short-name} cluster creation page, go to the *Cluster Configuration* screen and set the value of *Cloud Provider* to *External*.
 +
 image::rancher/external-harvester-cloud-provider.png[]
 
@@ -117,11 +590,12 @@ image::rancher/custom-cluster-vm-user-data.png[]
 +
 image::rancher/create-custom-rke2.png[]
 
-. On the *Registration* tab, perform the steps required to run the RKE2 registration command on the VM.
+. On the *Registration* tab, perform the steps required to run the {rke2-short-name} registration command on the VM.
 +
 image::rancher/custom-cluster-registration.png[]
 
-=== Deploying to the K3s cluster with Harvester Node Driver (experimental)
+[#_deploying_k3s_cluster]
+=== Deploying to a K3s cluster with Harvester Node Driver (experimental)
 
 . <<#_generating_cloudconfig_cloudprovider,Generate the `cloud-config` for the Harvester Cloud Provider>>.
 
@@ -142,7 +616,7 @@ image:rancher/cloud-config-userdata.png[]
    bootstrap: true
    repo: https://charts.harvesterhci.io/
    chart: harvester-cloud-provider
-   version: 0.2.2
+   version: 0.2.12
    helmVersion: v3
 ----
 +
@@ -203,12 +677,12 @@ You can send `POST` and `GET` requests to the {harvester-product-name} API endpo
 
 | `namespace`
 | String
-| Target Kubernetes namespace
+| Target namespace in {harvester-product-name} where the guest cluster is deployed.
 | `gc-test`
 
 | `serviceAccountName`
 | String
-| Service account name
+| Name of the ServiceAccount created for `cloud-config` generation (This must strictly match the guest cluster name.)
 | `gc4`
 
 | `clusterRoleName`
@@ -306,7 +780,7 @@ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/m
 . Copy the generated data to every node.
 +
 ** Legacy path: `/etc/kubernetes/cloud-config`
-** RKE2 default path (v1.9.0 and later): `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`
+** {rke2-short-name} default path (v1.9.0 and later): `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`
 
 You can find the kubeconfig file on any {harvester-product-name} management node at the following path: `/etc/rancher/rke2/rke2.yaml`. Before using the kubeconfig file, you must replace the IP address in the `server: field` with your cluster's VIP address.
 
@@ -361,13 +835,13 @@ write_files:
 
 [NOTE]
 ====
-In newer RKE2 versions (such as v1.33.11), the default cloud-config path is `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`. You must ensure that the `cloudConfigPath` value matches the exact file location you write to.
+In newer {rke2-short-name} versions (such as v1.33.11), the default cloud-config path is `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`. You must ensure that the `cloudConfigPath` value matches the exact file location you write to.
 
 Depending on your setup, choose one of the following approaches:
 
-* *Use the RKE2 default path*: In the `write_files` entry in your cloud-init configuration, change the value of `path` to `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`.
+* *Use the {rke2-short-name} default path*: In the `write_files` entry in your cloud-init configuration, change the value of `path` to `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`.
 
-* *Keep the legacy path*: In the Rancher UI, set `.spec.rkeConfig.chartValues.harvester-cloud-provider.cloudConfigPath` to `/etc/kubernetes/cloud-config`.
+* *Keep the legacy path*: In the {rancher-short-name} UI, set `.spec.rkeConfig.chartValues.harvester-cloud-provider.cloudConfigPath` to `/etc/kubernetes/cloud-config`.
 ====
 --
 ======
@@ -376,7 +850,7 @@ Depending on your setup, choose one of the following approaches:
 
 === Upgrade RKE2
 
-The cloud provider can be upgraded by upgrading the RKE2 version. You can upgrade the RKE2 cluster via the Rancher UI as follows:
+The cloud provider can be upgraded by upgrading the {rke2-short-name} version. You can upgrade the {rke2-short-name} cluster via the {rancher-short-name} UI as follows:
 
 . Click *☰ > Cluster Management*.
 . Find the guest cluster that you want to upgrade and select ⋮ *> Edit Config*.
@@ -385,7 +859,7 @@ The cloud provider can be upgraded by upgrading the RKE2 version. You can upgrad
 
 === Upgrade K3s
 
-K3s upgrade cloud provider via the Rancher UI, as follows:
+K3s upgrade cloud provider via the {rancher-short-name} UI, as follows:
 
 . Click *☰ > K3s Cluster > Apps > Installed Apps*.
 . Find the cloud provider chart and select ⋮ *> Edit/Upgrade*.
@@ -399,10 +873,37 @@ The upgrade process for a xref:installation-setup/single-node-clusters.adoc[sing
 For more information, see https://github.com/harvester/harvester/issues/5348#issuecomment-2055453709[this GitHub issue comment]. To address the issue, manually delete the old `harvester-cloud-provider` pod. You might need to do this multiple times until the new pod can be successfully scheduled.
 ====
 
+[#_guest_node_instance_metadata]
+== Guest node instance metadata
+
+When registering and updating guest nodes, `harvester-cloud-provider` queries the {harvester-product-name} API server to inspect the underlying `VirtualMachine` (VM) and `VirtualMachineInstance` (VMI) objects. It constructs the standard `cloudprovider.InstanceMetadata` struct by targeting three key metadata elements from the VMI:
+
+* *Provider identifier* (`ProviderID`): Sets a globally unique identifier for the guest node based on the underlying {harvester-product-name} virtual machine's UID.
++
+** *Format*: `harvester://<vm.UID>`
+** *Purpose*: Allows Kubernetes to deterministically map the guest `Node` object back to its physical {harvester-product-name} VM resource.
+
+* *Topology metadata* (`Region` and `Zone`): Reads topology annotations set on the `VMI` object to establish placement context for Kubernetes scheduling.
++
+** *Region*: Extracted from the `topology.kubernetes.io/region` annotation.
+** *Zone*: Extracted from the `topology.kubernetes.io/zone` annotation.
+** *Fallback*: If the VMI lacks topology annotations, `ProviderID` is still reported while region/zone fields remain unset.
+
+* *Node addresses* (`NodeAddresses`): Constructs the complete address list (`[]v1.NodeAddress`) for the guest node by combining hostname mapping with VMI status discovery.
++
+** *Host Name* (`NodeHostName`): Sets `v1.NodeHostName` directly using the target `node.Name`.
+** *IP Discovery* (`InternalIP` & `ExternalIP`): Evaluates active network interface IPs reported directly in the VMI status alongside provider configuration—eliminating the need for host-level probes or hardcoded NIC assumptions.
+** *Deterministic Mapping*: Assigns detected IPs to `InternalIP` and `ExternalIP` types, providing a consistent source of truth for downstream intra-cluster networking and load balancer traffic routing.
+
+[NOTE]
+====
+To filter or customize the virtual machine network interfaces and IP ranges reported as node addresses, see <<#_extra_arguments>>.
+====
+
 [#_load_balancer_support]
 == Load balancer support
 
-Once you've deployed the Harvester Cloud Provider, you can leverage the Kubernetes `LoadBalancer` service to expose a microservice within the guest cluster to the external world. Creating a Kubernetes `LoadBalancer` service assigns a dedicated {harvester-product-name} load balancer to the service, and you can make adjustments through the `Add-on Config` within the Rancher UI.
+Once you've deployed the Harvester Cloud Provider, you can leverage the Kubernetes `LoadBalancer` service to expose a microservice within the guest cluster to the external world. Creating a Kubernetes `LoadBalancer` service assigns a dedicated {harvester-product-name} load balancer to the service, and you can make adjustments through the `Add-on Config` within the {rancher-short-name} UI.
 
 image::rancher/lb-svc.png[]
 
@@ -412,9 +913,9 @@ image::rancher/lb-svc.png[]
 
 * *DHCP*: A DHCP server is required. The {harvester-product-name} load balancer will request an IP address from the DHCP server.
 +
-Starting with *Rancher v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the virtual IP to the correct network interface. If you do not select a VM network, the load balancer uses the default interface.
+Starting with *{rancher-short-name} v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the virtual IP to the correct network interface. If you do not select a VM network, the load balancer uses the default interface.
 +
-In earlier Rancher versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
+In earlier {rancher-short-name} versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
 +
 ** `cloudprovider.harvesterhci.io/ipam: "dhcp"`
 ** `cloudprovider.harvesterhci.io/network: "default/mgmt-vlan1"`
@@ -423,12 +924,17 @@ image::rancher/guest-cluster-load-balancer-dhcp.png[Guest cluster load balancer 
 
 * *Pool*: A pre-configured xref:networking/ip-pool.adoc[IP pool] is required. The {harvester-product-name} load balancer controller allocates an IP for the load balancer service according to the xref:networking/ip-pool.adoc#_selection_policy[IP pool selection policy]. You can create IP pools using either the xref:networking/ip-pool.adoc#_creating_an_IP_pool[{harvester-product-name} UI] or the xref:networking/ip-pool.adoc#_creating_an_IP_pool_using_the_rancher_ui[{rancher-short-name} UI]. For more information, see xref:networking/ip-pool.adoc#_best_practices[Best practices].
 +
-Starting with *Rancher v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the load balancer to the correct network interface. If you do not select a VM network (specifically, the `cloudprovider.harvesterhci.io/network` is empty), the load balancer controller automatically determines the network to be used.
+Starting with *{rancher-short-name} v2.15.1*, you can select a VM network when creating a `LoadBalancer` service using the UI. This enables explicit binding of the load balancer to the correct network interface. If you do not select a VM network (specifically, the `cloudprovider.harvesterhci.io/network` is empty), the load balancer controller automatically determines the network to be used.
 +
-On earlier Rancher versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
+On earlier {rancher-short-name} versions (v2.12.x, v2.13.x, and v2.14.x), you can achieve the same result by adding the following annotations to the `Service` manifest:
 +
 ** `cloudprovider.harvesterhci.io/ipam: "ippool"`
 ** `cloudprovider.harvesterhci.io/network: "default/mgmt-vlan1"`
++
+[NOTE]
+====
+The remote {harvester-product-name} cluster must run v1.9.0 or later to support custom `cloudprovider.harvesterhci.io/network` configurations in the Harvester Cloud Provider.
+====
 +
 When a guest cluster uses multiple networks, or when multiple guest clusters with distinct networks share a single namespace, configuring the correct network parameters is critical. For information about how the system automatically determines the network, see xref:networking/ip-pool.adoc#_guest_cluster_load_balancer_network_resolution[Guest cluster load balancer network resolution].
 +
@@ -485,7 +991,7 @@ Example:
 
 [TIP]
 ====
-If VM network interfaces are attached in different orders across nodes, reconfigure the network interface order in the machine pool settings to allow Rancher and RKE2 to reprovision the guest cluster virtual machines.
+If VM network interfaces are attached in different orders across nodes, reconfigure the network interface order in the machine pool settings to allow {rancher-short-name} and {rke2-short-name} to reprovision the guest cluster virtual machines.
 ====
 
 === Limitations
@@ -514,7 +1020,7 @@ When you delete a guest cluster that has the Harvester Cloud Provider enabled, {
 
 == Stale cloud credentials after cluster registration
 
-If you remove a {harvester-product-name} cluster from {rancher-short-name} and later re-register the same cluster, {rancher-short-name} may retain stale cloud credentials that reference the previous management cluster ID. This mismatch causes provisioning of guest clusters (such as RKE2 and K3s clusters) to fail.
+If you remove a {harvester-product-name} cluster from {rancher-short-name} and later re-register the same cluster, {rancher-short-name} may retain stale cloud credentials that reference the previous management cluster ID. This mismatch causes provisioning of guest clusters (such as {rke2-short-name} and K3s clusters) to fail.
 
 When this issue occurs, the system logs an error similar to the following:
 

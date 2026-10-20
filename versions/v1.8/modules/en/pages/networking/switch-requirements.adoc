@@ -1,0 +1,41 @@
+= Pre-deployment Checklist: Switch Requirements
+:revdate: 2026-09-28
+:page-revdate: {revdate}
+
+Physical switch configuration is a critical prerequisite for a stable {harvester-product-name} deployment. Because {harvester-product-name} relies heavily on external network infrastructure for cluster high availability (see xref:../security-resilience/ha-principles.adoc[High Availability Principles]), distributed storage ({longhorn-product-name}), and virtual machine networking, misconfigured switches can result in cluster instability or total network failure.
+
+== Requirements
+
+Before deploying {harvester-product-name} to production, ensure your network infrastructure meets the following physical switch requirements.
+
+=== 1. Port Configuration and VLANs
+
+* *Trunk Ports (802.1Q)*: Physical switches connected to bonded interfaces must be configured as trunk ports. These ports must accept tagged traffic and send traffic tagged with the VLAN ID used by the VM network.
+* *Native/Untagged VLAN*: The management network (`mgmt`) can be configured as either untagged or tagged based on your deployment needs. The physical switch interfaces must be configured to send and receive untagged traffic. If a primary VLAN ID is provided during installation, it is automatically added to the `mgmt-br` bridge.
+* *VLAN Accessibility*: External switches must include the specific VLANs used for custom xref:cluster-network.adoc[cluster networks] and the xref:storage-network.adoc[storage network] in their trunk port configuration. Failure to configure the corresponding VLANs on the external switch will result in {longhorn-product-name} pods failing to communicate, and new virtual machines becoming stuck in a `Not-Ready` state.
+
+=== 2. Link Aggregation (Bonding)
+
+To achieve high availability, {harvester-product-name} requires at least two NICs for the `mgmt` network and custom cluster networks. 
+
+* *Active-Backup (Default)*: By default, {harvester-product-name} configures bonded interfaces in `active-backup` mode.
+* *802.3ad Mode*: If you configure `mode: 802.3ad` in a `VlanConfig` to increase throughput, the corresponding physical switch ports must be properly configured to match this bonding mode.
+
+=== 3. MTU Consistency
+
+* *Matching MTU Values*: The MTU value on {harvester-product-name} and the external switch or router must match. If they do not match, packets exceeding the lowest configured MTU will be dropped, leading to degraded performance and cluster communication failures.
+* *Non-Default MTU*: If you change the MTU of a network configuration (for example, to `9000` for the storage network), you must also explicitly xref:cluster-network.adoc#_change_the_mtu_of_a_network_configuration_with_an_attached_storage_network[change the MTU on the peer external switch or router].
+
+=== 4. Layer 2 Adjacency and ARP
+
+* *Layer 2 Domain*: All {harvester-product-name} node management interfaces must be on the same layer-2 network segment.
+* *Gratuitous ARP (GARP)*: The xref:../installation-setup/management-address.adoc[Management VIP] relies on the Address Resolution Protocol (ARP). When the VIP changes hosts, gratuitous ARPs are sent so that other hosts on the network know where to direct traffic. The network setup between {harvester-product-name} nodes must allow these gratuitous ARPs to ensure the cluster functions properly during a failover.
+
+=== 5. DHCP Configuration
+
+* *Static IP-MAC Bindings*: If you select DHCP during the ISO installation, you must configure static MAC-to-IP address mapping on your DHCP server to have a persistent Virtual IP and stable node IPs.
+
+=== 6. Bandwidth and Traffic Segregation
+
+* *10 Gbps Minimum*: For production environments, the network card speed and corresponding switch ports must support 10 Gbps Ethernet at minimum.
+* *Best Practice for Traffic Segregation*: To prevent resource and bandwidth contention with the Kubernetes control plane, it is highly recommended to use dedicated custom xref:cluster-network.adoc[cluster networks] instead of the default `mgmt` network for heavy traffic plane operations. This includes creating separate physical network paths for the xref:storage-network.adoc[storage network], xref:vm-network.adoc[virtual machine networks], xref:vm-migration-network.adoc[live migration], and the xref:host-network-config.adoc[Kube-OVN underlay].
