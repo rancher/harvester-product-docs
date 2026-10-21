@@ -203,25 +203,38 @@ Regardless of the tool, a successful migration follows a similar path. The follo
 
 The state of the source virtual machine is the most common cause of a failed or degraded migration. Complete the following checks before starting a migration, regardless of the tool you use. Some items apply only to cold migrations or final cutovers when the source virtual machine is powered off.
 
-* *Shut down the guest operating system gracefully.* Shut down from within the guest operating system, or let the migration tool do it through VMware Tools, instead of powering off the virtual machine. A forced power-off leaves file systems marked as not cleanly unmounted, and conversion tools cannot safely modify them to install drivers.
-* *Disable hibernation and Fast Startup on Windows.* Both features leave the system volume in a hibernated state that conversion tools treat as unsafe to modify. To disable both, run `powercfg /h off` from an elevated command prompt, and then shut down the guest.
-* *Keep VMware Tools installed until the migration.* VMware Tools allows a migration tool to shut down the guest gracefully. Depending on the tool, VMware Tools is removed during conversion or must be removed after the migration.
-* *Eject ISO images and disconnect CD/DVD and floppy devices.* Media mounted from a source datastore is not available on {harvester-product-name}. Installation or answer media that remains attached can also change the boot order or start an unwanted installation when the virtual machine boots.
-* *Remove or consolidate snapshots.* Long snapshot chains slow down disk transfer and increase the amount of data that must be read from the source.
-* *Suspend or remove full-disk encryption.* Conversion tools must read and modify guest file systems to install drivers. Suspend BitLocker or similar encryption for the duration of the migration, or provide the keys if the tool supports it.
-* *Leave free space in the guest.* Conversion installs drivers and can rebuild the boot image. Keep free space on the system volume and, on Linux, on the `/boot` file system.
-* *Make sure Linux guests can install packages.* Some tools install the QEMU guest agent during the first boot using the guest's package manager. Register the system with its update service or make its repositories reachable; otherwise, install the agent manually after the migration.
-* *Verify that the guest configuration is supported.* Check the migration tool's support for the guest operating system and virtual hardware. For example, transactional (immutable) operating systems and disks attached to NVMe controllers might not be supported.
-* *Allow extra time for large Btrfs file systems.* Some tools check file system integrity before and after conversion. On Btrfs, the default file system of SUSE Linux Enterprise Server (SLES), this check reads all data on the file system and can add significant time to the migration.
-* *Avoid changes to the source during the migration.* Do not relocate (for example, with Storage vMotion), snapshot, or reconfigure the source virtual machine while a migration is running. The transfer reads disks from their original location and fails if the disks are moved.
+* *Shut down the guest operating system gracefully*: Shut down from within the guest operating system or allow the migration tool to perform the shutdown using VMware Tools. A forced power-off leaves file systems marked as unclean, preventing conversion tools from safely modifying them to install drivers.
 
-[#during-and-after-the-migration]
-== During and after the migration
+* *Disable hibernation and Fast Startup on Windows*: Both features leave the system volume in a hibernated state that conversion tools treat as unsafe to modify. To disable both features, run `powercfg /h off` from an elevated command prompt, and then shut down the guest.
 
-* *Match the volume settings to the target storage class when mapping storage.* Select the volume mode and access mode that the storage class supports. Use the *Block* volume mode for block storage, such as {longhorn-product-name}, Ceph RBD, iSCSI, or LVM, and the *Filesystem* volume mode for file storage, such as NFS. Select the *ReadWriteMany* access mode where the storage class supports it so that the virtual machine can be live-migrated; node-local storage supports only *ReadWriteOnce* and does not support live migration. Where available, the storage class's CDI storage profile lists the supported combinations.
-* *Allow the first boot to complete.* During the first boot, the guest installs drivers and the guest agent, and Windows guests can restart one or more times. Interrupting this process can leave the guest without the drivers it needs.
-* *Do not power on the source virtual machine after cutover.* The migrated virtual machine keeps the MAC addresses and, where applicable, the static IP configuration of the source. Running both at the same time causes address conflicts. Keep the source powered off until you have validated the migrated virtual machine, and then decommission it.
-* *Validate the migrated virtual machine.* Confirm that the virtual machine boots from the correct disk, its network interfaces receive the expected addresses, and the guest agent reports to {harvester-product-name}. Correct the boot order if necessary, and confirm that VMware Tools is no longer installed.
+* *Keep VMware Tools installed until migration*: VMware Tools allows the migration tool to perform a graceful guest shutdown. Depending on the tool used, VMware Tools is removed automatically during conversion or must be uninstalled manually after migration.
+
+* *Eject ISO images and disconnect CD/DVD and floppy devices*: Media mounted from a source datastore is not available on {harvester-product-name}. Attached installation or answer media can also alter the boot order or trigger unwanted installation prompts when the virtual machine boots.
+
+* *Remove or consolidate snapshots*: Long snapshot chains degrade disk transfer performance and increase the total data volume that must be read from the source.
+
+* *Suspend or remove full-disk encryption*: Conversion tools must read and modify guest file systems to install drivers. Suspend BitLocker or equivalent disk encryption during the migration, or provide decryption keys if the tool supports it.
+
+* *Maintain free space in the guest*: Conversion tools install drivers and may rebuild the boot image. Ensure sufficient free space remains on the system volume and, on Linux, on the `/boot` file system.
+
+* *Ensure Linux guests can access package repositories*: Some tools install the QEMU guest agent during the first boot using the guest's package manager. Register the system with its update service or verify repository reachability. Otherwise, install the agent manually after migration.
+
+* *Verify that the guest configuration is supported*: Verify that the migration tool supports the guest operating system and virtual hardware configuration. For example, transactional (immutable) operating systems and disks attached to NVMe controllers may not be supported.
+
+* *Allow extra time for large Btrfs file systems*: Some tools perform file system integrity checks before and after conversion. On Btrfs (the default file system for SUSE Linux Enterprise Server [SLES]), this check reads all data on the file system, which can significantly increase migration time.
+
+* *Avoid changes to the source during migration*: Do not relocate (for example, via Storage vMotion), snapshot, or reconfigure the source virtual machine while a migration is in progress. The transfer reads disks from their original location and fails if the underlying disk files move.
+
+[#_migration_cutover_post_migration]
+== Migration cutover and post-migration tasks
+
+* *Match volume settings when mapping storage*: Select the volume mode and access mode supported by your target StorageClass. Use the *Block* volume mode for block storage (such as {longhorn-product-name}, Ceph RBD, iSCSI, or LVM) and the *Filesystem* volume mode for file storage (such as NFS). Select *ReadWriteMany* (RWX) where the StorageClass supports it to enable virtual machine live migration, since *node-local* storage supports only *ReadWriteOnce* (RWO) and prevents live migration. Refer to the storage class's Containerized Data Importer (CDI) storage profile to view supported combinations.
+
+* *Allow the first boot to complete uninterrupted*: During the initial boot on {harvester-product-name}, the guest operating system installs VirtIO drivers and the guest agent. Windows guests may reboot automatically one or more times during this process. Interrupting or forcing a reboot during first boot can corrupt driver installation and leave the guest unbootable.
+
+* *Do not power on the source virtual machine after cutover*: The migrated virtual machine retains the MAC addresses and static IP configuration of the source. Powering on both virtual machines simultaneously causes network address conflicts and MAC collisions. Keep the source powered off until you have validated the migrated virtual machine, and then decommission it.
+
+* *Validate the migrated virtual machine*: Confirm that the virtual machine boots successfully from the correct disk, its network interfaces receive the expected IP addresses, and the QEMU guest agent reports its status to {harvester-product-name}. Correct the boot order in the virtual machine settings if necessary, and verify that VMware Tools is no longer installed.
 
 == Support and licensing summary
 
