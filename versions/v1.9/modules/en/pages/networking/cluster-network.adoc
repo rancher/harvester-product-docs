@@ -75,6 +75,8 @@ image::networking/mgmt-cn.png[Cluster Network Configuration screen]
 [NOTE]
 ====
 In {harvester-product-name} v1.5.x and earlier versions, the entire VLAN ID range (2 to 4094) was assigned to the `mgmt` interfaces. However, this exceeded the upper limit of supported VLANs on certain network cards, so hardware VLAN offloading stopped working correctly. For more information, see https://github.com/harvester/harvester/issues/7650[issue #7650].
+
+The displayed MTU for the `mgmt` cluster network is read-only. To configure a non-default MTU for networks attached to `mgmt`, see <<#_annotating_nondefault_mtu_mgmt>>.
 ====
 
 Only the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[primary VLAN ID] provided during installation is automatically added to the `mgmt-br` bridge and the `mgmt-bo` interface. You can <<#_adding_secondary_vlan_interfaces,add secondary VLAN interfaces>> after installation is completed.
@@ -114,15 +116,25 @@ $ nmcli con modify bridge-mgmt bridge.vlans 2017,2018
 
 . Reboot each node to apply the change.
 
-=== Annotate a Non-Default MTU Value to `mgmt` After Installation 
+[#_annotating_nondefault_mtu_mgmt]
+=== Annotating a Non-Default MTU Value to `mgmt` After Installation 
 
 If you specified a value other than `0` or `1500` in the `mtu` field of the xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting, you must annotate this value to the `mgmt` `clusternetwork` object. Without the annotation, all created xref:./vm-network.adoc#_create_a_vm_network[VM networks] use the default MTU value `1500` instead of automatically inheriting the value that you specified.
 
-*Example*
+*Example*:
 
-[bash, shell]
+[,shell]
 ----
-$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
+
+Starting with v1.9.0, the *Cluster Network Configuration* screen displays management interface details (for all non-witness nodes) through corresponding read-only VlanConfig resources. These VLAN configurations inherit their MTU value directly from the management interface. However, changing the management interface MTU does not automatically update the MTU used by VM networks attached to the `mgmt` cluster network. To update the MTU for these VM networks, you must explicitly annotate `mgmt` as shown in the preceding example.
+
+To reset the MTU to the default value on virtual machines using the `mgmt` cluster network, remove the annotation:
+
+[,shell]
+----
+kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu-
 ----
 
 [CAUTION]
