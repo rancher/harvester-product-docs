@@ -1,6 +1,6 @@
 = Longhorn V2 Data Engine
 :description: Enable the Longhorn V2 Data Engine to create new storage volumes and images with reduced I/O latency and increased performance
-:revdate: 2026-10-02
+:revdate: 2026-10-21
 :page-revdate: {revdate}
 
 The Longhorn V2 Data Engine harnesses the power of the Storage Performance Development Kit (SPDK) to significantly reduce I/O latency while boosting IOPS and throughput. The result is a high-performance storage solution that is capable of meeting diverse workload demands.
@@ -57,6 +57,8 @@ Set the `Provisioner` of each extra disk to `Longhorn V2 (CSI)`.
 [NOTE]
 ====
 The default disk driver for newly added Longhorn V2 disks in {harvester-product-name} is `aio`. This driver uses a Linux block device path and avoids the SPDK NVMe VFIO path.
+
+To enable Longhorn's automatic disk driver detection, which automatically assigns the NVMe driver to NVMe disks, set the disk driver to `auto`. For instructions, see <<#_manually_setting_disk_driver>>.
 ====
 
 . Go to *Advanced -> Storage Classes*, and then xref:./storageclass.adoc#_creating_a_storageclass[add a new StorageClass]. 
@@ -152,6 +154,36 @@ The matching `BlockDevice` custom resource should have the following values:
         longhorn:
       state: Active
 ----
+
+[#_manually_setting_disk_driver]
+== Manually setting the disk driver
+
+To use {longhorn-product-name}'s automatic disk driver detection feature instead of the default `aio` driver, do not add the disk through the {harvester-product-name} UI. Instead, perform the following steps:
+
+. Identify the name of the disk you want to add:
++
+[,shell]
+----
+NAME                                   TYPE   DEVPATH        MOUNTPOINT   NODENAME           PROVISIONPHASE   AGE
+4585c9be-da72-4481-80c0-c8021c15aace   disk   /dev/nvme0n1                harvester-node-0   Unprovisioned    24s
+----
+
+. Edit the target `BlockDevice` custom resource.
++
+[,yaml]
+----
+    spec:
+      provision: true
+      provisioner:
+        longhorn:
+          diskDriver: auto
+          engineVersion: LonghornV2
+----
+
+[IMPORTANT]
+====
+Updating the `diskDriver` setting of an already provisioned `BlockDevice` custom resource is not supported. To change the driver from `aio` to `auto` on an existing disk, you must first xref:hosts/hosts.adoc#_remove_disks[remove the disk] and then add it again using the procedure above.
+====
 
 == Known issues
 
