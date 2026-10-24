@@ -1,0 +1,412 @@
+= {harvester-product-name} v1.9.1 Release Notes
+:description: Introduce features, enhancements, and bug fixes in SUSE Virtualization v1.9.1 that improve system quality and user experience with documentation
+:revdate: 2026-10-30
+:page-revdate: {revdate}
+
+This release introduces several features, enhancements, and bug fixes that improve system quality and the overall user experience. The documentation is available at xref:introduction/overview.adoc.
+
+== Downloads
+
+=== AMD64
+
+==== Full ISO
+
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-amd64.iso
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-vmlinuz-amd64
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-initrd-amd64
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-rootfs-amd64.squashfs
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-amd64.sha512
+* https://releases.rancher.com/harvester/v1.9.1/version.yaml
+
+==== Net install ISO
+
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-amd64-net-install.iso
+
+=== ARM64
+
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-arm64.iso
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-vmlinuz-arm64
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-initrd-arm64
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-rootfs-arm64.squashfs
+* https://releases.rancher.com/harvester/v1.9.1/harvester-v1.9.1-arm64.sha512
+* https://releases.rancher.com/harvester/v1.9.1/version-arm64.yaml
+
+== Installation
+
+{harvester-product-name} can be installed using the xref:installation-setup/methods/iso-install.adoc[ISO image], a xref:installation-setup/methods/usb-install.adoc[bootable USB drive], and xref:installation-setup/methods/pxe-boot-install.adoc[PXE boot]. For more information, see the xref:installation-setup/requirements.adoc[Installation] section of the documentation.
+
+== Upgrades
+
+{harvester-product-name} only allows upgrades from supported versions. For more information about upgrade paths and procedures, see xref:upgrades/upgrades.adoc[Upgrades].
+
+== Highlights
+
+=== Guest cluster provisioning on Kube-OVN overlay networks
+
+{harvester-product-name} v1.9 adds support for provisioning {rancher-short-name} guest clusters on virtual machines attached to Kube-OVN overlay networks. This setup enables tenant-isolated VPCs and Kubernetes-native networking independent of the physical infrastructure. When provisioning virtual machines via the Harvester Node Driver, you can assign them directly to overlay networks, using a VPC NAT gateway (DNAT/SNAT) for external connectivity.
+
+Demos: https://www.youtube.com/watch?v=ypxBo9BFs2E[Pure Underlay Networking], https://youtu.be/YKBhTi8QgrI[VPC NAT Gateway for Overlay Networks], https://youtu.be/E-Hhw-esHWM[Rancher Guest Clusters on Kube-OVN Networks] | xref:integrations/rancher/overlay-underlay-guest-clusters.adoc[Documentation] | https://github.com/harvester/harvester/issues/9682[GitHub issue]
+
+=== Longhorn V2 Data Engine enhancements (Technical Preview)
+
+{harvester-product-name} v1.9 advances the Longhorn V2 Data Engine to "Technical Preview" (formerly "Experimental"), delivering key performance and configuration improvements. This release removes previous AIO driver block size (4096-byte) and unmap restrictions, allowing full 512-byte block size support and better storage space reclamation. To support resource-constrained deployments, new cluster settings allow you to customize SPDK target daemon memory allocation (`longhorn-v2-data-engine-memory-size`) and optionally disable hugepages when using the default AIO bdev driver (`longhorn-v2-data-engine-hugepage-enabled`), providing greater flexibility when managing node memory pressure.
+
+xref:storage/longhorn-v2-data-engine.adoc[Documentation] | https://github.com/harvester/harvester/issues/9960[GitHub issue]
+
+=== Option to cordon newly joined non-witness nodes
+
+Starting with {harvester-product-name} v1.9, you can configure newly joined non-witness nodes to initialize in a cordoned state, preventing workloads from immediately scheduling onto them after deployment. This allows you to perform post-installation configuration, validation, or maintenance before opening new host capacity to the cluster. To enable this behavior, set `install.cordoned: true` in your {harvester-product-name} configuration file. When specified, nodes are automatically marked as unschedulable upon joining the cluster. Once post-deployment tasks are complete, you can make the node available for workloads using the *Uncordon* option on the {harvester-product-name} UI.
+
+https://youtu.be/s_jIkOJpFs0[Demo] | xref:installation-setup/config/configuration-file.adoc#_install_cordoned[Documentation] | https://github.com/harvester/harvester/issues/4424[GitHub issue]
+
+=== Parallel live migrations
+
+{harvester-product-name} v1.9 introduces support for concurrent multi-virtual machine live migration. The *Virtual Machines* screen on the UI allows you to select multiple virtual machines and initiate a migration for the entire group. On the migration dialog, selected virtual machines are grouped by their current node, allowing you to identify a target destination. Once initiated, {harvester-product-name} processes a batch of migrations concurrently and automatically starts migrating the remaining virtual machines as active migrations complete. This simplifies host maintenance and workload rebalancing across your cluster.
+
+https://github.com/harvester/harvester/issues/10425[GitHub issue]
+
+=== Containerized GPU workloads on {harvester-product-name} nodes
+
+Starting with v1.9, you can run containerized GPU workloads directly on {harvester-product-name} nodes alongside virtual machine-based GPU workloads. To separate these nodes, you must apply designated labels and deploy the NVIDIA GPU Operator to the {harvester-product-name} cluster. The operator automatically targets only the nodes designated for bare-metal workloads, enabling native container access to GPU resources while leaving the remaining nodes available for vGPU-enabled virtual machines.
+
+https://github.com/harvester/harvester/issues/5321[GitHub issue]
+
+=== Support for custom Windows Sysprep files
+
+{harvester-product-name} v1.9 allows you to automate Windows operating system deployments using custom Sysprep answer files (`autounattend.xml` for fresh ISO installations or `unattend.xml` for generalized images) instead of relying on standard cloud-init configurations. On the *Advanced Options* tab of the virtual machine creation screen, you can select or create a Kubernetes Secret containing your answer file script. {harvester-product-name} leverages KubeVirt's native Sysprep support to mount the Secret as a virtual SATA CD-ROM drive, which Windows automatically detects during boot to handle disk partitioning, user creation, or domain joins.
+
+> Note: Built-in XML validation is provided on the UI when creating secrets. In v1.9, Sysprep configurations must be applied directly during individual virtual machine creation. Virtual machine template support will be added in a future release.
+
+https://youtu.be/r663OfoDiJQ[Demo] | https://github.com/harvester/harvester/issues/1836[GitHub issue]
+
+=== Optimized default settings for Windows virtual machines and templates
+
+When creating Windows virtual machines or templates in {harvester-product-name}, default values optimized for performance are now automatically applied to ensure consistent guest operation. The default disk bus for root disks on the base Windows templates is now SCSI (`virtio-scsi`) instead of VirtIO (`virtio-blk`), providing multi-queue support and faster DISCARD operations during sustained writes. Additionally, Hyper-V TLFS enlightenments are now enabled by default to streamline timer and interrupt handling, eliminating periodic I/O latency spikes and throughput degradation during heavy storage workloads. {harvester-product-name} also enables the cloud-config editor for Windows images, allowing you to pass cloud-init user data during initial setup to automate first-boot tasks such as user creation, SSH key deployment, and custom PowerShell execution.
+
+xref:virtual-machines/create-windows-vm.adoc#_recommended_tuning[Documentation] | https://github.com/harvester/harvester/issues/11124[GitHub issue]
+
+=== Load balancers on non-management interfaces for guest clusters
+
+Starting with {harvester-product-name} v1.9, you can route guest cluster load balancer traffic through secondary VM networks instead of binding virtual IPs exclusively to the primary management interface. This provides dedicated traffic segregation, security segmentation, and performance isolation. When configuring a `LoadBalancer` service in `DHCP` or `Pool` mode, select a target VM network that is symmetrically assigned across all nodes. Ensure matching VM networks and IP pools are configured prior to deployment.
+
+> Note: UI configuration requires {rancher-short-name} v2.15.1 or later, while earlier supported versions rely on API annotations. Additionally, external traffic using source IP retention may need custom host routing rules to prevent asymmetric routing.
+
+https://youtu.be/0-86R7EGkDw[Demo] | xref:integrations/rancher/cloud-provider.adoc#_ipam[Documentation] | https://github.com/harvester/harvester/issues/5486[GitHub issue]
+
+=== Direct Kubernetes service account mounting via virtiofs
+
+{harvester-product-name} v1.9 allows you to mount Kubernetes `ServiceAccounts`, `Secrets`, and `ConfigMaps` directly into virtual machines as live virtiofs filesystems. This provides workloads a secure, native Kubernetes identity to query the cluster API without hardcoded credentials. Because virtiofs maintains a live projected filesystem, token rotations and RBAC permission changes are updated within the guest operating system in real time without a reboot. When configuring disks on the UI, select *Filesystem* to choose a resource from the virtual machine's namespace, then add the appropriate mount command to your cloud-init script to map the virtiofs device to a guest directory (for example, `/mnt`). 
+
+https://youtu.be/sYkk1K-KNvs[Demo] | https://github.com/harvester/harvester/issues/10426[GitHub issue]
+
+=== CPU model selection for guest clusters
+
+Starting with {harvester-product-name} v1.9, you can select custom CPU models when provisioning guest clusters using the Harvester Node Driver. When creating a cluster, the new CPU Model dropdown list allows you to choose `Default`, host-model, host-passthrough, or a specific CPU model. For named CPU models, the UI displays node availability next to each entry (for example, `Ready nodes: 1`), helping you select a compatible configuration and ensure consistent CPU capabilities across guest nodes.
+
+https://github.com/harvester/harvester/issues/9744[GitHub issue]
+
+=== Option to keep restored or cloned virtual machines powered off
+
+Starting with {harvester-product-name} v1.9, virtual machines created from a snapshot, clone, or backup no longer power on automatically. To keep a virtual machine stopped after creation, select the *Remain halted* option on the UI or set `spec.haltAfterRestore: true` in your `VirtualMachineRestore` CRD or virtual machine manifest. This provides GitOps workflows time to complete post-restore validation before bringing workloads online.
+
+https://youtu.be/h9PFJz9Voa0[Demo] | https://github.com/harvester/harvester/issues/10422[GitHub issue]
+
+=== UI-based configuration of Pod Security Standards
+
+{harvester-product-name} v1.9 simplifies cluster-wide governance by allowing you to apply Kubernetes Pod Security Standards (PSS) directly from the UI using the new `cluster-pod-security-standard` setting. Once enabled, you can enforce specific security profiles across their environment by configuring the `Whitelisted Namespaces`, `Privileged Namespaces`, and `Restricted Namespaces` fields. To protect core system operations and guarantee the stability of {harvester-product-name}, system namespaces are automatically locked and exempted from custom PSS modifications.
+
+xref:security-resilience/pod-security-standards.adoc[Documentation] | https://github.com/harvester/harvester/issues/10350[GitHub issue]
+
+=== Visibility of management interface details
+
+Starting with {harvester-product-name} v1.9, the *Cluster Network Configuration* screen provides enhanced visibility into management network interfaces for all non-witness nodes. You can now view essential configuration details for `mgmt-bo` directly on the UI (such as member interfaces, MTU size, and active bond mode), which are automatically synced from the live host state. To protect host connectivity, management network settings are strictly view-only, with a webhook actively blocking any manual modification attempts via the UI or API.
+
+https://youtu.be/NbZJbxGGkWc[Demo] | xref:networking/cluster-network.adoc#_built_in_cluster_network[Documentation] | https://github.com/harvester/harvester/issues/6110[GitHub issue]
+
+=== Editable virtual machine display names
+
+On the {harvester-product-name} v1.9 UI, the virtual machine creation screen includes a *Display Name* field, which allows flexible labeling without strict character type or length restrictions. It is distinct from the *Name* field, which defines the custom resource name and must adhere to standard Kubernetes naming conventions. It also differs from the *Hostname* field, which defines the virtual machine's hostname inside the guest operating system and can be used to create unique DNS records. You can update the display name at any point in the virtual machine's lifecycle without affecting its configuration.
+
+https://github.com/harvester/harvester/issues/10423[GitHub issue]
+
+=== Custom package and kernel module installation
+
+{harvester-product-name} v1.9 introduces standardized workflows for extending its immutable operating system with third-party software, kernel modules, and system packages without compromising security or upgrade paths. Through the new `rancher/harvester-kernel-module-devel` image and Elemental `chroot` hooks, you can can build and sign kernel modules, load runtime or boot-time drivers, and persistently install SUSE Linux Enterprise 16.0-compatible packages across system upgrades.
+
+https://youtu.be/sImq-SqMgQw[Demo] | xref:cluster-management/additional-software.adoc[Documentation] | Github issues: https://github.com/harvester/harvester/issues/11263[#11263], https://github.com/harvester/harvester/issues/11264[#11264]
+
+== Deprecations and removals
+
+=== `ssl-parameters` setting
+
+The `ssl-parameters` setting for the Ingress NGINX Controller (`ingress-nginx`) is deprecated in {harvester-product-name} v1.9 and replaced with the `traefik-default-tls-options` setting, which applies default https://doc.traefik.io/traefik/reference/routing-configuration/http/tls/tls-options/[TLS options] for the Traefik Ingress Controller.
+
+=== `striped` volume type
+
+The `striped` volume type is deprecated and excluded from the LVM CSI general availability (GA) support scope. You must use a `dm-thin` StorageClass for all LVM storage. Because existing striped volumes cannot be converted to dm-thin in place, you must migrate data from existing striped volumes before upgrading to a {harvester-product-name} version that removes support for this volume type.
+
+== Features
+
+* https://github.com/harvester/harvester/issues/11263[#11263] [FEATURE] add harvester-kernel-module-devel image
+* https://github.com/harvester/harvester/issues/11159[#11159] [FEATURE] Grey out upgrade button in UI
+* https://github.com/harvester/harvester/issues/11124[#11124] [FEATURE] Windows VM defaults: virtio-scsi bus, cloud-init enabled, Hyper-V enlightenments
+* https://github.com/harvester/harvester/issues/11074[#11074] [FEATURE] fine tune node promotion logic
+* https://github.com/harvester/harvester/issues/10718[#10718] [FEATURE] [GUI] Show mgmt NICs in the UI, MTU and Interfaces
+* https://github.com/harvester/harvester/issues/10606[#10606] [FEATURE] API to fetch VM list from vsphere
+* https://github.com/harvester/harvester/issues/10476[#10476] [FEATURE] bump kubeovn operator to support kubeovn 1.16.x
+* https://github.com/harvester/harvester/issues/10426[#10426] [FEATURE] Provide identity to running VMs via Kubernetes Service accounts
+* https://github.com/harvester/harvester/issues/10417[#10417] [FEATURE] UX/UI for new VM Import/migration tool
+* https://github.com/harvester/harvester/issues/10350[#10350] [FEATURE] [GUI] PSA support for harvester
+* https://github.com/harvester/harvester/issues/10241[#10241] [FEATURE] Enforce Rancher RBAC In The UI
+* https://github.com/harvester/harvester/issues/10154[#10154] [FEATURE] Support directly routable VM IPs on the physical network vlan using KubeOVN
+* https://github.com/harvester/harvester/issues/9896[#9896] [FEATURE] [GUI] Support filesystem disk for VM
+* https://github.com/harvester/harvester/issues/9852[#9852] [FEATURE] add extraArgs for harvester-cloud-provider
+* https://github.com/harvester/harvester/issues/9745[#9745] [FEATURE] [GUI] Guest cluster needs cpu model configuration setting
+* https://github.com/harvester/harvester/issues/9744[#9744] [FEATURE] Guest cluster needs cpu model configuration setting in Rancher
+* https://github.com/harvester/harvester/issues/9818[#9818] [FEATURE] Rancher Manager Addon Migration to k3k or Optional k3k base
+* https://github.com/harvester/harvester/issues/9695[#9695] [FEATURE] [GUI] Support for external connectivity and inbound access for VMs attached to subnets from custom VPCs using kubeovn as Secondary CNI
+* https://github.com/harvester/harvester/issues/9503[#9503] [FEATURE] Support cloud config from secrets for harvester-cloud-provider
+* https://github.com/harvester/harvester/issues/9455[#9455] [FEATURE] Support for external connectivity and inbound access for VMs attached to subnets from custom VPCs using kubeovn as Secondary CNI
+* https://github.com/harvester/harvester/issues/9390[#9390] [FEATURE] Hugepage support for Longhorn V2
+* https://github.com/harvester/harvester/issues/9383[#9383] [FEATURE] Expose Disk Cache Mode
+* https://github.com/harvester/harvester/issues/9182[#9182] [FEATURE] Support vTPM / EFI state cloning
+* https://github.com/harvester/harvester/issues/9135[#9135] [FEATURE] Implement a unified backup and restore interface framework
+* https://github.com/harvester/harvester/issues/7601[#7601] [FEATURE] block registration of new nodes while upgrade is in progress
+* https://github.com/harvester/harvester/issues/6724[#6724] [FEATURE] Ability to support pcidevice passthrough of targeted individual devices
+* https://github.com/harvester/harvester/issues/6423[#6423] [FEATURE] Terraform provider: PCI passthrough
+* https://github.com/harvester/harvester/issues/6110[#6110] [FEATURE] Show mgmt NICs in the UI, MTU and Interfaces
+* https://github.com/harvester/harvester/issues/6087[#6087] [FEATURE] [GUI] Statically bind the IP address for VMs during creation
+* https://github.com/harvester/harvester/issues/5681[#5681] [FEATURE] Allow particular ports access as default security policy
+* https://github.com/harvester/harvester/issues/5486[#5486] [FEATURE] Support load balancers on non-management interfaces for guest clusters
+* https://github.com/harvester/harvester/issues/5321[#5321] [FEATURE] Support vGPU's with container workloads
+* https://github.com/harvester/harvester/issues/5052[#5052] [FEATURE] Statically bind the IP address for VMs during creation
+* https://github.com/harvester/harvester/issues/4424[#4424] [FEATURE] Harvester install in maintenance mode
+* https://github.com/harvester/harvester/issues/1836[#1836] [FEATURE] Unattend.xml support for Windows
+* https://github.com/harvester/harvester/issues/10381[#10381] [FEATURE] harvester-cloud-provider supports to mark network type
+* https://github.com/harvester/harvester/issues/9164[#9164] [FEATURE] add validation for YAML in /oem directory
+* https://github.com/harvester/harvester/issues/9960[#9960] [EPIC] Longhorn v2 data engine integration - Preview
+
+== Enhancements
+
+* https://github.com/harvester/harvester/issues/11151[#11151] [ENHANCEMENT] Completely Prevent Remote VM Backup for LH v2 Volumes
+* https://github.com/harvester/harvester/issues/10870[#10870] [ENHANCEMENT] Enhance cloudconfig generate api endpoint
+* https://github.com/harvester/harvester/issues/10869[#10869] [ENHANCEMENT] [GUI] Clear selected VM after bulk actions
+* https://github.com/harvester/harvester/issues/10713[#10713] [ENHANCEMENT] Detect paused fleet-local/local CAPI cluster before upgrade
+* https://github.com/harvester/harvester/issues/10635[#10635] [ENHANCEMENT] GUI Does Not Apply Node Expansion Secret for Encrypted StorageClass
+* https://github.com/harvester/harvester/issues/10581[#10581] [ENHANCEMENT] [GUI] Ensure or Support to configure the exclusive VID for storage-network
+* https://github.com/harvester/harvester/issues/10527[#10527] [ENHANCEMENT] Relax LB webhook with more backward compatibility
+* https://github.com/harvester/harvester/issues/10438[#10438] [ENHANCEMENT] [GUI] Intuitive way to recognize USB devices when using USB passthrough to transfer data to VMs
+* https://github.com/harvester/harvester/issues/10428[#10428] [ENHANCEMENT] Block parent vGPU device enable/disable actions
+* https://github.com/harvester/harvester/issues/10425[#10425] [ENHANCEMENT] Enable concurrent Live Migrations
+* https://github.com/harvester/harvester/issues/10423[#10423] [ENHANCEMENT] Allow changing the VM's name
+* https://github.com/harvester/harvester/issues/10422[#10422] [ENHANCEMENT] Prevent started VM after cloning or snapshotting
+* https://github.com/harvester/harvester/issues/10378[#10378] [ENHANCEMENT] Show driver location dialog when enabling nvidia-driver-toolkit addon
+* https://github.com/harvester/harvester/issues/10343[#10343] [ENHANCEMENT] Support Storage Migration for VMs Restored from Snapshot or Backup
+* https://github.com/harvester/harvester/issues/10328[#10328] [ENHANCEMENT] [GUI] allow users to disable autoAttachPodInterface to a VM
+* https://github.com/harvester/harvester/issues/10293[#10293] [ENHANCEMENT] Add the new label for e2e request with PR
+* https://github.com/harvester/harvester/issues/10243[#10243] [ENHANCEMENT] Ensure the Kubevirt volume operation call works with v1.8.0
+* https://github.com/harvester/harvester/issues/10235[#10235] [ENHANCEMENT] Extend VlanConfig protection to cover RWX network NAD
+* https://github.com/harvester/harvester/issues/10231[#10231] [ENHANCEMENT] Add IP availability checks to upgrade preflight for storage/RWX networks
+* https://github.com/harvester/harvester/issues/10210[#10210] [ENHANCEMENT] Bump monitoring, logging addon charts and check the used images
+* https://github.com/harvester/harvester/issues/10067[#10067] [ENHANCEMENT] Switch from nginx ingress to traefik
+* https://github.com/harvester/harvester/issues/10028[#10028] [ENHANCEMENT] [GUI] Apply CDI Settings To Non-Root Volumes
+* https://github.com/harvester/harvester/issues/10021[#10021] [ENHANCEMENT] Allow users to disable autoAttachPodInterface to a VM
+* https://github.com/harvester/harvester/issues/9807[#9807] [ENHANCEMENT] Make the harvester-cloud-provider container args configurable via helm chart
+* https://github.com/harvester/harvester/issues/9753[#9753] [ENHANCEMENT] Enhance the resource-quota processing when overhead-ratio is adjusted
+* https://github.com/harvester/harvester/issues/9682[#9682] [ENHANCEMENT] Support provisioning of guest clusters on Harvester VMs attached to overlay networks
+* https://github.com/harvester/harvester/issues/9650[#9650] [ENHANCEMENT] [GUI] Add `shareable` field when we create the volume
+* https://github.com/harvester/harvester/issues/9649[#9649] [ENHANCEMENT] Add `shareable` field when we create the volume
+* https://github.com/harvester/harvester/issues/9622[#9622] [ENHANCEMENT] Ensure or Support to configure the exclusive VID for storage-network
+* https://github.com/harvester/harvester/issues/9606[#9606] [ENHANCEMENT] [GUI] Show RKE2 certificates status on dashboard
+* https://github.com/harvester/harvester/issues/9573[#9573] [ENHANCEMENT] Essential checks upon upgradeLog
+* https://github.com/harvester/harvester/issues/9529[#9529] [ENHANCEMENT] Should show status reason when vGPU MIG Configuration is out-of-sync
+* https://github.com/harvester/harvester/issues/9496[#9496] [ENHANCEMENT] Provide a way to setup host mapping to /etc/hosts
+* https://github.com/harvester/harvester/issues/9463[#9463] [ENHANCEMENT] Enable Live Migration for VMs attached to Overlay Networks
+* https://github.com/harvester/harvester/issues/9382[#9382] [ENHANCEMENT] Deprecate and eventually remove legacy BIOS support
+* https://github.com/harvester/harvester/issues/9344[#9344] [ENHANCEMENT] Investigate why lhv2 csi-clone is much slower than copy mode
+* https://github.com/harvester/harvester/issues/9028[#9028] [ENHANCEMENT] [GUI] Enhance Route-connectivity field Info of VM Network
+* https://github.com/harvester/harvester/issues/8990[#8990] [ENHANCEMENT] Should filter the disks that have been added in longhorn dashboard when configuring storage in harvester dashboard
+* https://github.com/harvester/harvester/issues/8844[#8844] [ENHANCEMENT] Static IP assignment broken using OverlayNetwork in 1.6.0-RC5
+* https://github.com/harvester/harvester/issues/8667[#8667] [ENHANCEMENT] Enhance the `harv-purge-images.sh` script
+* https://github.com/harvester/harvester/issues/8451[#8451] [ENHANCEMENT] Set default value for LHv2 clone strategy to csi-clone in CDI annotations
+* https://github.com/harvester/harvester/issues/8330[#8330] [ENHANCEMENT] Intuitive way to recognize USB devices when using USB passthrough to transfer data to VMs
+* https://github.com/harvester/harvester/issues/7201[#7201] [ENHANCEMENT] [GUI] Ability to support pcidevice passthrough of targeted individual devices
+* https://github.com/harvester/harvester/issues/6944[#6944] [ENHANCEMENT] Support Local externalTrafficPolicy for workloads in guest clusters
+* https://github.com/harvester/harvester/issues/5385[#5385] [ENHANCEMENT] Enable automatic local ISO installation for virtualized Harvester deployments 
+* https://github.com/harvester/harvester/issues/4098[#4098] [ENHANCEMENT] Allow user to customize snapshot/backup deadline
+* https://github.com/harvester/harvester/issues/10584[#10584] [ENHANCEMENT] [GUI] Allow user to add empty volume when creating a VM
+* https://github.com/harvester/harvester/issues/8651[#8651] [ENHANCEMENT] [GUI] Possibility to assign IP addresses to the Hosts in the Virtual Machine Networks
+* https://github.com/harvester/harvester/issues/8061[#8061] [TASK] Clarify the upgrade sequences involving a witness-node
+* https://github.com/harvester/harvester/issues/11285[#11285] [TASK] add a default traefik helmchart config
+* https://github.com/harvester/harvester/issues/11212[#11212] [REFACTOR] [GUI] Extract access mode string to static variables
+
+== Bug fixes
+
+* https://github.com/harvester/harvester/issues/11596[#11596] [BUG] unable to start VM on ARM cluster with EFI OVMF roms missing error
+* https://github.com/harvester/harvester/issues/11590[#11590] [BUG] change in lb behaviour with bump to kubevip v1.2.x
+* https://github.com/harvester/harvester/issues/11469[#11469] [BUG] After upgrade to v1.9.0-rc6, addon deployment job failed for nvidia-driver-toolkit and pcidevices-controller
+* https://github.com/harvester/harvester/issues/11466[#11466] [BUG] upgrade from v1.9.0-rc6 stuck downloading image - scratch PVC not created
+* https://github.com/harvester/harvester/issues/11456[#11456] [BUG] [GUI] vGPU on RKE2 VM created by Rancher does not show on UI
+* https://github.com/harvester/harvester/issues/11440[#11440] [BUG] Harvester VIP lost after upgrade complete to v1.9.0-rc5
+* https://github.com/harvester/harvester/issues/11395[#11395] [BUG] refresh install ARM cluster stuck on setting up node
+* https://github.com/harvester/harvester/issues/11390[#11390] [BUG] Live migration using the non-existing metrics
+* https://github.com/harvester/harvester/issues/11360[#11360] [BUG] pcidevices are not created with harvester v1.9.0-rc4
+* https://github.com/harvester/harvester/issues/11358[#11358] [BUG] Fail to migrate VM in v1.9.0-rc4 due to "CPU doesn't match specification: missing features: pdcm"
+* https://github.com/harvester/harvester/issues/11357[#11357] [BUG] Terraform provider v1.8.1 does not wait for VM DHCP lease
+* https://github.com/harvester/harvester/issues/11338[#11338] [BUG] TLS certificate flapping while bumping embedded Rancher to v2.15.0
+* https://github.com/harvester/harvester/issues/11336[#11336] [BUG] node join failure once we bump Rancher v2.15.0
+* https://github.com/harvester/harvester/issues/11289[#11289] [BUG] VMs, Images, not visible in rancher UI
+* https://github.com/harvester/harvester/issues/11266[#11266] [BUG] ipxe boot of Harvester v1.8.x onwards fails on some broadcom nics
+* https://github.com/harvester/harvester/issues/11252[#11252] [BUG] Can't add static-ip.harvesterhci.io annotation to VM via UI form
+* https://github.com/harvester/harvester/issues/11213[#11213] [BUG] Creating a VM with no cloud init user data but network data only fails
+* https://github.com/harvester/harvester/issues/11206[#11206] [BUG] Upgrade stuck on configmap "chart-content-rke2-traefik-crd" not found
+* https://github.com/harvester/harvester/issues/11174[#11174] [BUG] [GUI] Valid VM name after an invalid try still regarded as invalid but the VM is actually created
+* https://github.com/harvester/harvester/issues/11169[#11169] [GUI] [BUG] 1.8.1 - vGPU partition types not found, enabling not possible
+* https://github.com/harvester/harvester/issues/11154[#11154] [BUG] spec.template.spec.domain.devices.disks is invalid in some cases; item is specified for two types
+* https://github.com/harvester/harvester/issues/11145[#11145] [BUG] restoring a VM backup to a different cluster is not working as described or intended
+* https://github.com/harvester/harvester/issues/8700[#8700] [BUG] [GUI] Support Enable/Disable of NAT on custom subnets
+* https://github.com/harvester/harvester/issues/11133[#11133] [BUG] 1.8.1 - vGPU partition types not found, enabling not possible
+* https://github.com/harvester/harvester/issues/11123[#11123] [BUG] LH V2 Volume Cannot Be Attached When the Storage Network Is Enabled
+* https://github.com/harvester/harvester/issues/11096[#11096] [BUG] Upgrade stuck in node `Waiting Reboot` after complete first node upgrade when upgrade from v1.8.1 to v1.9.0-dev-20260705
+* https://github.com/harvester/harvester/issues/11084[#11084] [BUG] harvester-webhook SA token expiration with RKE2 CIS profile enabled.
+* https://github.com/harvester/harvester/issues/11041[#11041] [BUG] V2 Disk Provisioning Fails Due to Conflicting IOMMU Group
+* https://github.com/harvester/harvester/issues/11033[#11033] [BUG] VM Template UserData editor remains editable in view mode
+* https://github.com/harvester/harvester/issues/11011[#11011] [BUG] Kubelet enters NotReady state after RKE2 upgrade due to failed node registration
+* https://github.com/harvester/harvester/issues/11008[#11008] [BUG] Duplicated `app: whereabouts` label in whereabouts.labels helm template
+* https://github.com/harvester/harvester/issues/10942[#10942] [BUG][GUI] Harvester UI doesn't honor selected namespace when first entering the pages
+* https://github.com/harvester/harvester/issues/10941[#10941] [BUG] Cloud Configuration Template cloud-init field should not be editable when not editing
+* https://github.com/harvester/harvester/issues/10878[#10878] [BUG] Harvester api http server framework has below warning when app writes return directly
+* https://github.com/harvester/harvester/issues/10814[#10814] [BUG] Encrypted V2 volume size is 16MB short of the claimed size
+* https://github.com/harvester/harvester/issues/10802[#10802] [BUG] hostnetworkconfig does not work with vlan 1 DHCP mode
+* https://github.com/harvester/harvester/issues/10783[#10783] [BUG] `ifname=` kernel args don't always work to rename network interfaces
+* https://github.com/harvester/harvester/issues/10765[#10765] [BUG] Upgrade V2: missing /lib bind mount for aarch64 in upgrade_node.sh
+* https://github.com/harvester/harvester/issues/10710[#10710] [BUG] V2 volume I/O can get stuck on ARM64 when SPDK uses 2+ CPU cores and node disks use the NVMe driver
+* https://github.com/harvester/harvester/issues/10685[#10685] [BUG] 502 Bad Gateway Error During Node Join is Misleading and it Should Indicate Token Mismatch
+* https://github.com/harvester/harvester/issues/10666[#10666] [BUG] NDM always uses BDF paths when adding LHv2 nvme and virto disks, regardless of DiskDriver setting
+* https://github.com/harvester/harvester/issues/10653[#10653] [BUG] VM migration causes MAC address to move between hosts more than once
+* https://github.com/harvester/harvester/issues/10591[#10591] [BUG] install.wipe_disks_list should not error out if the disk doesn't exist
+* https://github.com/harvester/harvester/issues/10575[#10575] [BUG] [GUI] cmd(alt) button is not work when restart / softreboot VM
+* https://github.com/harvester/harvester/issues/10574[#10574] [BUG] [GUI] PersistentVolumeClaim is overridden by Volume in Rancher local cluster
+* https://github.com/harvester/harvester/issues/10540[#10540] [BUG] f29abc8d airgapped Harvester master build fails to render harvester dashboard
+* https://github.com/harvester/harvester/issues/10532[#10532] [BUG] Upgrade from v1.7.x to v1.8.0 stuck in Post-draining when storage-network is configured with RWX volumes
+* https://github.com/harvester/harvester/issues/10529[#10529] [BUG] Upgrade could fail without retrying when entering the node upgrade phase
+* https://github.com/harvester/harvester/issues/10399[#10399] [BUG] Cloud provider functionality doesn't work on custom cluster created in Rancher
+* https://github.com/harvester/harvester/issues/10388[#10388] [BUG] vGPU VMs is not regarded as Non-Migratable when triggering upgrade.
+* https://github.com/harvester/harvester/issues/10374[#10374] [BUG] Stop using `rancher/kubectl` image
+* https://github.com/harvester/harvester/issues/10367[#10367] [BUG] Template rendering fails on Grafana Dashboard JSON containing `{{name}}`
+* https://github.com/harvester/harvester/issues/10310[#10310] [BUG] UI shows incorrect info when deleting storage
+* https://github.com/harvester/harvester/issues/10298[#10298] [BUG] Insufficient harvester-csi-driver permissions for k3s guest cluster
+* https://github.com/harvester/harvester/issues/10286[#10286] [BUG] Harvester 1.7.1 Upgrade (aarch64/arm64) post-drain-* Pods Fail
+* https://github.com/harvester/harvester/issues/10265[#10265] [BUG] Mutating webhook rejects multi-socket VMs when CPU hotplug is disabled
+* https://github.com/harvester/harvester/issues/10258[#10258] [BUG] seeder based provisioning fails in lab due to multiple dhcp servers
+* https://github.com/harvester/harvester/issues/10250[#10250] [BUG] network-controller LOGLEVEL env does not work as expected
+* https://github.com/harvester/harvester/issues/10225[#10225] [BUG] Harvester Cloud Provider cannot run with SELinux enforcing on guest cluster
+* https://github.com/harvester/harvester/issues/10165[#10165] [BUG] A corner case on vm volumeClaimTemplates annotation protection and check
+* https://github.com/harvester/harvester/issues/10109[#10109] [BUG] Failed image cannot be deleted due to finalizer lock when a successful upload exists
+* https://github.com/harvester/harvester/issues/10108[#10108] [BUG] `resourceName()` generates invalid Kubernetes resource names when PCI device description contains trailing spaces
+* https://github.com/harvester/harvester/issues/10092[#10092] [BUG] Host VM view does not show all states
+* https://github.com/harvester/harvester/issues/10081[#10081] [BUG] Containerd-registry setting in the terraform provider is always "changed"
+* https://github.com/harvester/harvester/issues/10056[#10056] [BUG] The v171 to v180 upgrade is blocked by CDI ISO image downloading
+* https://github.com/harvester/harvester/issues/10029[#10029] [BUG] pcidevice passthorugh is broken on VM with hot plugged volume
+* https://github.com/harvester/harvester/issues/10008[#10008] [BUG] The permittedHostDevices.pciHostDevices has duplicated records
+* https://github.com/harvester/harvester/issues/9998[#9998] [BUG] Harvester csi volume fails to mount
+* https://github.com/harvester/harvester/issues/9886[#9886] [BUG] RancherD should retry on bootstrap failure
+* https://github.com/harvester/harvester/issues/9775[#9775] [BUG] Online Expansion fails for Encrypted Longhorn Volumes
+* https://github.com/harvester/harvester/issues/9502[#9502] [BUG] harvester-cloud-provider pods on downstream rancher cluster restarting when any VM is created in the same harvester setup
+* https://github.com/harvester/harvester/issues/9375[#9375] [BUG] Storage network optimizations
+* https://github.com/harvester/harvester/issues/9332[#9332] [BUG] storage network configuration failure on vlanconfig with empty matched nodes
+* https://github.com/harvester/harvester/issues/9055[#9055] [BUG] cdi-importer pods don't appear to be using the system trust-store during download
+* https://github.com/harvester/harvester/issues/8700[#8700] [BUG] [GUI] Support Enable/Disable of NAT on custom subnets
+* https://github.com/harvester/harvester/issues/8553[#8553] [BUG] show generic error message when creating API key failed
+* https://github.com/harvester/harvester/issues/8120[#8120] [BUG] Admission webhook errors are not displayed in `Edit as YAML`
+* https://github.com/harvester/harvester/issues/7617[#7617] [BUG] Admission webhook errors are displayed at top AND bottom of the YAML editor
+* https://github.com/harvester/harvester/issues/7583[#7583] [BUG] Node Scheduling tab of VMs does not work
+* https://github.com/harvester/harvester/issues/7275[#7275] [BUG] Unable to provision dual stack RKE2 cluster via rancher on harvester when cloud provider is enabled
+* https://github.com/harvester/harvester/issues/6957[#6957] [BUG]  Should remove value of deviceAllocationDetails annotation while removing hostDevices
+* https://github.com/harvester/harvester/issues/6536[#6536] [BUG] The images action menu does not show `Edit YAML`
+* https://github.com/harvester/harvester/issues/5179[#5179] [BUG] PCI Device Controller Go Routine Leakage
+* https://github.com/harvester/harvester/issues/10879[#10879] [BUG] Dual-Stack IPv4-First Support for harvester (core)
+* https://github.com/harvester/harvester/issues/10795[#10795] [BUG] Dual-Stack IPv4-First Support for harvester-installer
+* https://github.com/harvester/harvester/issues/11129[#11129] [BUG] /v1/harvester/kubeconfig rejects external Rancher global admins
+* https://github.com/harvester/harvester/issues/10556[#10556] [BUG] [GUI] Cannot setup project resource quota in Rancher 2.14.1 / 2.15.0
+* https://github.com/harvester/harvester/issues/9515[#9515] [BUG] Create an image which name length over the limitaion via YAML, the image still can be created
+
+== Others
+
+* https://github.com/harvester/harvester/issues/11310[#11310] [RELEASE] Release v1.9.0
+* https://github.com/harvester/harvester/issues/8266[#8266] [TASK] Improve smoke test stability
+* https://github.com/harvester/harvester/issues/11275[#11275] [DOC] Add details about mgmt network displaying the interface properties
+* https://github.com/harvester/harvester/issues/11264[#11264] [DOC] expand the after-install-chroot/after-upgrade-chroot docs
+* https://github.com/harvester/harvester/issues/11259[#11259] [DOC] Document per-node VM/VMI volume limit for Harvester CSI Driver
+* https://github.com/harvester/harvester/issues/11248[#11248] [DOC] Compare Planned VM Shutdown and Live Migration during a Harvester upgrade
+* https://github.com/harvester/harvester/issues/11168[#11168] [DOC] Document VM image upload timeout behavior with third-party storage
+* https://github.com/harvester/harvester/issues/11071[#11071] [DOC] Update Harvester kubeovn networking docs to include UI configuration details
+* https://github.com/harvester/harvester/issues/11056[#11056] [DOC] Document Longhorn V2 CPU configuration when using CPU-pinned VMs
+* https://github.com/harvester/harvester/issues/11054[#11054] [DOC] Longhorn V2 Data Engine Kernel Workqueue Lockup
+* https://github.com/harvester/harvester/issues/11052[#11052] [DOC] Guide for migrating diskDriver from NVMe to AIO and unprovisioning block devices
+* https://github.com/harvester/harvester/issues/10754[#10754] [DOC] Update lvm-local-storage addon yaml URL with version and remove the redundant '#' symbol
+* https://github.com/harvester/harvester/issues/10597[#10597] [DOC] Documentation referring to Longhorn V2 volume expansion may be incorrect
+* https://github.com/harvester/harvester/issues/10415[#10415] [DOC] Customer guidance on which Adv Networking features are GA
+* https://github.com/harvester/harvester/issues/10325[#10325] [DOC] server_url while cluster installation
+* https://github.com/harvester/harvester/issues/10324[#10324] [DOC] https://harvesterhci.io/intro lists link for PXE/iPXE support but link target does not exist
+* https://github.com/harvester/harvester/issues/10323[#10323] [DOC] Edit links in https://harvesterhci.io have wrong target
+* https://github.com/harvester/harvester/issues/9796[#9796] [DOC] Rancher-Manager Experimental Plugin
+* https://github.com/harvester/harvester/issues/9391[#9391] [DOC] Add how to enable CSI Snapshot Support in the guest cluster
+* https://github.com/harvester/harvester/issues/8919[#8919] [DOC] Need to clarify the user scenario of the Managed DHCP add-on due to the introduction of Kube-OVN
+* https://github.com/harvester/harvester/issues/8860[#8860] [DOC] Find a better home for "Related CPU Pinning Concepts" and "Related Networking Concepts" sections
+* https://github.com/harvester/harvester/issues/8479[#8479] [DOC] Improve image management doc following 3rd party storage introduction
+* https://github.com/harvester/harvester/issues/9227[#9227] [CI] Ensure the installation works with specific changes
+* https://github.com/harvester/harvester/issues/8266[#8266] [TASK] Improve smoke test stability
+* https://github.com/harvester/harvester/issues/10952[#10952] [TASK] Bump K8s Descheduler to v0.36.0
+* https://github.com/harvester/harvester/issues/10897[#10897] [TASK] Update Longhorn CSI Sidecars Version In Harvester CSI Driver
+* https://github.com/harvester/harvester/issues/10875[#10875] [TASK] Create new release for docker-machine-driver
+* https://github.com/harvester/harvester/issues/10780[#10780] [TASK] Bump Harvester CSI Driver v0.1.30 to Rancher/RKE2
+* https://github.com/harvester/harvester/issues/10732[#10732] [TASK] Component updates for Harvester v1.9.0
+* https://github.com/harvester/harvester/issues/10448[#10448] [TASK] Remove non-orgs users when creating backport issue
+* https://github.com/harvester/harvester/issues/10111[#10111] [TASK] Drop `kubevirt.io/client-go/kubecli` from import
+* https://github.com/harvester/harvester/issues/10068[#10068] [TASK] Release new harvester-cloud-provider version v0.2.12
+* https://github.com/harvester/harvester/issues/10031[#10031] [TASK] Automate artifact dependency version management aligned with release maintenance
+* https://github.com/harvester/harvester/issues/9797[#9797] [TASK] Make experimental-addons version aligned with Harvester minor release
+* https://github.com/harvester/harvester/issues/9607[#9607] [TASK] Use CODEOWNERS to efficient the review progress
+* https://github.com/harvester/harvester/issues/9381[#9381] [TASK] Move Endpoints to EndpointSlice
+
+== Known issues
+
+This section includes only issues identified before the release date. For information about all issues associated with v1.9.1, see https://github.com/harvester/harvester/issues?q=is:issue%20label:known-issue-v1.9.1[this page].
+
+* https://github.com/harvester/harvester/issues/11648[#11648] [BUG] arm upgrade from v1.8.2 to v1.9-head fails
+* https://github.com/harvester/harvester/issues/11634[#11634] [BUG] lost VIP and UI accessibility during upgrade (ARM cluster)
+* https://github.com/harvester/harvester/issues/11615[#11615] [BUG] VM Live migration failed when upgrading from 1.8.2 to 1.9.0-rc7 due to CPU extra features
+* https://github.com/harvester/harvester/issues/11543[#11543] [BUG] Upgrade from v1.8.2 to v1.9-head stuck on Images preloaded
+* https://github.com/harvester/harvester/issues/11386[#11386] [BUG] logout feature isn't working properly
+* https://github.com/harvester/harvester/issues/11356[#11356] [BUG] VM does not LiveMigrate but Off during v1.8.1 to v1.9.0-rc4 upgrade
+* https://github.com/harvester/harvester/issues/10447[#10447] [BUG] After upgraded to three Nodes Harvester with witness role to v1.8.0-rc6, vm failed to migrate with error "Kubevirt not ready"
+* https://github.com/harvester/harvester/issues/10221[#10221] [BUG] Failed to migrate VM after eject the windows image from CDROM device
+* https://github.com/harvester/harvester/issues/1004[#1004] [BUG] Guest Cluster to Harvester Longhorn Storage via RWX / NFS connectivty loss during upgrade from 1.7.0 to 1.7.1
+
+== Components
+
+|===
+| Component | Version
+
+| Containerized Data Importer (CDI)
+| https://github.com/kubevirt/containerized-data-importer/releases/tag/v1.64.0[v1.64.0]
+
+| Kube-OVN
+| https://github.com/kubeovn/kube-ovn/releases/tag/v1.15.4[v1.15.4]
+
+| KubeVirt
+| https://github.com/kubevirt/kubevirt/releases/tag/v1.7.0[v1.7.0]
+
+| {longhorn-product-name-tm}
+| https://github.com/longhorn/longhorn/releases/tag/v1.11.2[v1.11.2]
+
+| {rancher-product-name-tm} (embedded)
+| https://github.com/rancher/rancher/releases/tag/v2.14.2[v2.14.2]
+
+| {rke2-product-name}
+| https://github.com/rancher/rke2/releases/tag/v1.35.6%2Brke2r1[v1.35.6+rke2r1]
+
+| SUSE Linux Micro
+| https://github.com/harvester/os2/releases/tag/v1.8-20260605[6.2]
+|===
