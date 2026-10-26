@@ -1,5 +1,5 @@
 = Network Architecture Best Practices: Network Configurations
-:revdate: 2026-09-28
+:revdate: 2026-10-26
 :page-revdate: {revdate}
 
 Implementing strict VLAN separation in {harvester-product-name} is critical for isolating data-center (management/control-plane) traffic from out-of-band (OOB) or tenant virtual machine traffic. 
@@ -14,11 +14,11 @@ VLAN separation begins at the physical layer. The {harvester-product-name} netwo
 
 * *Physical NIC Separation*: To achieve true hardware-level separation and optimal performance, dedicate specific physical NICs exclusively for VM workloads. While testing environments can multiplex VM VLANs over the built-in `mgmt` network, production environments require at least two dedicated NICs for the management cluster network and at least two distinct, dedicated NICs for VM workload networks. For exact specifications, see xref:../installation-setup/requirements.adoc#_hardware_requirements[Hardware Requirements].
 * *Trunk Port Requirement*: Starting with {harvester-product-name} v1.6.1, the CNI bridge plug-in no longer associates virtual Ethernet (veth) interfaces with the default VLAN ID 1. *Physical switches connected to {harvester-product-name} hosts must be configured as trunk ports*. These ports must explicitly accept tagged traffic and send traffic tagged with the VLAN IDs used by your VM networks. Untagged traffic arriving at network bridges for a VLAN-tagged veth interface is dropped. Additionally, the physical switch must be able to handle any untagged traffic received on the connected port (typically configured via the native VLAN on the switch trunk).
-* *Link Aggregation Matching*: When configuring Link Aggregation on your physical switches, the switch mode must strictly match the bonding mode configured in the {harvester-product-name} `NetworkConfig`. For example, the commonly used `active-backup` mode requires no link aggregation on the switch, whereas `802.3ad` requires `LACP`. Failure to align these will result in dropped packets and broken VLAN paths. For a complete list of supported bond modes, see xref:networking/deep-dive.adoc#_external_networking[External Networking Deep Dive].
+* *Link Aggregation Matching*: When configuring Link Aggregation on your physical switches, the switch mode must strictly match the bonding mode configured in the {harvester-product-name} `NetworkConfig`. For example, the commonly used `active-backup` mode requires no link aggregation on the switch, whereas `802.3ad` requires `LACP`. Failure to align these will result in dropped packets and broken VLAN paths. For a complete list of supported bond modes, see xref:./deep-dive.adoc#_external_networking[External Networking Deep Dive].
 
 === 2. Cluster Network and Network Config Design
 
-A xref:networking/cluster-network.adoc#_concepts[Cluster Network] represents a traffic-isolated forwarding path. To implement VLAN separation, you must create custom Cluster Networks rather than relying solely on the built-in `mgmt` network.
+A xref:./cluster-network.adoc#_concepts[Cluster Network] represents a traffic-isolated forwarding path. To implement VLAN separation, you must create custom Cluster Networks rather than relying solely on the built-in `mgmt` network.
 
 ==== Custom Cluster Networks for Workloads
 
@@ -36,7 +36,7 @@ A Cluster Network requires one or more `Network Config` (backed by a `VlanConfig
 Do not attempt to configure Maximum Transmission Unit (MTU) sizes at the guest OS or individual VM Network level.
 
 * You must enforce the MTU value at the *Cluster Network/Network Config* level. 
-* All xref:networking/vm-network.adoc#_vlan_network[VM Networks] attached to a Cluster Network automatically inherit its MTU. 
+* All xref:./vm-network.adoc#_vlan_network[VM Networks] attached to a Cluster Network automatically inherit its MTU. 
 * *Validation*: All cluster nodes and the upstream physical switch ports must use the exact same MTU value. The {harvester-product-name} webhook actively rejects new network configurations if the MTU does not match existing configurations on the same Cluster Network.
 * *Management Network (`mgmt`)*: If you configure a non-default MTU (a value other than `0` or `1500`) for the built-in `mgmt` network during installation, you must explicitly annotate the `mgmt` cluster network object. Without this annotation, any VM networks attached to `mgmt` will fall back to the default `1500` MTU instead of inheriting your specified value.
 +
@@ -83,4 +83,4 @@ VLAN separation directly impacts virtual machine scheduling. {harvester-product-
 
 While VLANs provide strict Layer 2 broadcast domain separation, they do not inherently restrict traffic between VMs located on the *same* VLAN. 
 
-If your architecture requires zero-trust or micro-segmentation between VMs on the identical VLAN subnet, you must apply firewall rules within the guest OS. Alternatively, for workloads running on Kube-OVN overlay networks, you can use Subnet ACLs and Kubernetes Network Policies. For more information on intra-network isolation, see xref:networking/vm-isolation.adoc[Virtual Machine Isolation].
+If your architecture requires zero-trust or micro-segmentation between VMs on the identical VLAN subnet, you must apply firewall rules within the guest OS. Alternatively, for workloads running on Kube-OVN overlay networks, you can use Subnet ACLs and Kubernetes Network Policies. For more information on intra-network isolation, see xref:./vm-isolation.adoc[Virtual Machine Isolation].
