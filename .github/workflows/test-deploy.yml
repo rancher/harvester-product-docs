@@ -21,20 +21,36 @@ jobs:
         run: make environment
       - name: Generate Site
         run: |
+          # Allow antora to complete without halting the bash script on failure
+          set +e
           npx antora --stacktrace \
             --log-file local-build.log \
             --log-format=pretty \
             --log-level=info \
-            --log-failure-level=warn \
             playbook-local.yml 2>&1 | tee local-build.log 2>&1
-          
-          BUILD_STATUS=${PIPESTATUS[0]}
-          
-          if grep -B1 '/modules/en/' local-build.log | grep -E -q "(ERROR|INFO) \(asciidoctor\)"; then
-            echo "Found errors or infos in English modules."
+          set -e
+
+          # Reset BUILD_STATUS to 0; fail ONLY if an English (en) error/warning exists
+          BUILD_STATUS=0
+
+          # Check local-build.log specifically for asciidoctor issues originating from /modules/en/
+          if awk '
+            /ERROR \(asciidoctor\)|WARN \(asciidoctor\)|INFO \(asciidoctor\)/ { flagged=1; msg=$0; next }
+            flagged {
+              if ($0 ~ /file:.*\/modules\/en\//) {
+                print "Found issue in English docs:\n" msg "\n" $0;
+                failed=1
+              }
+              flagged=0
+            }
+            END { exit failed ? 1 : 0 }
+          ' local-build.log; then
+            echo "✅ No English documentation issues detected."
+          else
+            echo "❌ Build failed due to errors/warnings in English modules."
             BUILD_STATUS=1
           fi
-          
+
           echo "BUILD_STATUS=$BUILD_STATUS" >> $GITHUB_ENV
       - name: Check for build errors
         run: |
