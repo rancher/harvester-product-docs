@@ -27,11 +27,15 @@ jobs:
             --log-level=info \
             --log-failure-level=warn \
             playbook-local.yml 2>&1 | tee local-build.log 2>&1
-            BUILD_STATUS=${PIPESTATUS[0]}
-            if grep "INFO (asciidoctor)" local-build.log; then
-              BUILD_STATUS=1
-            fi
-            echo "BUILD_STATUS=$BUILD_STATUS" >> $GITHUB_ENV
+          
+          BUILD_STATUS=${PIPESTATUS[0]}
+          
+          if grep -B1 '/modules/en/' local-build.log | grep -E -q "(ERROR|INFO) \(asciidoctor\)"; then
+            echo "Found errors or infos in English modules."
+            BUILD_STATUS=1
+          fi
+          
+          echo "BUILD_STATUS=$BUILD_STATUS" >> $GITHUB_ENV
       - name: Check for build errors
         run: |
           echo ${{ env.BUILD_STATUS }}
