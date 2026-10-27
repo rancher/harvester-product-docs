@@ -1,5 +1,6 @@
 = Storage Types and Integration: DAS, SAN, and NAS
-:revdate: 2026-10-01
+:description: Overview of storage types (DAS, SAN, NAS) and their integration with SUSE Virtualization.
+:revdate: 2026-10-27
 :page-revdate: {revdate}
 
 {harvester-product-name} provides a flexible storage architecture that supports both internal hyperconverged storage and external storage arrays. Understanding how different storage types (DAS, SAN and NAS) integrate with the underlying technologies like *{longhorn-product-name}* (storage provisioner) and *KubeVirt* (virtualization management) is important for optimizing virtual machine (VM) performance and aligning with the datacenter infrastructure.
@@ -15,7 +16,7 @@ In {harvester-product-name}, Direct Attached Storage (DAS) represents the defaul
 * *The KubeVirt Role*: When a user creates a VM, KubeVirt requests a volume. The active provisioner (Longhorn or LVM) provisions a block-based Persistent Volume (PV) backed by the node-local storage and attaches it to the KubeVirt VM pod.
 * *How the VM sees it*: KubeVirt exposes this volume to the guest operating system as a standard block device. The exact presentation depends on the configured disk bus, ensuring high-performance I/O native to the hypervisor.
 
-It is best suited for core HCI deployments, maximizing internal I/O performance, and eliminating the need for expensive external storage arrays or SAN fabrics. However, for optimal results, configuring a dedicated xref:/networking/storage-network.adoc[storage network] for {longhorn-product-name} replication traffic is highly recommended to improve I/O performance and cluster stability.
+It is best suited for core HCI deployments, maximizing internal I/O performance, and eliminating the need for expensive external storage arrays or SAN fabrics. However, for optimal results, configuring a dedicated xref:networking/storage-network.adoc[storage network] for {longhorn-product-name} replication traffic is highly recommended to improve I/O performance and cluster stability.
 
 == 2. Storage Area Network (SAN)
 
@@ -29,7 +30,7 @@ While built-in provisioners manage internal DAS, {harvester-product-name} integr
 +
 [IMPORTANT]
 ====
-Because {harvester-product-name} uses an immutable operating system, some CSI drivers may require persistent host paths (`os.persistent_state_paths`) or additional host software (`os.after_install_chroot_commands`). Additionally, `multipathd` is disabled by default and must be explicitly enabled if required by the driver. For detailed configuration steps, refer to xref:./csidriver.adoc[Third-Party Storage Support].
+Because {harvester-product-name} uses an immutable operating system, some CSI drivers may require persistent host paths (`os.persistent_state_paths`) or additional host software (`os.after_install_chroot_commands`). Additionally, `multipathd` is disabled by default and must be explicitly enabled if required by the driver. For detailed configuration steps, refer to xref:storage/csidriver.adoc[Third-Party Storage Support].
 ====
 * *Snapshot & Backup Configuration*: To enable VM snapshots and backups on third-party storage, administrators must configure the `csi-driver-config` setting to define the `volumeSnapshotClassName` and `backupVolumeSnapshotClassName`.
 * *The KubeVirt Role*: When provisioning a VM, the SAN-backed StorageClass can be selected for the root and data volumes. Kubernetes provisions the volume using the CSI driver, and KubeVirt simply consumes the resulting Persistent Volume Claim (PVC).
@@ -50,9 +51,9 @@ NAS integration for active VM disks relies on external CSI drivers (such as the 
 +
 [IMPORTANT]
 ====
-To avoid permission failures during automatic `disk.img` creation and synchronization, the image file must be owned by the `qemu` user (UID `107`). Protocol-specific configurations are often required on your storage backend to allow this ownership. For detailed driver-specific instructions, refer to the xref:./csidriver.adoc[Third-Party Storage Support] documentation.
+To avoid permission failures during automatic `disk.img` creation and synchronization, the image file must be owned by the `qemu` user (UID `107`). Protocol-specific configurations are often required on your storage backend to allow this ownership. For detailed driver-specific instructions, refer to the xref:storage/csidriver.adoc[Third-Party Storage Support] documentation.
 ====
-* *Image Import via DataVolumes (CDI)*: When importing existing VM images specifically to a NAS-backed StorageClass (or other external CSI storage), {harvester-product-name} uses DataVolumes via the Containerized Data Importer (CDI) to automate the creation of the PVC and the population of the storage data. If CDI cannot automatically determine the provisioner's volume and access modes, administrators must add the `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` annotation to the StorageClass. For details, refer to xref:./storageclass.adoc[StorageClass Settings].
+* *Image Import via DataVolumes (CDI)*: When importing existing VM images specifically to a NAS-backed StorageClass (or other external CSI storage), {harvester-product-name} uses DataVolumes via the Containerized Data Importer (CDI) to automate the creation of the PVC and the population of the storage data. If CDI cannot automatically determine the provisioner's volume and access modes, administrators must add the `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` annotation to the StorageClass. For details, refer to xref:storage/storageclass.adoc[StorageClass Settings].
 * *How the VM sees it*: KubeVirt mounts the file-based NAS share, reads the `disk.img` file, and translates it into a virtual block device for the guest OS. The exact presentation depends on the configured disk bus.
 
 While NAS can be used for virtual machine images, root volumes, and data volumes, the required `disk.img` layer introduces filesystem overhead not present in block-mode storage (like DAS or SAN). Therefore, NAS CSI storage is typically chosen when an organization wants to use existing enterprise file-storage infrastructure rather than maximizing raw block I/O performance.
@@ -64,7 +65,7 @@ In addition to S3 endpoints, {harvester-product-name} supports using an NFS serv
 * *The Configuration*: For the NFS backup-target path, administrators configure an NFS endpoint through the `backup-target` setting. This integration skips Kubernetes StorageClasses entirely.
 * *The Backup Process*: When a VM backup is triggered, the data is stored as a {longhorn-product-name}/{harvester-product-name} backup (consisting of backup volumes and metadata) in the configured NFS backup store, rather than as a directly usable exported disk image.
 
-For detailed instructions on configuring an NFS backup target, refer to xref:/virtual-machines/backup-restore.adoc[Virtual Machine Backup and Restore].
+For detailed instructions on configuring an NFS backup target, refer to xref:backup-restore/integration-built-in.adoc[Built-in Virtual Machine Backup, Snapshot and Restore].
 
 [NOTE]
 ====
