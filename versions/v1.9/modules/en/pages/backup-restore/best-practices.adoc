@@ -1,0 +1,80 @@
+= Backup and Restore Best Practices
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+A backup is only as good as your ability to restore from it. This page collects practices that help ensure your {harvester-product-name-tm} backups are reliable, recoverable, and aligned with your xref:backup-restore/recommendations.adoc[recovery objectives].
+
+== Design the strategy around recovery objectives
+
+* Assign every workload to a tier with a defined xref:backup-restore/definitions.adoc[RPO and RTO], as described in xref:backup-restore/recommendations.adoc[RPO and RTO Recommendations].
+* Set backup frequency to meet the RPO and choose a recovery method that meets the RTO. Do not over-protect low-value workloads or under-protect critical ones.
+* Combine xref:backup-restore/backup-types.adoc[backup types]: frequent snapshots for fast local rollback, periodic full backups to anchor a chain, and incremental backups between them to meet the RPO economically.
+
+== Follow the 3-2-1 rule
+
+A widely used guideline for durable protection:
+
+* Keep at least *3* copies of your data.
+* Store them on at least *2* different types of media or storage systems.
+* Keep at least *1* copy off-site.
+
+In practice, this means not relying on snapshots alone (which usually live on the same storage as the source), exporting backups to a separate target such as an NFS share or object store, and replicating at least one copy to a remote location or region for disaster recovery.
+
+== Protect against ransomware and accidental deletion
+
+* Use *immutable backups* where the tool supports them (for example, Veeam Kasten or CloudCasa), so that backups cannot be altered or deleted within their retention period, even by an administrator.
+* Restrict who can delete backups and backup targets, and enable audit logging where available.
+* Keep an off-site or logically isolated copy so that a compromise of the production environment does not reach every backup.
+
+== Ensure the right consistency
+
+* Use *crash-consistent* backups for workloads that recover cleanly from an abrupt stop; this is sufficient for most virtual machines.
+* Use *application-consistent* backups for databases and other transactional workloads. Enable the QEMU guest agent in the guest, and configure filesystem freeze and thaw (Linux `fsfreeze`; Windows Volume Shadow Copy Service) so that pending writes are flushed before the recovery point is taken.
+* Verify that the guest agent reports as connected (for example, the VMI shows `AgentConnected`) before relying on application-consistent backups.
+
+== Test backups regularly
+
+Untested backups are a common cause of failed recoveries. Restore, do not just back up.
+
+How often to test::
+* Perform a *restore test* for critical (Tier 1) workloads at least *monthly*, and after any significant change to the workload, its storage, or the backup configuration.
+* Test *standard* workloads at least *quarterly*.
+* Test *archive* recovery at least *once or twice a year*, and whenever retention media or formats change.
+* Run a full *disaster recovery (DR) exercise* — failing over to the destination cluster or site — at least *annually*, and ideally every six months for critical services.
+
+How to test::
+* Restore to a *separate namespace or an isolated test cluster* so production workloads are not disrupted.
+* Start the restored virtual machine, confirm the guest boots, and verify that applications start and that data on all volumes is present and correct.
+* For application-consistent backups, confirm that the application (for example, a database) starts without recovery errors.
+
+== Validate recovery against objectives
+
+Testing confirms that a backup *exists* and can be restored; validation confirms that the recovered workload actually *meets its recovery objectives* and is fit for production. Validate every recovery test, and in particular every disaster recovery (DR) exercise, as follows:
+
+* *Confirm functional recovery*: the virtual machine boots, the guest operating system is healthy, applications start without recovery errors, and data on all volumes is present and correct.
+* *Measure the achieved RPO*: determine how much data was lost by comparing the recovery point to the moment of the simulated failure, and check it against the workload's target RPO.
+* *Measure the achieved RTO*: time the recovery from the declaration of failure to the workload being fully available, and check it against the workload's target RTO.
+* *Record the results* in the recovery runbook or a test log, note any gaps, and adjust backup frequency, recovery method, or infrastructure until the objectives are consistently met.
+* *Re-validate after major changes*, because growth in data size or changes in storage and network performance can erode a previously acceptable RTO.
+
+=== Regular disaster recovery tests
+
+A DR test goes beyond restoring a single workload: it rehearses recovering a service (or an entire environment) at the destination cluster or site, ideally without prior notice to the recovery team, to validate both the technology and the runbook.
+
+* Schedule DR tests on a regular cadence — at least annually, and every six months for critical services — and after any significant architectural change.
+* Fail over the protected workloads to the destination cluster or site using only the documented runbook, so that gaps in the procedure surface during the test rather than during a real incident.
+* For the storage-based DR solution, verify that {longhorn-product-name-tm} Disaster Recovery volumes activate correctly and that the restored application attaches to them. See xref:backup-restore/integration-cloudcasa.adoc[Integrating CloudCasa].
+* Validate the recovered service end to end (functionality, achieved RPO, achieved RTO), then document the outcome and any corrective actions.
+* Where practical, perform a *failback* to confirm you can return to normal operation once the primary environment is restored.
+
+[NOTE]
+====
+Some restore behavior is specific to {harvester-product-name}. For example, when restoring virtual machines, MAC addresses and firmware UUIDs may need to be regenerated to avoid conflicts, and certain {harvester-product-name} volume annotations must be adjusted. Account for these steps in your tested recovery runbooks. See xref:backup-restore/integration-velero.adoc[Integrating Velero] for a worked example.
+====
+
+== Document and automate
+
+* Maintain a *recovery runbook* for each tier that lists the exact restore steps, so recovery does not depend on individual knowledge during an incident.
+* *Automate* backups with schedules or policies rather than relying on manual runs, so that the RPO is met consistently.
+* *Monitor* backup success and failure and alert on missed or failed backups. Treat a failed backup as an incident, not a routine log entry.
+* Review retention against compliance requirements periodically, and expire old backups to control storage cost.

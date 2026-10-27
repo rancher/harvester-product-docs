@@ -1,0 +1,83 @@
+= RPO and RTO Recommendations
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+There is no single correct xref:backup-restore/definitions.adoc[Recovery Point Objective (RPO) or Recovery Time Objective (RTO)]. The right values depend on the business value of each workload, the cost of the data protection required to achieve them, and any regulatory obligations. This page groups workloads into three common tiers and recommends starting values for each, with the reasoning behind them.
+
+[IMPORTANT]
+====
+The values below are starting points for planning, not guarantees. Validate them against your own recovery testing, the performance of your storage and network, and the requirements of your business and any applicable regulations. Achievable objectives always depend on your specific environment.
+====
+
+== Classify workloads into tiers
+
+Before assigning objectives, group workloads by the impact that data loss and downtime would have on the business. A practical approach is three tiers: _critical systems_, _standard systems_, and _archive data_.
+
+[cols="1,2,1,1", options="header"]
+|===
+| Tier | Examples | Target RPO | Target RTO
+
+| Critical systems
+| Transactional (OLTP) databases, payment and order processing, authentication services, primary line-of-business applications
+| &#8804; 15 minutes
+| &#8804; 1 hour
+
+| Standard systems
+| Internal web applications, application servers, departmental services, development and test platforms
+| 1&#8211;4 hours
+| 4&#8211;8 hours
+
+| Archive data
+| Compliance and audit archives, logs, completed project data, cold backups
+| 24 hours
+| 24&#8211;72 hours (or best effort)
+|===
+
+== Critical systems
+
+*Recommended: RPO &#8804; 15 minutes, RTO &#8804; 1 hour.*
+
+Critical systems are those where data loss or downtime causes immediate financial loss, breaks a regulatory obligation, or halts core business operations. Enterprise transactional databases are the archetypal example.
+
+Justification::
+* *Why RPO &#8804; 15 minutes:* A transactional database can process thousands of business transactions per minute. Losing even an hour of committed transactions could mean lost orders, payments, or records that cannot be reconstructed from other systems. An RPO of 15 minutes bounds this loss to a recoverable amount while remaining achievable with frequent incremental backups or storage replication, rather than the cost and complexity of synchronous replication needed for a near-zero RPO.
+* *Why RTO &#8804; 1 hour:* Extended downtime of a core system directly stops revenue or operations. A one-hour objective is aggressive enough to limit business impact yet realistic for a well-tested restore, particularly when recovery uses local snapshots or pre-replicated (disaster recovery) volumes rather than a full restore from remote object storage.
+
+Recommended approach::
+* Take *application-consistent* backups so that databases recover cleanly. See xref:backup-restore/best-practices.adoc[Best Practices] for filesystem freeze and guest agent configuration.
+* Combine frequent xref:backup-restore/backup-types.adoc[incremental backups or snapshots] to meet the RPO with pre-replicated volumes to meet the RTO. A storage-based disaster recovery solution, such as {longhorn-product-name-tm} Disaster Recovery volumes paired with CloudCasa, can deliver an RPO and RTO in the 10-minute to 1-hour range cost-effectively.
+
+== Standard systems
+
+*Recommended: RPO 1&#8211;4 hours, RTO 4&#8211;8 hours.*
+
+Standard systems support the business but can tolerate a modest amount of data loss and a partial working day of downtime without severe consequences. Most internal applications fall into this tier.
+
+Justification::
+* *Why RPO 1&#8211;4 hours:* The data these systems hold usually changes more slowly, and small losses can often be reconstructed from other sources or re-entered. Backing up every few hours meets the objective at a fraction of the storage and performance cost of the critical tier.
+* *Why RTO 4&#8211;8 hours:* These workloads can typically be offline for part of a working day. This window is comfortable for restoring from a standard backup target, so there is no need to fund the pre-replicated volumes that the critical tier requires.
+
+Recommended approach::
+* Scheduled backups a few times per day, using crash-consistent backups unless the application specifically requires consistency.
+* Restore from the backup target; local snapshots add a fast rollback option for maintenance.
+
+== Archive data
+
+*Recommended: RPO 24 hours, RTO 24&#8211;72 hours (or best effort).*
+
+Archive data is retained for compliance, audit, or reference rather than active use. It changes rarely, and access is infrequent.
+
+Justification::
+* *Why RPO 24 hours:* Because the data changes seldom, a daily recovery point captures virtually all changes while keeping storage cost and backup activity to a minimum.
+* *Why RTO 24&#8211;72 hours:* Archived data is not needed to keep the business running, so a longer recovery window is acceptable. This allows the use of the lowest-cost, highest-latency storage tiers, such as cold object storage.
+
+Recommended approach::
+* Infrequent xref:backup-restore/backup-types.adoc[full backups] to inexpensive, durable storage, with retention set to satisfy the relevant compliance period.
+* Where supported, use immutable backups to protect archives against tampering and ransomware.
+
+== Applying the tiers
+
+* Assign every workload to a tier as part of onboarding, and record the assigned RPO and RTO.
+* Where a single virtual machine mixes data of different value, protect it at the level of its most critical data, or separate that data onto its own volume so it can be protected independently.
+* Review tier assignments periodically, because the business value of a workload changes over time.
+* Confirm that each tier's objectives are actually met through regular recovery testing, as described in xref:backup-restore/best-practices.adoc[Best Practices].
