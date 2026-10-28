@@ -1,18 +1,19 @@
 = Creating an RKE2 Kubernetes Cluster
-:revdate: 2026-06-12
+:description: Create an RKE2 Kubernetes cluster using the Harvester Node Driver by setting up cloud credentials and configuring node and workload affinity rules
+:revdate: 2026-10-22
 :page-revdate: {revdate}
 
-You can now provision {rke2-product-name} Kubernetes clusters on top of the {harvester-product-name} cluster in {rancher-product-name} using the built-in Harvester Node Driver.
+You can now `Provision new nodes and create a cluster using RKE2/K3s` on top of the {harvester-product-name} cluster in {rancher-product-name} using the built-in Harvester Node Driver.
 
-image::rancher/rke2-k3s-node-driver.png[rke2-cluster]
+image::rancher/create-cluster-via-harvester-node-driver.png[rke2-cluster]
 
 [NOTE]
 ====
 
-* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN network] is required for Harvester Node Driver.
-* Provisioning RKE2 Kubernetes clusters involves configuring the IP address of the underlying virtual machines. You can do this using a DHCP server on the VLAN network that the virtual machines are attached to. If such a server does not exist on the network, you can use the xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] feature to configure the IP address.
+* xref:networking/vm-network.adoc#_vlan_network[VLAN network] is required for Harvester Node Driver.
+* Provisioning RKE2 Kubernetes clusters involves configuring the IP address of the underlying virtual machines. You can do this using a DHCP server on the VLAN network that the virtual machines are attached to. If such a server does not exist on the network, you can use the xref:add-ons/vm-dhcp-controller.adoc[Managed DHCP] feature to configure the IP address.
 * Harvester Node Driver only supports cloud images.
-* For the port requirements of the guest clusters deployed within {harvester-product-name}, please refer to the doc xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[here].
+* For the port requirements of the guest clusters deployed within {harvester-product-name}, please refer to the doc xref:installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[here].
 * For RKE2 with Harvester Cloud Provider support matrix, please refer to the website https://www.suse.com/suse-harvester/support-matrix/all-supported-versions/[here].
 ====
 
@@ -35,42 +36,65 @@ For a detailed support matrix, please refer to the *Harvester CCM & CSI Driver w
 . Select "Imported Harvester Cluster".
 . Click *Create*.
 
-image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+image::rancher/create-cloud-credentials-v2.14.2.png[create-harvester-cloud-credentials]
 
-== Create RKE2 kubernetes cluster
+== Create RKE2 Kubernetes cluster
 
-Users can create a RKE2 Kubernetes cluster from the *Cluster Management* page via the RKE2 node driver.
+Users can create a RKE2 Kubernetes cluster from the *Cluster Management* page via the Harvester node driver.
 
 . Select *Clusters* menu.
 . Click *Create* button.
-. Toggle Switch to *RKE2/K3s*.
-. Select Harvester Node Driver.
+. Select Harvester node driver.
 . Select a *Cloud Credential*.
 . Enter *Cluster Name* (required).
 . Enter *Namespace* (required).
 . Enter *Image* (required).
 . Enter *Network Name* (required).
 . Enter *SSH User* (required).
-. (optional) Configure the menu:Show Advanced[User Data] to install the required packages of VM.
-+
+. (optional) Configure the *Show Advanced > User Data* to install the required packages of VM.
 [,yaml]
 ----
 #cloud-config
+package_update: true
 packages:
-  - iptables
+  - qemu-guest-agent
+runcmd:
+  - - systemctl
+    - enable
+    - '--now'
+    - qemu-guest-agent.service
 ----
-+
+
+. In the *Basics* section, use the *Kubernetes Version* drop-down menu to select your preferred Kubernetes distribution (*RKE2* or *K3s*) and its corresponding version.
+. Configure cluster-specific settings. (Loads dynamically based on your selection.)
+. Click *Create*.
+
 [NOTE]
 ====
 Calico and Canal networks require the `iptables` or `xtables-nft` package to be installed on the node. For more information, see https://documentation.suse.com/cloudnative/rke2/latest/en/known_issues.html#_canal_and_ip_exhaustion[Canal and IP exhaustion] in the RKE2 documentation.
 ====
 
-. Click *Create*.
-+
-image:rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
-image:rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
-image:rancher/create-rke2-harvester-cluster-3.png[create-rke2-harvester-cluster-3]
-+
+[IMPORTANT]
+====
+Ensure all *Machine Pools* use the same first(primary) Network. RKE2/K3s rely on this network to boot the cluster; using different networks across machine pools may cause the cluster to fail.
+====
+
+Machine Pools (Basic)
+
+image::rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+
+Machine Pools (Advanced)
+
+image::rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+
+Kubernetes Distribution & Version
+
+image::rancher/create-rke2-harvester-cluster-rke2-k3s-selection.png[create-rke2-harvester-cluster-rke2-k3s-selection]
+
+K3s Settings (Only applies if K3s is selected)
+
+image::rancher/create-rke2-harvester-cluster-3-k3s.png[create-rke2-harvester-cluster-3]
+
 [NOTE]
 ====
 * RKE2 v1.21.5+rke2r2 or above provides a built-in Harvester Cloud Provider and Guest CSI driver integration.
@@ -119,9 +143,19 @@ See the https://kubernetes.io/docs/concepts/scheduling-eviction/assign-pod-node/
 
 == Update RKE2 Kubernetes cluster
 
-The fields highlighted below of the RKE2 machine pool represent the {harvester-product-name} VM configurations. Any modifications to these fields will trigger node reprovisioning.
+. Click *☰ > Cluster Management*.
+. Select *Clusters* menu.
+. Find the target cluster.
+. Click the *three-dot* menu on the right and select *Edit Config*.
+
+The non-grayed fields of the RKE2 machine pool represent the Harvester VM configurations. Any modifications to these fields will trigger node reprovisioning.
 
 image::rancher/rke2-harvester-fields.png[rke2-harvester-fields]
+
+[IMPORTANT]
+====
+Do not change the first(primary) *Network*. By default, RKE2/K3s relies on it to boot the cluster. If different *Machine Pools* use different networks, the cluster may break.
+====
 
 == Using Harvester RKE2 node driver in air gapped environment
 
