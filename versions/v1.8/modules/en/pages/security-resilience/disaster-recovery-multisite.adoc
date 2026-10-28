@@ -1,15 +1,15 @@
-= Disaster Recovery in Multi-Site Architectures
-:description: Disaster recovery strategies for multi-site architectures using SUSE Virtualization and SUSE Storage.
-:revdate: 2026-10-01
+= Cross-Cluster Workload Recovery in Multi-Site Architectures
+:description: Workload recovery strategies and cross-cluster backup guidelines for multi-site architectures using SUSE Virtualization.
+:revdate: 2026-10-28
 :page-revdate: {revdate}
 
-When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, you must choose between two distinct disaster recovery (DR) strategies: a *Stretched Cluster (Active-Active)* or a *Multi-Cluster DR (Active-Passive)* setup. 
+When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, it is important to understand the scope of the available features. *{harvester-product-name} currently does not provide a native, automated Disaster Recovery (DR) solution*.
 
-Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
+Instead, you can utilize the Harvester's cross-cluster backup and restore capabilities to manually recover workloads across distinct physical locations. Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
 
 == Unsupported Topology: Stretched Clusters (Active-Active)
 
-A stretched cluster attempts to span a single {harvester-product-name} deployment across multiple physical data centers. **{harvester-product-name} does not officially support stretched clusters.** 
+A stretched cluster attempts to span a single {harvester-product-name} deployment across multiple physical data centers. *{harvester-product-name} does not officially support stretched clusters*. 
 
 For multi-site disaster recovery, you must use two independent clusters as described in the Multi-Cluster DR section below. Attempting to stretch a single cluster across physical locations is highly risky due to the following strict architectural constraints:
 
@@ -27,9 +27,9 @@ While {harvester-product-name} supports a *Witness Node* to act as a tie-breaker
 
 Accurate time synchronization is mandatory. Clock drift exceeding *500 ms* between any nodes across your sites will cause leader election timeouts in etcd, leading to cluster flap, loss of quorum, and total cluster instability.
 
-== Multi-Cluster Disaster Recovery (Active-Passive)
+== Multi-Cluster Backup and Restore (Active-Passive)
 
-For true geographic disaster recovery across distinct physical locations, the recommended architecture is an Active-Passive topology. This involves two completely separate {harvester-product-name} clusters (Primary and Secondary) linked by a shared external backup target.
+For workload recovery across distinct physical locations, the recommended architecture is an Active-Passive topology. This involves two completely separate {harvester-product-name} clusters (Primary and Secondary) linked by a shared external backup target.
 
 === 1. The Shared Backup Target (S3 Recommended)
 
@@ -58,7 +58,7 @@ Automatic image synchronization is skipped if a virtual machine image with the s
 
 === Unsupported Workflow: Longhorn DR Volumes 
 
-While upstream {longhorn-product-name} documentation describes a feature called *Disaster Recovery (DR) Volumes*, **this workflow is not supported for {harvester-product-name} disaster recovery**. 
+While upstream {longhorn-product-name} documentation describes a feature called *Disaster Recovery (DR) Volumes*, *this workflow is not supported for {harvester-product-name} disaster recovery*. 
 
 {harvester-product-name} does not manage Longhorn DR volume activation, nor does it reconstruct the Kubernetes `VirtualMachine` custom resources and PersistentVolumeClaims (PVCs) required to use an activated volume. Do not attempt to use Longhorn DR volumes for virtual machine failover. Instead, you must use the supported *Cross-Cluster Virtual Machine Restore (Harvester Workflow)* described above.
 
@@ -70,7 +70,7 @@ When designing your storage and backup policies for DR, you must account for the
 
 When configuring {longhorn-product-name} StorageClasses for multi-site topologies, you might encounter the `dataLocality: strict-local` setting in the upstream storage documentation. 
 
-**{harvester-product-name} explicitly does not support the `strict-local` option.** This setting is a Longhorn-only feature that directly interferes with {harvester-product-name}'s Virtual Machine Live Migration. You must restrict your StorageClass configurations to the supported `dataLocality` options: `disabled` (the default) or `best-effort`.
+*{harvester-product-name} explicitly does not support the `strict-local` option*. This setting is a Longhorn-only feature that directly interferes with {harvester-product-name}'s Virtual Machine Live Migration. You must restrict your StorageClass configurations to the supported `dataLocality` options: `disabled` (the default) or `best-effort`.
 
 === Ubuntu/Netplan MAC Address Conflicts on Restore
 
@@ -80,4 +80,4 @@ Ensure `dhcp-identifier: mac` is configured in the Ubuntu VM's `netplan` setting
 
 === Longhorn V2 Data Engine Volumes
 
-{longhorn-product-name} V2 Data Engine volumes are **not supported** for backup and restore operations in a multi-site disaster recovery workflow. Do not attempt to use the V2 Data Engine for virtual machines that require cross-cluster failover or DR volume replication. You must use the default V1 Data Engine for these workloads.
+{longhorn-product-name} V2 Data Engine volumes are *not supported* for backup and restore operations in a multi-site disaster recovery workflow. Do not attempt to use the V2 Data Engine for virtual machines that require cross-cluster failover or DR volume replication. You must use the default V1 Data Engine for these workloads.

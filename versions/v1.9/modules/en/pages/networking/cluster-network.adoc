@@ -1,5 +1,6 @@
 = Cluster Network
-:revdate: 2026-08-17
+:description: Understand the structure and relationships of cluster, VM, and network configurations in SUSE Virtualization
+:revdate: 2026-10-26
 :page-revdate: {revdate}
 
 == Concepts
@@ -22,11 +23,11 @@ Network configuration only works under a certain cluster network. Each network c
 
 === VM Network
 
-A VM network is an interface in a virtual machine that connects to the host network. As with a network configuration, every network except the built-in xref:./vm-network.adoc#_management_network[management network] must be under a cluster network.
+A VM network is an interface in a virtual machine that connects to the host network. As with a network configuration, every network except the built-in xref:networking/vm-network.adoc#_management_network[management network] must be under a cluster network.
 
 {harvester-product-name} supports adding multiple networks to one VM. If a network's cluster network is not enabled on some hosts, the VM that owns this network will not be scheduled to those hosts.
 
-Please refer to xref:./vm-network.adoc[network part] for more details about networks.
+Please refer to xref:networking/vm-network.adoc[network part] for more details about networks.
 
 === Relationship Between Cluster Network, Network Config, VM Network
 
@@ -67,13 +68,20 @@ When a {harvester-product-name} cluster is deployed, a cluster network named `mg
 
 `mgmt` does not require a network configuration and is always enabled on all hosts. You cannot disable and delete `mgmt`.
 
-Only the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[primary VLAN ID] provided during installation is automatically added to the `mgmt-br` bridge and the `mgmt-bo` interface. You can <<#_adding_secondary_vlan_interfaces,add secondary VLAN interfaces>> after installation is completed.
-
 Starting with v1.9.0, the *Cluster Network Configuration* screen displays interface details for `mgmt-bo` across all non-witness nodes, including its member interfaces, MTU, and bond mode.
 
 image::networking/mgmt-cn.png[Cluster Network Configuration screen]
 
-During installation of the first cluster node, you can configure the MTU value for `mgmt` using the xref:../installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting. The default value of the `mtu` field is `1500`, which is what `mgmt` typically uses. However, if you specify an MTU value other than `0` or `1500`, you must xref:#_annotate_a_non_default_mtu_value_to_mgmt_after_installation[add a corresponding annotation] after the cluster is deployed.
+[NOTE]
+====
+In {harvester-product-name} v1.5.x and earlier versions, the entire VLAN ID range (2 to 4094) was assigned to the `mgmt` interfaces. However, this exceeded the upper limit of supported VLANs on certain network cards, so hardware VLAN offloading stopped working correctly. For more information, see https://github.com/harvester/harvester/issues/7650[issue #7650].
+
+The displayed MTU for the `mgmt` cluster network is read-only. To configure a non-default MTU for networks attached to `mgmt`, see xref:_annotate_a_non_default_mtu_value_to_mgmt_after_installation[Annotating a Non-Default MTU Value to `mgmt` After Installation].
+====
+
+Only the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[primary VLAN ID] provided during installation is automatically added to the `mgmt-br` bridge and the `mgmt-bo` interface. You can <<#_adding_secondary_vlan_interfaces,add secondary VLAN interfaces>> after installation is completed.
+
+During installation of the first cluster node, you can configure the MTU value for `mgmt` using the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting. The default value of the `mtu` field is `1500`, which is what `mgmt` typically uses. However, if you specify an MTU value other than `0` or `1500`, you must xref:_annotate_a_non_default_mtu_value_to_mgmt_after_installation[Annotating a Non-Default MTU Value to `mgmt` After Installation] after the cluster is deployed.
 
 [CAUTION]
 ====
@@ -108,22 +116,32 @@ $ nmcli con modify bridge-mgmt bridge.vlans 2017,2018
 
 . Reboot each node to apply the change.
 
-=== Annotate a Non-Default MTU Value to `mgmt` After Installation 
+[#_annotate_a_non_default_mtu_value_to_mgmt_after_installation]
+=== Annotating a Non-Default MTU Value to `mgmt` After Installation
 
-If you specified a value other than `0` or `1500` in the `mtu` field of the xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting, you must annotate this value to the `mgmt` `clusternetwork` object. Without the annotation, all created xref:./vm-network.adoc#_create_a_vm_network[VM networks] use the default MTU value `1500` instead of automatically inheriting the value that you specified.
+If you specified a value other than `0` or `1500` in the `mtu` field of the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] setting, you must annotate this value to the `mgmt` `clusternetwork` object. Without the annotation, all created xref:networking/vm-network.adoc#_create_a_vm_network[VM networks] use the default MTU value `1500` instead of automatically inheriting the value that you specified.
 
-*Example*
+*Example*:
 
-[bash, shell]
+[,shell]
 ----
-$ kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu="9000"
+----
+
+Starting with v1.9.0, the *Cluster Network Configuration* screen displays management interface details (for all non-witness nodes) through corresponding read-only VlanConfig resources. These VLAN configurations inherit their MTU value directly from the management interface. However, changing the management interface MTU does not automatically update the MTU used by VM networks attached to the `mgmt` cluster network. To update the MTU for these VM networks, you must explicitly annotate `mgmt` as shown in the preceding example.
+
+To reset the MTU to the default value on virtual machines using the `mgmt` cluster network, remove the annotation:
+
+[,shell]
+----
+kubectl annotate clusternetwork mgmt network.harvesterhci.io/uplink-mtu-
 ----
 
 [CAUTION]
 ====
 You must ensure the following:
 
-* The `uplink-mtu` value in the annotation is identical to the `mtu` value in the xref:/installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] SETTING.
+* The `uplink-mtu` value in the annotation is identical to the `mtu` value in the xref:installation-setup/config/configuration-file.adoc#_install_management_interface[`install.management_interface`] SETTING.
 * All cluster nodes use the same MTU value.
 ====
 
@@ -173,7 +191,7 @@ If more than one network interface is attached to each host, you can create cust
 
 [NOTE]
 ====
-The xref:../hosts/witness-node.adoc[witness node] is generally not involved in the custom cluster network.
+The xref:hosts/witness-node.adoc[witness node] is generally not involved in the custom cluster network.
 ====
 
 == Configuration
@@ -185,7 +203,7 @@ The xref:../hosts/witness-node.adoc[witness node] is generally not involved in t
 To simplify cluster maintenance, create one network configuration for each node or group of nodes. Without dedicated network configurations, certain maintenance tasks (for example, replacing old NICs with NICs in different slots) will require you to stop and/or migrate the affected virtual machines before updating the network configuration.
 ====
 
-. Ensure that the xref:../installation-setup/requirements.adoc#_hardware_requirements[hardware requirements] are met.
+. Ensure that the xref:installation-setup/requirements.adoc#_hardware_requirements[hardware requirements] are met.
 
 . Go to *Networks -> ClusterNetworks/Configs*, and then click *Create*.
 
@@ -205,7 +223,7 @@ image::networking/select-nodes.png[Network configuration node selector]
 +
 [NOTE]
 ====
-* The method *Select all nodes* works only when all nodes use the exact same dedicated NICs for this specific custom cluster network. In other situations (for example, when the cluster has a xref:../hosts/witness-node.adoc[witness node]), you must select either of the remaining methods.
+* The method *Select all nodes* works only when all nodes use the exact same dedicated NICs for this specific custom cluster network. In other situations (for example, when the cluster has a xref:hosts/witness-node.adoc[witness node]), you must select either of the remaining methods.
 * If you want the configuration to apply to nodes that are not covered by the selected method, you must create another network configuration.
 ====
 
@@ -226,7 +244,7 @@ Physical switches connected to bonded interfaces must be configured as trunk por
 
 === Change a network configuration
 
-Changes to existing network configurations may affect {harvester-product-name} virtual machines and workloads, and external devices such as switches and routers. For more information, see xref:./deep-dive.adoc#_network_topology[Network Topology].
+Changes to existing network configurations may affect {harvester-product-name} virtual machines and workloads, and external devices such as switches and routers. For more information, see xref:networking/deep-dive.adoc#_network_topology[Network Topology].
 
 [IMPORTANT]
 ====
@@ -266,11 +284,11 @@ You must use the same values for the *Bond Options* and *Attributes* fields in a
 [#_changing_mtu_no_storage_network]
 ==== Changing the MTU of a network configuration with no attached storage network
 
-In this scenario, the xref:./storage-network.adoc#_storage_network_setting[storage network setting] is neither enabled nor attached to the target cluster network.
+In this scenario, the xref:networking/storage-network.adoc#_storage_network_setting[storage network setting] is neither enabled nor attached to the target cluster network.
 
 [CAUTION]
 ====
-* The MTU affects {harvester-product-name} nodes and networking devices such as switches and routers. Careful planning and testing are required to ensure that changing the MTU does not adversely affect the system. For more information, see xref:./deep-dive.adoc#_network_topology[Network Topology].
+* The MTU affects {harvester-product-name} nodes and networking devices such as switches and routers. Careful planning and testing are required to ensure that changing the MTU does not adversely affect the system. For more information, see xref:networking/deep-dive.adoc#_network_topology[Network Topology].
 * You must use the same MTU across all network configurations of a custom cluster network.
 * Cluster operations are interrupted during the configuration change.
 * The information in this section does not apply to the built-in `mgmt` cluster network.
@@ -280,7 +298,7 @@ If you must change the MTU, perform the following steps:
 
 . Stop all virtual machines that are attached to the target cluster network.
 +
-You can check this using the xref:./vm-network.adoc#_create_a_vm_network[virtual machine network] and any xref:../virtual-machines/create-vm.adoc#_secondary_network[secondary networks] you may have used. Do not change the MTU while any of the connected virtual machines are still running.
+You can check this using the xref:networking/vm-network.adoc#_create_a_vm_network[virtual machine network] and any xref:virtual-machines/create-vm.adoc#_secondary_network[secondary networks] you may have used. Do not change the MTU while any of the connected virtual machines are still running.
 
 . Check the network configurations of the target cluster network.
 +
@@ -416,13 +434,13 @@ The virtual machines should have inherited the new MTU. You can verify this in t
 
 ==== Change the MTU of a network configuration with an attached storage network
 
-In this scenario, the xref:./storage-network.adoc#_storage_network_setting[storage network setting] is enabled and attached to the target cluster network.
+In this scenario, the xref:networking/storage-network.adoc#_storage_network_setting[storage network setting] is enabled and attached to the target cluster network.
 
-The storage network is used by `driver.longhorn.io`, which is {harvester-product-name}'s default CSI driver. {longhorn-product-name} is responsible for provisioning xref:../virtual-machines/create-vm.adoc#_volumes[root volumes], so changing the MTU affects all virtual machines.
+The storage network is used by `driver.longhorn.io`, which is {harvester-product-name}'s default CSI driver. {longhorn-product-name} is responsible for provisioning xref:virtual-machines/create-vm.adoc#_volumes[root volumes], so changing the MTU affects all virtual machines.
 
 [CAUTION]
 ====
-* The MTU affects {harvester-product-name} nodes and networking devices such as switches and routers. Careful planning and testing are required to ensure that changing the MTU does not adversely affect the system. For more information, see xref:./deep-dive.adoc#_network_topology[Network Topology].
+* The MTU affects {harvester-product-name} nodes and networking devices such as switches and routers. Careful planning and testing are required to ensure that changing the MTU does not adversely affect the system. For more information, see xref:networking/deep-dive.adoc#_network_topology[Network Topology].
 * You must use the same MTU across all network configurations of a custom cluster network.
 * All cluster operations are interrupted during the configuration change.
 * The information in this section does not apply to the built-in `mgmt` cluster network.
@@ -432,9 +450,9 @@ If you must change the MTU, perform the following steps:
 
 . Stop all virtual machines.
 
-. Disable the xref:./storage-network.adoc#_storage_network_setting[storage network setting].
+. Disable the xref:networking/storage-network.adoc#_storage_network_setting[storage network setting].
 +
-Allow some time for the setting to be disabled, and then xref:./storage-network.adoc#_verify_configuration_is_completed[verify that the change was applied].
+Allow some time for the setting to be disabled, and then xref:networking/storage-network.adoc#_verify_configuration_is_completed[verify that the change was applied].
 
 . Check the network configurations of the target cluster network.
 +
@@ -527,9 +545,9 @@ $ ip addr delete 192.168.100.100/24 dev cn-data-br
 You must change the MTU in each network configuration, and verify that the new MTU was applied. The {harvester-product-name} webhook rejects a new network configuration if its MTU does not match the MTU of existing network configurations.
 ====
 
-. Enable and configure the xref:./storage-network.adoc#_storage_network_setting[storage network setting], ensuring that the xref:./storage-network.adoc#_prerequisites[prerequisites] are met.
+. Enable and configure the xref:networking/storage-network.adoc#_storage_network_setting[storage network setting], ensuring that the xref:networking/storage-network.adoc#_prerequisites[prerequisites] are met.
 
-. Allow some time for the setting to be enabled, and then xref:./storage-network.adoc#_prerequisites[verify that the change was applied]. The `storagenetwork` runs with the new MTU value.
+. Allow some time for the setting to be enabled, and then xref:networking/storage-network.adoc#_prerequisites[verify that the change was applied]. The `storagenetwork` runs with the new MTU value.
 
 All VM networks that are attached to the target cluster network automatically inherit the new MTU value.
 +
