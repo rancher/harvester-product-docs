@@ -1,0 +1,49 @@
+= Backup Definitions
+:revdate: 2026-07-15
+:page-revdate: {revdate}
+
+This page defines the terms used throughout the {harvester-product-name-tm} backup and restore documentation. Understanding them helps you select the right tool and configure it to meet your service level objectives.
+
+== Recovery objectives
+
+Recovery objectives express, in measurable terms, how much data loss and downtime a workload can tolerate. They are the foundation of every backup strategy, because they determine how often you protect data and which tools and storage you need.
+
+Recovery Point Objective (RPO)::
+The maximum amount of data loss that is acceptable, measured as a period of time. For example, an RPO of 15 minutes means that no more than 15 minutes of data can be lost during a recovery. The RPO determines how frequently backups or snapshots must be taken: to meet an RPO of 15 minutes, a recovery point must be created at least every 15 minutes.
+
+Recovery Time Objective (RTO)::
+The maximum acceptable amount of time that a workload can be unavailable after a failure. The RTO influences the choice of recovery method, because restoring large volumes from remote object storage takes longer than activating a pre-replicated volume.
+
+=== Differences and dependencies
+
+The RPO and RTO measure different things and are set independently, but they interact when you design a solution:
+
+* The *RPO looks backward* from the moment of failure and answers the question, "How much data can I afford to lose?" It is met by the _frequency_ of your snapshots or backups.
+* The *RTO looks forward* from the moment of failure and answers the question, "How long can the workload stay offline?" It is met by the _speed_ of your recovery method.
+
+A single workload has both an RPO and an RTO, and the two are often in tension. Achieving a very short RPO requires frequent recovery points, which increases storage consumption and the load placed on production systems. Achieving a very short RTO requires fast recovery methods, such as local snapshots or pre-replicated (disaster recovery) volumes, which cost more than restoring from remote object storage.
+
+[NOTE]
+====
+Driving both objectives toward zero is rarely necessary or economical. The cost and complexity of a solution rises sharply as the RPO and RTO approach zero, culminating in active-active or synchronous-replication designs. Set each objective according to the business value of the workload. For guidance, see xref:backup-restore/recommendations.adoc[RPO and RTO Recommendations].
+====
+
+== Recovery points
+
+Snapshot::
+A point-in-time copy of a volume, typically stored on the same storage system as the source. Snapshots are fast to create and restore, which makes them well suited to quick, local rollbacks. However, because they usually reside alongside the source data, they do not protect against the loss of the underlying storage.
+
+Backup::
+A copy of data that is exported to a separate location, such as an NFS share or an S3-compatible object store. Backups protect against the loss of the source storage and support disaster recovery, but they generally take longer to create and restore than snapshots.
+
+For a detailed comparison of full backups, incremental backups, and snapshots, including their advantages, disadvantages, and typical uses, see xref:backup-restore/backup-types.adoc[Backup Types].
+
+== Consistency
+
+The _consistency_ of a recovery point describes the state of the data it captures, which determines whether a workload can reliably resume from it.
+
+Crash-consistent backup::
+A backup that captures the state of a volume at a single moment, equivalent to the state after an abrupt power loss. Most workloads recover cleanly from crash-consistent backups.
+
+Application-consistent backup::
+A backup taken after the guest operating system and applications have flushed pending writes to disk and quiesced their filesystems (for example, using the QEMU guest agent, or Volume Shadow Copy Service on Windows). Application-consistent backups are recommended for databases and other transactional workloads.
