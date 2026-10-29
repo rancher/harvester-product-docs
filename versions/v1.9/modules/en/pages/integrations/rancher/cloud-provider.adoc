@@ -1,6 +1,6 @@
 = Harvester Cloud Provider
 :description: Provision RKE2 and K3s clusters in {rancher-short-name} using the Harvester Cloud Provider with SUSE Virtualization support
-:revdate: 2026-10-27
+:revdate: 2026-10-28
 :page-revdate: {revdate}
 
 You can provision xref:integrations/rancher/node-driver/rke2-cluster.adoc[{rke2-product-name}] clusters in {rancher-product-name-tm} using the built-in *Harvester Node Driver*. This component provides <<#_load_balancer_support,load balancer>> and xref:integrations/rancher/csi-driver.adoc[storage passthrough] capabilities to guest Kubernetes clusters.
@@ -45,7 +45,7 @@ The Harvester Cloud Provider is packaged as an official Helm chart and is native
 The following table lists the most common parameters:
 
 |===
-| Parameter | Description | Default Value | First Available Version
+| Parameter | Description | Default Value | First Available Chart Version
 
 | `extraArgs`
 | Additional CLI flags passed to cloud provider container
@@ -172,7 +172,7 @@ The cluster identifier is represented by different parameter names depending on 
 
 | Harvester Cloud Provider deployment flag
 | `--cluster-name`
-| Internal container argument injected into the Harvester Cloud Provider deployment. The Helm chart template automatically converts `global.cattle.clusterName` to `--cluster-name`. When troubleshooting, check the deployment manifest to verify this parameter, but **do not edit it directly**.
+| Internal container argument injected into the Harvester Cloud Provider deployment. The Helm chart template automatically converts `global.cattle.clusterName` to `--cluster-name`. When troubleshooting, check the deployment manifest to verify this parameter, but *do not edit it directly*.
 
 | Cloud Config Generation
 | `serviceAccountName`
@@ -303,44 +303,59 @@ Starting with v0.2.12, the Helm chart natively supports flag configuration via `
 The Harvester Cloud Provider supports both standard upstream CCM flags and {harvester-product-name}-specific extended flags.
 
 |===
-| Flag | Category | Description
+| Flag | Category | Description | First Available Chart Version
 
 | `--controllers`
 | CCM framework
 | List of CCM controllers to enable (for example, `cloud-node-controller` and `node-route-controller`). Omit a controller to disable it.
+| 0.2.12
 
 | `--v`
 | CCM framework
 | Logging verbosity level (for example, `--v=5` for debug logging).
+| 0.2.12
 
 | `--disable-vmi-controller`
 | {harvester-product-name} extended
 | Disables {harvester-product-name}'s custom VMI controller.
+| 0.2.12
+
+| `--disable-hostname-lookup`
+| {harvester-product-name} extended
+| Disables guest-agent hostname lookup for virtual machine-to-node mapping and requires the `VirtualMachineInstance` name to exactly match the `Node` name.
+| 0.2.16
 
 | `--show-full-help-on-error`
 | {harvester-product-name} extended
 | Prints full CLI help if a flag parsing error occurs at startup.
+| 0.2.12
 
 | `--management-network`
 | Networking and IP selection
 | Target virtual machine network name used to allocate load balancer IP addresses and report node IP addresses in multi-network environments.
+| 0.2.12
 
 | `--node-ip-cidr`
 | Networking and IP selection
 | CIDR range for exact node IP selection in multi-IP address environments.
+| 0.2.12
 
 | `--node-exclude-ip-ranges`
 | Networking and IP selection
 | Comma-separated list of IP addresses or subnets to exclude from node status reports.
+| 0.2.12
 
 | `--disable-annotation-alpha-provided-ip-addr`
 | Networking and IP selection
 | Disables legacy alpha annotations, forcing the provider to rely strictly on CIDR logic.
+| 0.2.12
 |===
 
 Consider the following usage notes when configuring complex flags:
 
 * `--disable-vmi-controller`: The standard `--controllers` flag only manages upstream CCM controllers. {harvester-product-name} uses a dedicated VMI controller to watch VirtualMachineInstance resources and sync topology changes (such as region and zone updates) to guest `Node` objects. Set this flag to `false` to ensure dynamic topology sync works correctly as detailed in <<#_guest_node_instance_metadata>>.
+
+* `--disable-hostname-lookup`: Disables legacy guest-agent hostname lookup and requires each `VirtualMachineInstance` name to exactly match its `Node` name in the guest cluster. This option takes effect only when `--disable-vmi-controller=false`. Enable it on new clusters to enforce name alignment. In existing deployments, enable this option only after verifying that all node and VMI names match. If the names differ (such as when a custom hostname is configured), the provider cannot locate the virtual machine, node initialization fails, and the cloud-node lifecycle controller may prune the node, particularly if the virtual machine is powered off. For more information, see <<#_avoid_static_hostname_guest_cluster_vm>>.
 
 * `--show-full-help-on-error`: By default, the Harvester Cloud Provider silences the upstream CCM's long help output on startup errors to keep logs clean. Set this flag to `true` only when debugging startup configuration issues.
 
@@ -476,7 +491,7 @@ kube-vip:
 
 [IMPORTANT]
 ====
-**Best practice: Ensure node coverage for `externalTrafficPolicy: Local`**
+*Best practice: Ensure node coverage for `externalTrafficPolicy: Local`*
 
 Deploying `kube-vip` across all nodes in the guest cluster is strongly recommended when using `externalTrafficPolicy: Local`.
 Because `kube-vip` only elects a leader and advertises a VIP on nodes that actively host workload pods, restricting pod scheduling creates the following coverage gaps:
@@ -575,7 +590,7 @@ In the {rancher-short-name} UI, you can create a `Custom` RKE2 cluster with *Har
 
 image::rancher/guest-cluster-custom.png[guest-cluster-custom]
 
-The **Harvester Cloud Provider** requires a cloud-config file to connect to the remote Harvester cluster (e.g., to query VM information or allocate load balancers). Follow the steps below to generate this file.
+The *Harvester Cloud Provider* requires a cloud-config file to connect to the remote {harvester-product-name} cluster (e.g., to query VM information or allocate load balancers). Follow the steps below to generate this file.
 
 . Generate cloud config data using the script `generate_addon.sh`, and then place the data on every custom node (directory: `/etc/kubernetes/cloud-config`; see the note below for the newer RKE2 default path `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`).
 +
@@ -586,9 +601,9 @@ curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/m
 +
 [NOTE]
 ====
-The script depends on `kubectl` and `jq` when operating the Harvester cluster, and functions only when given access to the `Harvester Cluster` kubeconfig file.
+The script depends on `kubectl` and `jq` when operating the {harvester-product-name} cluster, and functions only when given access to the {harvester-product-name} cluster kubeconfig file.
 
-You can find the `kubeconfig` file in one of the Harvester management nodes in the `/etc/rancher/rke2/rke2.yaml` path. The server IP must be replaced with the VIP address.
+You can find the `kubeconfig` file in one of the {harvester-product-name} management nodes in the `/etc/rancher/rke2/rke2.yaml` path. The server IP must be replaced with the VIP address.
 
 Example of content:
 
@@ -648,7 +663,7 @@ In newer RKE2 versions (e.g. v1.33.11), the cloud-config path defaults to `/var/
 * If you keep `path: /etc/kubernetes/cloud-config`, set `.spec.rkeConfig.chartValues.harvester-cloud-provider.cloudConfigPath` to `/etc/kubernetes/cloud-config` in the {rancher-short-name} UI.
 ====
 
-. Create a VM in the Harvester cluster with the following settings:
+. Create a VM in the {harvester-product-name} cluster with the following settings:
 
 ** *Basics* tab: The minimum requirements are 2 CPUs and 4 GiB of RAM. The required disk space depends on the VM image.
 +
