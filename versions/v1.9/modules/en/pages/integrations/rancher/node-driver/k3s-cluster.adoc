@@ -1,19 +1,19 @@
 = Creating a K3s Kubernetes Cluster
-:description: Create a K3s Kubernetes cluster using the Harvester node driver in Rancher by entering cloud credentials, cluster name, namespace, image, network name
-:revdate: 2026-06-12
+:description: Create a K3s Kubernetes cluster using the Harvester Node Driver in Rancher by entering cloud credentials, cluster name, namespace, image, network name
+:revdate: 2026-10-22
 :page-revdate: {revdate}
 
-You can now provision K3s Kubernetes clusters on top of the Harvester cluster in Rancher using the built-in Harvester node driver.
+You can now `Provision new nodes and create a cluster using RKE2/K3s` on top of the {harvester-product-name} cluster in Rancher using the built-in Harvester Node Driver.
 
-image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
+image::rancher/create-cluster-via-harvester-node-driver.png[create-cluster-via-harvester-node-driver]
 
 [NOTE]
 ====
 * Harvester K3s node driver is in *Tech Preview*.
 * Provisioning K3s Kubernetes clusters involves configuring the IP address of the underlying virtual machines. You can do this using a DHCP server on the VLAN network that the virtual machines are attached to. If such a server does not exist on the network, you can use the xref:../../../add-ons/vm-dhcp-controller.adoc[Managed DHCP] feature to configure the IP address.
-* xref:../../../networking/vm-network.adoc#_vlan_network[VLAN network] is required for Harvester node driver.
-* Harvester node driver only supports cloud images.
-* For the port requirements of the guest clusters deployed within Harvester, please refer to the xref:../../../installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[port requirements for guest clusters].
+* xref:networking/vm-network.adoc#_vlan_network[VLAN network] is required for Harvester Node Driver.
+* Harvester Node Driver only supports cloud images.
+* For the port requirements of the guest clusters deployed within {harvester-product-name}, please refer to the xref:installation-setup/requirements.adoc#_port_requirements_for_k3s_or_rkerke2_clusters[port requirements for guest clusters].
 ====
 
 == Create your cloud credentials
@@ -26,15 +26,14 @@ image::rancher/rke2-k3s-node-driver.png[k3s-cluster]
 . Select "Imported Harvester Cluster".
 . Click *Create*.
 
-image::rancher/create-cloud-credentials.png[create-harvester-cloud-credentials]
+image::rancher/create-cloud-credentials-v2.14.2.png[create-harvester-cloud-credentials]
 
 == Create K3s Kubernetes cluster
 
-You can create a K3s Kubernetes cluster from the *Cluster Management* page via the K3s node driver.
+Users can create a K3s Kubernetes cluster from the *Cluster Management* page via the Harvester Node Driver.
 
 . Select *Clusters* menu.
 . Click *Create* button.
-. Toggle Switch to *RKE2/K3s*.
 . Select Harvester node driver.
 . Select a *Cloud Credential*.
 . Enter *Cluster Name* (required).
@@ -42,13 +41,56 @@ You can create a K3s Kubernetes cluster from the *Cluster Management* page via t
 . Enter *Image* (required).
 . Enter *Network Name* (required).
 . Enter *SSH User* (required).
+. (optional) Configure the *Show Advanced > User Data* to install the required packages of VM.
++
+[,yaml]
+----
+#cloud-config
+package_update: true
+packages:
+  - qemu-guest-agent
+runcmd:
+  - - systemctl
+    - enable
+    - '--now'
+    - qemu-guest-agent.service
+----
+
+. In the *Basics* section, use the **Kubernetes Version** drop-down menu to select your preferred Kubernetes distribution (*RKE2* or *K3*) and its corresponding version.
+. Configure cluster-specific settings. (Loads dynamically based on your selection).
 . Click *Create*.
 
-image::rancher/create-k3s-harvester-cluster.png[create-k3s-harvester-cluster]
+[IMPORTANT]
+====
+* Ensure all machine pools share the same primary network. K3s relies on this network to initialize the cluster. Using different networks across machine pools can cause the cluster to fail.
+
+* Avoid setting a static hostname. For more information, see xref:integrations/rancher/cloud-provider.adoc#_avoid_setting_a_static_hostname_on_guest_cluster_virtual_machines[Avoid Setting a Static Hostname on Guest Cluster Virtual Machines].
+====
+
+Machine Pools (Basic)
+
+image::rancher/create-rke2-harvester-cluster-1.png[create-rke2-harvester-cluster-1]
+
+Machine Pools (Advanced)
+
+image::rancher/create-rke2-harvester-cluster-2.png[create-rke2-harvester-cluster-2]
+
+Kubernetes Distribution & Version
+
+image::rancher/create-rke2-harvester-cluster-rke2-k3s-selection.png[create-rke2-harvester-cluster-rke2-k3s-selection]
+
+K3s Settings (Only applies if K3s is selected)
+
+image::rancher/create-rke2-harvester-cluster-3-k3s.png[create-rke2-harvester-cluster-3]
+
+[NOTE]
+====
+Only imported {harvester-product-name} clusters are supported by the Harvester Node Driver.
+====
 
 === Add node affinity
 
-The Harvester node driver now supports scheduling a group of machines to particular nodes through the node affinity rules. This provides high availability and better resource utilization.
+The Harvester Node Driver now supports scheduling a group of machines to particular nodes through the node affinity rules. This provides high availability and better resource utilization.
 
 Node affinity can be added to the machine pools during the cluster creation:
 
@@ -83,7 +125,7 @@ You can address the installation constraints with the following options:
 * Option 1. Use a VM image preconfigured with the required packages (e.g., `iptables`, `qemu-guest-agent`).
 * Option 2. Go to *Show Advanced* > *User Data* to allow VMs to install the required packages via an HTTP(S) proxy.
 
-Example of `user data` in Harvester node template:
+Example of `user data` in {harvester-product-name} node template:
 
 ----
 #cloud-config

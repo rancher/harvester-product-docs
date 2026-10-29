@@ -1,6 +1,6 @@
 = Harvester Cloud Provider
 :description: Provision RKE2 and K3s clusters in {rancher-short-name} using the Harvester Cloud Provider with SUSE Virtualization support
-:revdate: 2026-10-05
+:revdate: 2026-10-27
 :page-revdate: {revdate}
 
 You can provision xref:integrations/rancher/node-driver/rke2-cluster.adoc[{rke2-product-name}] clusters in {rancher-product-name-tm} using the built-in *Harvester Node Driver*. This component provides <<#_load_balancer_support,load balancer>> and xref:integrations/rancher/csi-driver.adoc[storage passthrough] capabilities to guest Kubernetes clusters.
@@ -459,19 +459,19 @@ By default, `kube-vip` runs exclusively on management nodes. To support `externa
 +
 [,yaml]
 ----
-    kube-vip:
-      env:
-        svc_election: "true"
-      affinity:
-        nodeAffinity:
-          requiredDuringSchedulingIgnoredDuringExecution:
-            nodeSelectorTerms:
-            - matchExpressions:
-              - key: node-role.kubernetes.io/control-plane
-                operator: Exists
-            - matchExpressions:
-              - key: node-role.kubernetes.io/worker
-                operator: Exists
+kube-vip:
+  env:
+    svc_election: "true"
+  affinity:
+    nodeAffinity:
+      requiredDuringSchedulingIgnoredDuringExecution:
+        nodeSelectorTerms:
+        - matchExpressions:
+          - key: node-role.kubernetes.io/control-plane
+            operator: Exists
+        - matchExpressions:
+          - key: node-role.kubernetes.io/worker
+            operator: Exists
 ----
 
 [IMPORTANT]
@@ -544,22 +544,22 @@ You must replace `<cluster-name>` with the name of your cluster.
 +
 [,yaml]
 ----
- apiVersion: helm.cattle.io/v1
- kind: HelmChart
- metadata:
-   name: harvester-cloud-provider
-   namespace: kube-system
- spec:
-   targetNamespace: kube-system
-   bootstrap: true
-   repo: https://raw.githubusercontent.com/rancher/charts/dev-v2.9
-   chart: harvester-cloud-provider
-   version:  104.0.2+up0.2.6
-   helmVersion: v3
-   valuesContent: |-
-     global:
-       cattle:
-         clusterName: <cluster-name>
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: harvester-cloud-provider
+  namespace: kube-system
+spec:
+  targetNamespace: kube-system
+  bootstrap: true
+  repo: https://raw.githubusercontent.com/rancher/charts/dev-v2.9
+  chart: harvester-cloud-provider
+  version:  104.0.2+up0.2.6
+  helmVersion: v3
+  valuesContent: |-
+    global:
+      cattle:
+        clusterName: <cluster-name>
 ----
 +
 image::rancher/external-cloud-provider-addon.png[]
@@ -568,31 +568,135 @@ image::rancher/external-cloud-provider-addon.png[]
 +
 image::rancher/harvester-cloud-provider-loadbalancer-annotation.png[]
 
+[#_deploying_rke2_cluster]
 === Deploying to the RKE2 custom cluster (experimental)
 
-image::rancher/custom.png[]
+In the {rancher-short-name} UI, you can create a `Custom` RKE2 cluster with *Harvester Cloud Provider*.
 
-. <<#_generating_cloudconfig_cloudprovider,Generate the `cloud-config` for the {harvester-product-name} Cloud Provider>>.
+image::rancher/guest-cluster-custom.png[guest-cluster-custom]
 
-. Create a VM in the {harvester-product-name} cluster with the following settings:
- ** *Basics* tab: The minimum requirements are 2 CPUs and 4 GiB of RAM. The required disk space depends on the VM image.
+The **Harvester Cloud Provider** requires a cloud-config file to connect to the remote Harvester cluster (e.g., to query VM information or allocate load balancers). Follow the steps below to generate this file.
+
+. Generate cloud config data using the script `generate_addon.sh`, and then place the data on every custom node (directory: `/etc/kubernetes/cloud-config`; see the note below for the newer RKE2 default path `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`).
 +
-image::rancher/custom-cluster-vm-cpu-and-ram.png[]
-
- ** *Networks* tab: Specify a network name with the format `nic-<number>`.
+[,bash]
+----
+curl -sfL https://raw.githubusercontent.com/harvester/cloud-provider-harvester/master/deploy/generate_addon.sh | bash -s <serviceaccount name> <namespace>
+----
 +
-image::rancher/custom-cluster-vm-network.png[]
+[NOTE]
+====
+The script depends on `kubectl` and `jq` when operating the Harvester cluster, and functions only when given access to the `Harvester Cluster` kubeconfig file.
 
- ** *Advanced Options* tab: Copy and paste the content of the *Cloud Config User Data* screen.
+You can find the `kubeconfig` file in one of the Harvester management nodes in the `/etc/rancher/rke2/rke2.yaml` path. The server IP must be replaced with the VIP address.
+
+Example of content:
+
+[,yaml]
+----
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <redacted>
+    server: https://127.0.0.1:6443
+  name: default
+# ...
+----
+
+You must specify the namespace in which the guest cluster will be created.
+====
 +
-image::rancher/custom-cluster-vm-user-data.png[]
+Example of output:
++
+[,yaml]
+----
+########## cloud config ############
+apiVersion: v1
+clusters:
+- cluster:
+    certificate-authority-data: <CACERT>
+    server: https://HARVESTER-ENDPOINT/k8s/clusters/local
+  name: local
+contexts:
+- context:
+    cluster: local
+    namespace: default
+    user: harvester-cloud-provider-default-local
+  name: harvester-cloud-provider-default-local
+current-context: harvester-cloud-provider-default-local
+kind: Config
+preferences: {}
+users:
+- name: harvester-cloud-provider-default-local
+  user:
+    token: <TOKEN>
+
+########## cloud-init user data ############
+write_files:
+- encoding: b64
+  content: <CONTENT>
+  owner: root:root
+  path: /etc/kubernetes/cloud-config
+  permissions: '0644'
+----
++
+[NOTE]
+====
+In newer RKE2 versions (e.g. v1.33.11), the cloud-config path defaults to `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`. Ensure `cloudConfigPath` matches the file location you write to:
+
+* If you use the RKE2 default path, change the `write_files` entry above to `path: /var/lib/rancher/rke2/etc/config-files/cloud-provider-config`.
+* If you keep `path: /etc/kubernetes/cloud-config`, set `.spec.rkeConfig.chartValues.harvester-cloud-provider.cloudConfigPath` to `/etc/kubernetes/cloud-config` in the {rancher-short-name} UI.
+====
+
+. Create a VM in the Harvester cluster with the following settings:
+
+** *Basics* tab: The minimum requirements are 2 CPUs and 4 GiB of RAM. The required disk space depends on the VM image.
++
+image::rancher/custom-cluster-vm-cpu-and-ram.png[custom-cluster-vm-cpu-and-ram]
++
+** *Networks* tab: Specify a network name with the format `nic-<number>`.
++
+image::rancher/custom-cluster-vm-network.png[custom-cluster-vm-network]
++
+** *Instance Labels* tab: Add two required labels: `guestcluster.harvesterhci.io/name: <cluster-name>` and `harvesterhci.io/creator: docker-machine-driver-harvester`.
++
+image::rancher/guest-cluster-vm-instance-labels.png[guest-cluster-vm-instance-labels]
++
+** *Advanced Options* tab: Copy and paste the content of the *Cloud Config User Data* screen.
++
+image::rancher/custom-cluster-vm-user-data.png[custom-cluster-vm-user-data]
++
+[NOTE]
+====
+* Ensure the virtual machine's hostname matches its name. Avoid hardcoding hostnames in the cloud-config, as this can cause critical node registration issues. For more information, see <<#_avoid_static_hostname_guest_cluster_vm>>.
+
+* Retain instance labels for resource management. {harvester-product-name} relies on instance labels when allocating and deallocating resources for guest clusters. Missing labels prevent the Harvester Node Driver from identifying guest clusters, which breaks features such as the guest cluster load balancer in `Pool` mode.
+====
+
 . On the *Basics* tab of the *Cluster Configuration* screen, select *Harvester* as the *Cloud Provider* and then select *Create* to spin up the cluster.
 +
-image::rancher/create-custom-rke2.png[]
-
-. On the *Registration* tab, perform the steps required to run the {rke2-short-name} registration command on the VM.
+image::rancher/create-custom-rke2.png[create-custom-rke2]
 +
-image::rancher/custom-cluster-registration.png[]
+Click *Add-on: Harvester Cloud Provider* to verify the `Cloud config file path`. On newer versions, this defaults to `/var/lib/rancher/rke2/etc/config-files/cloud-provider-config`. Ensure this value matches the `path` you set under `write_files:` in the previous step.
++
+image::rancher/create-custom-rke2-cloud-config.png[create-custom-rke2-cloud-config]
+
+. On the *Registration* tab, perform the steps required to run the RKE2 registration command on the VM.
++
+image::rancher/custom-cluster-registration.png[custom-cluster-registration]
+
+. (Optional) Verify the customized cluster YAML to ensure the following fields are correctly set:
+** `.spec.rkeConfig.chartValues.harvester-cloud-provider.global.cattle.clusterName`
+** `.spec.rkeConfig.chartValues.harvester-cloud-provider.cloudConfigPath`
++
+If either field is missing or incorrect, update it in the YAML file.
+
+[NOTE]
+====
+* Deleting a virtual machine directly in {harvester-product-name} does not remove the corresponding `Machine` object from {rancher-short-name}. You must manually delete that object on the {rancher-short-name} UI.
+
+* When copying the *Registration* command on the {rancher-short-name} UI, the default suffix (`--etcd --controlplane --worker`) assigns all node roles to the virtual machine. To register a virtual machine strictly as a worker node, change the suffix to `--worker`.
+====
 
 [#_deploying_k3s_cluster]
 === Deploying to a K3s cluster with Harvester Node Driver (experimental)
@@ -601,55 +705,55 @@ image::rancher/custom-cluster-registration.png[]
 
 . Copy and paste the `cloud-init user data` content to *Machine Pools > Show Advanced > User Data*.
 +
-image:rancher/cloud-config-userdata.png[]
+image:rancher/cloud-config-userdata.png[cloud-config-userdata]
 
 . Add the following `HelmChart` yaml of `harvester-cloud-provider` to *Cluster Configuration > Add-On Config > Additional Manifest*.
 +
 ----
- apiVersion: helm.cattle.io/v1
- kind: HelmChart
- metadata:
-   name: harvester-cloud-provider
-   namespace: kube-system
- spec:
-   targetNamespace: kube-system
-   bootstrap: true
-   repo: https://charts.harvesterhci.io/
-   chart: harvester-cloud-provider
-   version: 0.2.12
-   helmVersion: v3
+apiVersion: helm.cattle.io/v1
+kind: HelmChart
+metadata:
+  name: harvester-cloud-provider
+  namespace: kube-system
+spec:
+  targetNamespace: kube-system
+  bootstrap: true
+  repo: https://charts.harvesterhci.io/
+  chart: harvester-cloud-provider
+  version: 0.2.12
+  helmVersion: v3
 ----
 +
-image::rancher/external-cloud-provider-addon.png[]
+image::rancher/external-cloud-provider-addon.png[external-cloud-provider-addon]
 
 . Disable the `in-tree` cloud provider in the following ways:
  ** Click the `Edit as YAML` button.
 
 +
-image::rancher/edit-k3s-cluster-yaml.png[]
+image::rancher/edit-k3s-cluster-yaml.png[edit-k3s-cluster-yaml]
  ** Disable `servicelb` and set `disable-cloud-controller: true` to disable the default K3s cloud controller.
 +
 [,yaml]
 ----
-  machineGlobalConfig:
-    disable:
-      - servicelb
-    disable-cloud-controller: true
+machineGlobalConfig:
+  disable:
+    - servicelb
+  disable-cloud-controller: true
 ----
 
  ** Add `cloud-provider=external` to use the Harvester Cloud Provider.
 +
 [,yaml]
 ----
-  machineSelectorConfig:
-    - config:
-        kubelet-arg:
-        - cloud-provider=external
-        protect-kernel-defaults: false
+machineSelectorConfig:
+  - config:
+      kubelet-arg:
+      - cloud-provider=external
+      protect-kernel-defaults: false
 ----
 
 +
-image::rancher/k3s-cluster-yaml-content-for-harvester-cloud-provider.png[]
+image::rancher/k3s-cluster-yaml-content-for-harvester-cloud-provider.png[k3s-cluster-yaml-content-for-harvester-cloud-provider]
 
 With these settings in place a K3s cluster should provision successfully while using the external cloud provider.
 
@@ -900,6 +1004,21 @@ When registering and updating guest nodes, `harvester-cloud-provider` queries th
 To filter or customize the virtual machine network interfaces and IP ranges reported as node addresses, see <<#_extra_arguments>>.
 ====
 
+[#_avoid_static_hostname_guest_cluster_vm]
+=== Avoid setting a static hostname on guest cluster virtual machines
+
+When provisioning guest clusters via {rancher-short-name} on {harvester-product-name}, avoid setting a static `hostname` in the `cloud-config`.
+
+* *Uniqueness and cloud provider identification*: By default, the node hostname is derived from the virtual machine name when no custom `hostname` is specified. During node registration, RKE2 or K3s uses this hostname so the `cloud-controller-framework` can query node information from the Harvester Cloud Provider. Specifying a custom hostname forces the provider to search for that identifier across all virtual machines in the cluster or namespace, leading to possible lookup failures and node conflicts.
+
+* *Risk of node deletion on power-off*: If a virtual machine with a custom hostname is powered off, the Harvester Cloud Provider (`cloud-provider-management`) may inadvertently delete the corresponding `Node` object. Because the stopped virtual machine cannot report its custom hostname, the provider is unable to map the node name, leading to lookup failures and unintended node pruning.
+
+* *Dynamic naming and scaling collisions*: Machine pools in {rancher-short-name} and RKE2 support multiple machines within a single pool. {harvester-product-name} virtual machines rely on dynamically generated names to differentiate themselves. Hardcoding a hostname in `cloud-config` forces all virtual machines in the pool to share the same identifier, resulting in hostname collisions and pool scaling failures.
+
+* *Breakage during machine pool updates*: When you modify a machine pool's configuration (such as memory allocations or base images), {rancher-short-name} provisions a new {harvester-product-name} virtual machine, registers it as a new node, and then deletes the old one. A fixed hostname prevents the replacement node from registering properly. For more information, see https://github.com/harvester/harvester/issues/11682[issue #11682].
+
+* *Impact on RKE2 custom clusters*: Using a static hostname when <<#_deploying_rke2_cluster,deploying to an RKE2 cluster>> carries these same risks. Node registration and cloud provider lifecycles require unique, dynamically managed hostnames across all cluster types.
+
 [#_load_balancer_support]
 == Load balancer support
 
@@ -952,6 +1071,8 @@ This mode has two known limitations:
 Modifying the IPAM mode of an existing service is not supported. To use a different IPAM mode, create a new load balancer service.
 
 See xref:troubleshooting/rancher.adoc#_guest_cluster_load_balancer_ip_is_not_reachable[Guest cluster load balancer IP is not reachable].
+
+See xref:troubleshooting/rancher.adoc#_guest_cluster_load_balancer_ip_leaks_with_multiple_cloud_providers[Guest cluster load balancer IP leaks with multiple cloud providers] if you encounter leftover `LoadBalancer` objects when deleting services in environments with multiple cloud providers.
 ====
 
 [#_asymmetric_topology]
