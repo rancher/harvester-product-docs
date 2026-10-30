@@ -12,11 +12,11 @@ The Longhorn V2 Data Engine is a *Technical Preview* feature. Test the feature e
 
 == Prerequisites
 
-Every node with an active Longhorn V2 Data Engine requires the following dedicated resources:
+Every node with an active Longhorn V2 Data Engine requires the following resource configurations:
 
-* 2 CPU cores for use by the Longhorn instance-manager pod
-* 2 GiB RAM (allocated as 1024 × 2 MiB huge pages)
-* At least one local NVMe disk for data storage
+* *CPU Allocation*: By default, the `spdk_tgt` process binds to 2 CPUs (IDs 0 and 1) using a CPU mask. On nodes with CPU-pinned virtual machines (CPU Manager enabled), you must configure `data-engine-number-of-cpu-cores` (recommended: at least 2) for exclusive CPU allocation to avoid conflicts.
+* *Memory*: By default, 2 GiB of RAM is allocated as 1024 × 2 MiB huge pages. Huge pages are required for the `nvme` and `virtio` drivers, but can be disabled when using the default `aio` driver.
+* *Disk*: At least one local disk for data storage. NVMe disks are strongly recommended for optimal performance.
 
 == Limitations
 
@@ -24,7 +24,6 @@ The Longhorn V2 Data Engine currently does not support the following operations:
 
 * Backing image creation and usage
 * Volume encryption
-* {harvester-product-name} does not automatically coordinate Longhorn V2 SPDK CPU assignment with virtual machine CPU pinning. Configure SPDK CPU assignment before running CPU-pinned virtual machines on nodes where the Longhorn V2 Data Engine is enabled. For more information, see <<#_cpu_config_cpu_pinned_vms>>.
 
 == Usage
 
@@ -56,9 +55,9 @@ Set the `Provisioner` of each extra disk to `Longhorn V2 (CSI)`.
 +
 [NOTE]
 ====
-The default disk driver for newly added Longhorn V2 disks in {harvester-product-name} is `aio`. This driver uses a Linux block device path and avoids the SPDK NVMe VFIO path.
+In {harvester-product-name} v1.9, newly added Longhorn V2 disks default to the `aio` disk driver. This driver uses standard Linux block device paths and avoids SPDK NVMe VFIO binding. 
 
-To enable Longhorn's automatic disk driver detection, which automatically assigns the NVMe driver to NVMe disks, set the disk driver to `auto`. For instructions, see <<#_manually_setting_disk_driver>>.
+If you explicitly set the https://documentation.suse.com/cloudnative/storage/1.11/en/longhorn-system/v2-data-engine/features/node-disk-support.html[Longhorn Disk Driver] to `auto`, NVMe disks will attempt to use the native SPDK NVMe bdev driver for optimal performance, provided they meet the strict VFIO/IOMMU isolation requirements.
 ====
 
 . Go to *Advanced -> Storage Classes*, and then xref:./storageclass.adoc#_creating_a_storageclass[add a new StorageClass]. 
