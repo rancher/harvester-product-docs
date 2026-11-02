@@ -1,6 +1,6 @@
 = Enterprise Storage Integration (CSI)
 :description: Integration of enterprise storage solutions with Harvester using CSI drivers.
-:revdate: 2026-10-28
+:revdate: 2026-11-02
 :page-revdate: {revdate}
 
 {harvester-product-name} ships with {longhorn-product-name} as the built-in storage system. However, {harvester-product-name} also supports provisioning root volumes and data volumes using external Container Storage Interface (CSI) drivers. This allows integration with existing enterprise SAN or NAS storage solutions.
@@ -50,9 +50,11 @@ You only need to configure the *Volume Snapshot Class Name*. Leave the *Backup V
 
 {harvester-product-name} integrates with the Containerized Data Importer (CDI) to handle VM image management. If your Enterprise StorageClass provisioner is not included in CDI's default capabilities list, you must annotate the `StorageClass` with `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes`. Without this annotation, image deployments or Helm chart installations may fail.
 
-Apply CDI annotations directly to the `StorageClass`. For full attribute descriptions and configuration rules, see xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[Containerized Data Importer (CDI) Settings].
+Apply CDI annotations directly to the `StorageClass`. Crucially, the `cdi.harvesterhci.io/storageProfileVolumeModeAccessModes` annotation must match your CSI driver's actual supported capabilities. For example, use `Filesystem` for NAS/NFS drivers, as they do not support block volumes.
 
-The following example demonstrates a `StorageClass` annotated for CDI:
+For full attribute descriptions and configuration rules, see xref:storage/storageclass.adoc#_containerized_data_importer_cdi_settings[Containerized Data Importer (CDI) Settings].
+
+The following example demonstrates a `StorageClass` annotated for a SAN-backed *block-storage* driver:
 
 [,yaml]
 ----
@@ -62,6 +64,7 @@ metadata:
   name: enterprise-csi
   annotations:
     cdi.harvesterhci.io/storageProfileCloneStrategy: snapshot
+    # Ensure this matches the driver's capability (e.g., use "Filesystem" for NAS/NFS)
     cdi.harvesterhci.io/storageProfileVolumeModeAccessModes: '{"Block":["ReadWriteOnce"]}'
     cdi.harvesterhci.io/storageProfileVolumeSnapshotClass: enterprise-snapshot
     cdi.harvesterhci.io/filesystemOverhead: '0.05'
