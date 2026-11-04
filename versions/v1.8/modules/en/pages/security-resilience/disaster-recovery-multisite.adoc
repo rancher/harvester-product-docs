@@ -1,11 +1,11 @@
 = Cross-Cluster Workload Recovery in Multi-Site Architectures
 :description: Workload recovery strategies and cross-cluster backup guidelines for multi-site architectures using SUSE Virtualization.
-:revdate: 2026-11-02
+:revdate: 2026-11-04
 :page-revdate: {revdate}
 
 When planning a multi-site architecture with {harvester-product-name} and {longhorn-product-name}, it is important to understand the scope of the available features. *{harvester-product-name} currently does not provide a native, automated Disaster Recovery (DR) solution*.
 
-Instead, you can utilize the Harvester's cross-cluster backup and restore capabilities to manually recover workloads across distinct physical locations. Because the virtualization layer (Harvester), the control plane (Kubernetes/etcd), and the storage layer (Longhorn) have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
+Instead, you can utilize the {harvester-product-name} cross-cluster backup and restore capabilities to manually recover workloads across distinct physical locations. Because the virtualization layer, the control plane (Kubernetes/etcd), and the storage layer have strict, independent failure domains, designing a multi-site topology requires careful consideration of network latency, quorum requirements, and replication methods.
 
 == Unsupported Topology: Stretched Clusters (Active-Active)
 
@@ -40,11 +40,12 @@ Both the Primary and Secondary clusters must be configured to point to the exact
 *S3 vs. NFS*: While {harvester-product-name} supports both S3 and NFS backup targets, using an S3-compatible object store (like AWS S3 or MinIO) is strongly recommended for multi-site recovery. S3 does not require mounting and unmounting to the nodes, which significantly reduces the risk of recovery complications or stale connections when a site goes offline.
 ====
 
-=== 2. Cross-Cluster Virtual Machine Restore (Harvester Workflow)
+=== 2. Cross-Cluster Virtual Machine Restore ({harvester-product-name} Workflow)
 
 Manual workload recovery in {harvester-product-name} relies on synchronizing virtual machine backup metadata rather than directly managing storage volumes. When the Primary and Secondary clusters share the same backup target, the backup controller on the Secondary cluster automatically synchronizes the virtual machine backup metadata.
 
 *Asynchronous Backups*: Your Recovery Point Objective (RPO) is determined by the cron schedules of the virtual machine backups on the Primary cluster.
+
 *Restore Process*: To perform a manual recovery, navigate to the *VM Backups* page on the Secondary cluster, select the synchronized backup, and choose to restore a new virtual machine. {harvester-product-name} will automatically provision the volumes and reconstruct the virtual machine metadata.
 
 === 3. Virtual Machine Image Prerequisites
@@ -58,9 +59,9 @@ Automatic image synchronization is skipped if a virtual machine image with the s
 
 === Unsupported Workflow: Longhorn DR Volumes 
 
-While upstream {longhorn-product-name} documentation describes a feature called *Disaster Recovery (DR) Volumes*, *this workflow is not supported for {harvester-product-name} workload recovery*. 
+While upstream Longhorn documentation describes a feature called *Disaster Recovery (DR) Volumes*, *this workflow is not supported for {harvester-product-name} workload recovery*. 
 
-{harvester-product-name} does not manage Longhorn DR volume activation, nor does it reconstruct the Kubernetes `VirtualMachine` custom resources and PersistentVolumeClaims (PVCs) required to use an activated volume. Do not attempt to use Longhorn DR volumes for virtual machine recovery. Instead, you must use the supported *Cross-Cluster Virtual Machine Restore (Harvester Workflow)* described above.
+{harvester-product-name} does not manage Longhorn DR volume activation, nor does it reconstruct the Kubernetes `VirtualMachine` custom resources and PersistentVolumeClaims (PVCs) required to use an activated volume. Do not attempt to use Longhorn DR volumes for virtual machine recovery. Instead, you must use the supported *Cross-Cluster Virtual Machine Restore ({harvester-product-name} Workflow)* described above.
 
 == Critical Constraints and Warnings
 
@@ -70,7 +71,7 @@ When designing your storage and backup policies for cross-cluster recovery, you 
 
 When configuring {longhorn-product-name} StorageClasses for multi-site topologies, you might encounter the `dataLocality: strict-local` setting in the upstream storage documentation. 
 
-*{harvester-product-name} explicitly does not support the `strict-local` option*. This setting is a Longhorn-only feature that directly interferes with {harvester-product-name}'s Virtual Machine Live Migration. You must restrict your StorageClass configurations to the supported `dataLocality` options: `disabled` (the default) or `best-effort`.
+*{harvester-product-name} explicitly does not support the `strict-local` option*. This setting is a {longhorn-product-name}-only feature that directly interferes with {harvester-product-name}'s Virtual Machine Live Migration. You must restrict your StorageClass configurations to the supported `dataLocality` options: `disabled` (the default) or `best-effort`.
 
 === Ubuntu/Netplan MAC Address Conflicts on Restore
 
@@ -78,6 +79,6 @@ When restoring a VM backup that runs an Ubuntu release later than 16.04 (managed
 
 Ensure `dhcp-identifier: mac` is configured in the Ubuntu VM's `netplan` settings prior to taking backups.
 
-=== Longhorn V2 Data Engine Volumes
+=== {longhorn-product-name} V2 Data Engine Volumes
 
 In {harvester-product-name} v1.8.x (which bundles {longhorn-product-name} v1.11.x), V2 Data Engine volumes are *not supported* for backup and restore operations. Do not attempt to use the V2 Data Engine for virtual machines that require cross-cluster manual recovery or replication. You must use the default V1 Data Engine for these workloads to ensure backup and restore compatibility.
