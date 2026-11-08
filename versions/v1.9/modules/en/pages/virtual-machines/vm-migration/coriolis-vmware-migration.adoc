@@ -36,7 +36,7 @@ Use a two-stage approach that copies disk data while the source virtual machine 
 
 * *Snapshots*: Delete orphaned snapshots before enabling CBT or creating the transfer.
 * *Changed Block Tracking (CBT)*: Set `ctkEnabled = true` on all virtual disks, or select *Automatically Enable CBT* in the transfer's source options. The automatic option requires that the virtual machine has no existing snapshots. Disk mode must be set to *Dependent*. Independent disks and Raw Device Mappings (RDMs) do not support CBT incremental syncs.
-* *File system free space*: Ensure at least 15–20% (or 1–2 GB) of free space on the guest operating system's `/boot` and `/` (root) file systems. The morphing step mounts these partitions to install VirtIO drivers, rebuild `initramfs`/`initrd`, and configure `qemu-guest-agent`. If either partition lacks sufficient space, morphing fails.
+* *File system free space*: Ensure the guest operating system's `/boot` and `/` (root) file systems have at least 15–20% (or 1–2 GB) of free space. The morphing step mounts these partitions to install VirtIO drivers, rebuild `initramfs`/`initrd`, and configure `qemu-guest-agent`. If either partition lacks sufficient space, morphing fails.
 * *Guest package repositories*: Operating system morphing installs packages inside the guest. SUSE Linux Enterprise Server guests must have a valid registration and reachable repositories (SUSE Customer Center, RMT, or SUSE Multi-Linux Manager). Otherwise, morphing fails with the error `Failed to activate SLES module`.
 * *VMware Tools*: Ensure VMware Tools is running and reporting guest operating system and network information to vCenter. Coriolis relies on VMware Tools to snapshot the source virtual machine and to read network configurations prior to cutover. Virtual machine templates cannot be transferred.
 
@@ -47,7 +47,7 @@ Use a two-stage approach that copies disk data while the source virtual machine 
 * *StorageClass*: `harvester-longhorn` (or another active StorageClass) with sufficient free capacity.
 * *VolumeSnapshotClass*: A VolumeSnapshotClass for the same CSI driver as the target StorageClass (for example, `longhorn-snapshot` for `harvester-longhorn`). During deployment, Coriolis snapshots the transferred volumes and creates the final volumes from those snapshots.
 * *KubeConfig*: Downloaded from the {harvester-product-name} UI (*Support -> Download KubeConfig*).
-* *Worker images*: Must be uploaded. For image setup instructions, see link:https://cloudbase.it/kubevirt-harvester-as-a-destination-cloud/#:~:text=Temporary%20worker%20image%20for%20Replica%2FMigration[Temporary worker image for Replica/Migration] in the Coriolis documentation.
+* *Worker images*: Ensure the required worker images are uploaded. For image setup instructions, see link:https://cloudbase.it/kubevirt-harvester-as-a-destination-cloud/#:~:text=Temporary%20worker%20image%20for%20Replica%2FMigration[Temporary worker image for Replica/Migration] in the Coriolis documentation.
 ** *Linux*: Cloud image (for example, `Leap-16.0-Minimal-VM.x86_64-Cloud.qcow2`). Coriolis treats every image that is not labeled `harvesterhci.io/os-type: windows` as a Linux image.
 ** *Windows*: Windows Server image with VirtIO or VMDP drivers and Cloudbase-Init, labeled `harvesterhci.io/os-type: windows`. For more information, see xref:virtual-machines/create-windows-vm-cloudbaseinit.adoc[Creating Windows Virtual Machines Using Cloudbase-Init].
 ** *UEFI*: If the worker image itself boots with UEFI, add the annotation `vm.boot/firmware: uefi` to the image.
@@ -73,7 +73,7 @@ Do not deploy the appliance on the source VMware cluster scheduled for decommiss
 * *Disk*: 40 GB NVMe or fast SSD
 * *Network*: 10 GbE interface with access to both management and migration VLANs
 
-You must also obtain the appliance ID, generate the corresponding license key, and then activate the license. For instructions, see <<#_appliance_image_license_key>>.
+You must also obtain the appliance ID, generate a license key, and activate the license. For instructions, see <<#_appliance_image_license_key>>.
 
 === Networking
 
@@ -146,7 +146,7 @@ vCenter delegates NFC disk streams to the ESXi host running the virtual machine,
 
 An active DHCP server on the {harvester-product-name} VM migration network is strongly recommended. During disk copy and operating system morphing, Coriolis boots temporary worker virtual machines that attach target PVCs, format file systems, install drivers, and stream data over TCP ports 22 (SSH) and 6677 (HTTPS). DHCP allows these temporary workers to automatically acquire IP addresses upon booting.
 
-Separately, Coriolis retains the network configuration of your target workload virtual machines. The migrated virtual machine keeps the MAC address of the source network interface, and static IP settings inside the guest are preserved. Do not select the *Set DHCP* option if you want to keep static IP addresses. That option reconfigures all guest network interfaces to use DHCP during operating system morphing.
+Coriolis also retains the existing network configuration of the target workload virtual machines. The migrated virtual machine keeps the MAC address of the source network interface, and static IP settings inside the guest are preserved. Do not select the *Set DHCP* option if you want to keep static IP addresses. That option reconfigures all guest network interfaces to use DHCP during operating system morphing.
 
 [TIP]
 ====
