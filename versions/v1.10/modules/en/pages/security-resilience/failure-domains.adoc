@@ -1,0 +1,41 @@
+= Cluster Architecture and Failure Domains
+:revdate: 2026-05-25
+:page-revdate: {revdate}
+
+{harvester-product-name} combines Kubernetes (RKE2), KubeVirt, and {longhorn-product-name} on cluster nodes. Each layer has independent failure domains.
+
+image::resilience/cluster-failure-domains.svg[Cluster failure domains]
+
+|===
+| Failure Domain | Self-Healing Mechanism | Tolerated Failures | Incident Requiring Action
+
+| Kubernetes
+| etcd quorum
+| 1/3 management nodes
+| Failure of 2/3 management nodes
+
+| kube-vip
+| ARP failover
+| Node switch in 30 seconds or less
+| VIP IP conflict
+
+| {longhorn-product-name}
+| Replicas (automatic rebuilding)
+| 1/3 replicas (default replica count is 3)
+| Loss of all replicas
+
+| Virtual machines
+| Live migration
+| Non-pinned virtual machines
+| Failure of virtual machines pinned to a specific host via affinity rules or device allocation
+
+| {rancher-product-name}
+| None (external to {harvester-product-name})
+| 1/3 nodes (high availability setup)
+| Immediate failure
+|===
+
+[NOTE]
+====
+{harvester-product-name} uses StorageClasses to describe how {longhorn-product-name} must provision volumes. Each StorageClass includes a parameter that defines the number of replicas per volume. The default replica count is 3, but you can modify this value to match your cluster's requirements.
+====
