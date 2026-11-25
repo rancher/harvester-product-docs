@@ -1,0 +1,203 @@
+= Upgrade from v1.7.x to v1.7.y
+:description: Upgrade from v1.7.x to v1.7.y by checking the Dashboard for the Upgrade button, preparing air-gapped environments if needed, and updating the Harvester UI
+:revdate: 2026-07-07
+:page-revdate: {revdate}
+
+== General information
+
+An *Upgrade* button appears on the *Dashboard* screen whenever a new {harvester-product-name} version that you can upgrade to becomes available. For more information, see xref:upgrades/upgrades.adoc#_start_an_upgrade[Start an upgrade].
+
+For information about upgrading {harvester-product-name} in air-gapped environments, see xref:upgrades/upgrades.adoc#_prepare_an_air_gapped_upgrade[Prepare an air-gapped upgrade].
+
+=== Update the Harvester UI Extension on {rancher-product-name} v2.13
+
+You must use a compatible version (v1.7.x) of the Harvester UI Extension to import {harvester-product-name} v1.7.x clusters on {rancher-short-name} v2.13.
+
+. On the {rancher-short-name} UI, go to *local -> Apps -> Repositories*.
+
+. Locate the repository named *harvester*, and then select *⋮ -> Refresh*.
+
+. Go to the *Extensions* screen.
+
+. Locate the extension named *Harvester*, and then click *Update*.
+
+. Select a compatible version, and then click *Update*.
+
+. Allow some time for the extension to be updated, and then refresh the screen.
+
+== Known issues
+
+=== Upgrade is stuck in the "Post-draining" state
+
+During the node draining process, the `upgrade-repo` deployment may get stuck when its {longhorn-product-name} volume remains in the "Attaching" state. This causes the upgrade flow to stall in the "Post-draining" phase, since the post-drain jobs wait for the `upgrade-repo` deployment to become ready before proceeding.
+
+The workaround is to delete the {longhorn-product-name} replica of the `upgrade-repo` volume on the drained node. This allows the volume to attach and the upgrade flow to continue. Note that any node being drained during the upgrade may encounter this issue, so this workaround may need to be applied whenever it occurs.
+
+Related issues: https://github.com/harvester/harvester/issues/9597[#9597] and https://github.com/longhorn/longhorn/issues/12226[#12226]
+
+=== Unnecessary live migrations during the upgrade
+
+{harvester-product-name} v1.6.x enables xref:virtual-machines/vm-resources/cpu-memory-hotplug.adoc[CPU and memory hot-plugging] for virtual machines through KubeVirt's `LiveMigrate` workload update strategy. However, upgrading the KubeVirt operator triggers simultaneous live migrations of all running virtual machines to immediately update their `virt-launcher` pods. This mass migration can overwhelm cluster resources and degrade performance.
+
+To prevent this issue, temporarily disable the `LiveMigrate` workload update method before upgrading and re-enable it once the upgrade completes. Virtual machines will then migrate naturally during node upgrades, allowing the `virt-launcher` image to update gradually.
+
+[NOTE]
+====
+Starting with v1.8.0, this process is handled automatically. The workaround is only necessary when upgrading to a version earlier than v1.8.0.
+====
+
+==== Pre-upgrade workaround steps
+
+. Disable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods: []
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource to prevent drift warnings.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+
+. Add the following entry to the `spec.diff.comparePatches` field:
++
+[,yaml]
+----
+   spec:
+     diff:
+       comparePatches:
+       # Keep existing entries
+       - apiVersion: kubevirt.io/v1
+         jsonPointers:
+         - /spec/workloadUpdateStrategy/workloadUpdateMethods
+         kind: KubeVirt
+         name: kubevirt
+----
++
+You must preserve the existing entries.
+
+. Verify that the ManagedChart resource is ready.
++
+[,bash]
+----
+   kubectl get managedchart.management.cattle.io harvester -n fleet-local 
+----
+
+With these changes, virtual machines will not be scheduled for live migration because of `virt-launcher` pod image mismatches during the upgrade.
+
+[IMPORTANT]
+====
+CPU and memory hot-plugging is temporarily unavailable during the upgrade. For more information about decoupling this feature from workload update flags, see https://github.com/kubevirt/kubevirt/issues/17329[KubeVirt issue #17329].
+====
+
+==== Post-upgrade workaround steps
+
+After the upgrade completes successfully, restore the `LiveMigrate` workload update method to re-enable CPU and memory hot-plugging.
+
+. Re-enable the `LiveMigrate` workload update method.
++
+[,bash]
+----
+   kubectl patch kubevirt kubevirt -n harvester-system --type=merge --patch-file=/dev/stdin <<EOF
+   spec:
+     workloadUpdateStrategy:
+       workloadUpdateMethods:
+       - LiveMigrate
+   EOF
+----
+
+. Edit the `harvester` ManagedChart resource.
++
+[,bash]
+----
+   kubectl edit managedchart.management.cattle.io harvester -n fleet-local
+----
+  
+. Remove the entry you added to the `spec.diff.comparePatches` field.
+
+. Verify that the `LiveMigrate` method has been restored.
++
+[,bash]
+----
+   kubectl get kubevirt kubevirt -n harvester-system -o yaml | grep -A 3 workloadUpdateStrategy
+----
++
+Expected output:
++
+[,yaml]
+----
+   workloadUpdateStrategy:
+     workloadUpdateMethods:
+     - LiveMigrate
+----
+
+Related issue: https://github.com/harvester/harvester/issues/10349[#10349]
+
+=== Upgrade stalls during image preloading due to system-upgrade-controller failure
+
+During the image preloading phase of the upgrade, {harvester-product-name} creates a `system-upgrade-controller` (SUC) plan for each node to download the container images required for the new release. If the SUC fails to reschedule a plan job after a transient failure, the affected node's plan remains stuck in the `Applying` state, stalling the upgrade indefinitely.
+
+This is an intermittent issue. Once a plan job fails and is subsequently deleted (according to the default time-to-live value of 900 seconds), the SUC may stop rescheduling the job for the affected node.
+
+[NOTE]
+====
+While this issue most commonly manifests during the image preloading phase, the same SUC behavior can potentially affect any other upgrade phase that relies on SUC plans.
+====
+
+==== Symptoms
+
+* The upgrade has shown no progress for an extended period (typically more than 30 minutes) while in the image preloading phase.
+
+* No job has been created for the affected node's prepare plan in the `cattle-system` namespace.
++
+[,bash]
+----
+kubectl get jobs -n cattle-system | grep prepare
+----
+
+* One or more SUC prepare plans are stuck in the `Applying` state.
++
+[,bash]
+----
+kubectl get plans.upgrade.cattle.io -n cattle-system | grep prepare
+----
++
+You can run the following command to check the status of the stuck plan. Replace `<plan-name>` with the actual resource name returned from the previous command.
++
+[,bash]
+----
+kubectl get plans.upgrade.cattle.io <plan-name> -n cattle-system -o yaml | yq .status
+----
++
+The affected node's name is listed under `applying` and the status of the `Complete` condition is `False`.
++
+[,yaml]
+----
+  applying:
+  - <node-name>
+  conditions:
+  - lastUpdateTime: "..."
+    reason: SyncJob
+    status: "False"
+    type: Complete
+----
+
+==== Workaround
+
+Restart the `system-upgrade-controller` deployment to force the SUC to reconcile all plans and reschedule any stuck jobs.
+
+[,bash]
+----
+kubectl rollout restart deployment/system-upgrade-controller -n cattle-system
+----
+
+After the restart, SUC reschedules the plan job for the affected node. The upgrade automatically resumes within a few minutes.
+
+Related issue: https://github.com/harvester/harvester/issues/9880[#9880]
