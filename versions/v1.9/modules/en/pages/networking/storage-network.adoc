@@ -1,6 +1,6 @@
 = Storage Network
 :description: Configure a dedicated storage network to isolate SUSE Storage replication traffic and improve performance
-:revdate: 2026-06-01
+:revdate: 2026-11-27
 :page-revdate: {revdate}
 
 {harvester-product-name} uses {longhorn-product-name} to provide block device volumes for virtual machines and pods. If you want to isolate {longhorn-product-name} replication traffic from `mgmt` (the built-in cluster network) or other cluster-wide workloads, you can use a dedicated storage network for better network bandwidth and performance.
@@ -151,7 +151,7 @@ image::storagenetwork/storage-network-enabled.png[Storage network enabled]
 
 . Click *Save*.
 
-Once the storage network is disabled, {longhorn-product-name} starts using the pod network for storage-related operations.
+Once the storage network is disabled (or not yet configured), {longhorn-product-name} uses the pod network (`k8s-pod-network`, routed through the `mgmt` cluster network and management NICs) for storage-related operations, including volume replication, replica rebuilding, and backing image transfers.
 
 image::storagenetwork/storage-network-disabled.png[Storage network disabled]
 --
@@ -454,7 +454,13 @@ If you configured the xref:installation-setup/config/settings.adoc#_rwx_network[
 +
 [NOTE]
 ====
-During a cluster upgrade, the {harvester-product-name} upgrade repository deployment is backed by an RWX volume. This creates an additional `share-manager` pod and consumes one extra IP for the duration of the upgrade.
+During a cluster upgrade, the {harvester-product-name} upgrade repository deployment is backed by an RWX volume. This creates an additional `share-manager` pod and consumes one extra IP during the upgrade.
 ====
 
-* Configure the storage network on a non-`mgmt` cluster network to ensure complete separation of the {longhorn-product-name} replication traffic from the Kubernetes control plane traffic. Using `mgmt` is possible but not recommended because of the negative impact (resource and bandwidth contention) on the control plane network performance. Use `mgmt` only if your cluster has NIC-related constraints and if you can completely segregate the traffic.
+* Configure the storage network on a non-`mgmt` cluster network to isolate {longhorn-product-name} replication and storage traffic from Kubernetes control plane and management traffic. When `storage-network` is disabled, storage traffic defaults to the pod network over the `mgmt` network path, which introduces the following impacts:
++
+** *Shared NIC and control plane contention*: Storage replication and rebuild traffic shares physical bandwidth and host network resources with cluster management and control plane traffic on `mgmt`. Under sustained write or replica rebuild loads, this contention can degrade control plane responsiveness and storage throughput (`[TBD - Engineering: insert verified impact metrics/thresholds]`).
+** *Interface and MTU characteristics*: Pod-network traffic traverses the pod network interface (such as `eth0` in `instance-manager` pods) rather than a dedicated `lhnet1` interface on a separate VLAN, and may be subject to overlay/encapsulation MTU differences (`[TBD - Engineering: confirm pod network vs. storage network MTU/overhead impact]`).
+** *Operational risk during maintenance and migrations*: High-volume storage operations—such as volume initialization, image transfers, or post-maintenance replica rebuilding—can saturate shared management links if not isolated onto a dedicated storage network (`[TBD - Engineering: quantify impact during high-concurrency/migration workloads]`).
++
+Using `mgmt` (or relying on pod-network fallback) is supported only when NIC constraints prevent a dedicated storage network and traffic contention is acceptable for your workload profile.
